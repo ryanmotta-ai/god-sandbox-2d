@@ -22,6 +22,8 @@ import {
 } from './BridgeSprites';
 import { PROP_SCALE, propAspect, roadProp, type RoadProp } from './RoadSprites';
 import { CARAVAN_FRAMES, CARAVAN_PX, STRIDE_TILES, caravanSprite, type CaravanView } from './CaravanSprites';
+import { AIRCRAFT_FRAMES, AIRCRAFT_PX, aircraftSprite } from './AircraftSprites';
+import type { Flight } from '../civ/AirSystem';
 
 /** Deposit tiers so plentiful that drawing every one clutters the whole map. */
 const COMMON_NODE_TIERS = new Set<GoodTier>(['common']);
@@ -1368,7 +1370,8 @@ export class PixelRenderer {
     brushSize: number,
     ships?: Iterable<Ship>,
     caravans?: Iterable<OverlandCaravan>,
-    railways?: { yearlyFreight: number }
+    railways?: { yearlyFreight: number },
+    flights?: Iterable<Flight>
   ): void {
     const width = this.canvas.width;
     const height = this.canvas.height;
@@ -1864,6 +1867,16 @@ export class PixelRenderer {
           this.ctx.fillStyle = caravan.kingdomColor ?? '#fbbf24';
           this.ctx.fillRect(footX - 3, drawY + caravanSize * 0.06, 7, 4);
         }
+      }
+    }
+
+    // ========== 2f. AIRCRAFT ==========
+    // Drawn after everything on the ground, because they are over it.
+    if (flights && tileSize >= 3) {
+      for (const flight of flights) {
+        if (flight.turnaround > 0 && flight.altitude <= 0) continue; // on the apron
+        if (flight.x < minX - 2 || flight.x > maxX + 2 || flight.y < minY - 2 || flight.y > maxY + 2) continue;
+        this.drawFlight(flight, camera, width, height, tileSize);
       }
     }
 
@@ -3306,6 +3319,73 @@ export class PixelRenderer {
           ctx.stroke();
         }
       }
+    }
+  }
+
+  /**
+   * An aircraft in flight, with the shadow that says how high it is.
+   *
+   * A top-down map has no horizon to measure height against, so altitude has
+   * to be carried by the gap between an aircraft and its own shadow: tucked
+   * under the wheels on the runway, thrown well out behind at cruise. The
+   * aircraft also grows a little as it climbs, which is the same cue a camera
+   * gives you, and the shadow softens as it spreads.
+   */
+  private drawFlight(
+    flight: Flight,
+    camera: Camera,
+    width: number, height: number,
+    tileSize: number
+  ): void {
+    const ctx = this.ctx;
+    const pos = camera.worldToScreen(flight.x, flight.y, width, height);
+    const cx = pos.x + tileSize * 0.5;
+    const cy = pos.y + tileSize * 0.5;
+    const alt = flight.altitude;
+    const size = Math.max(12, tileSize * 1.5) * (0.82 + alt * 0.24);
+    const angle = Math.atan2(flight.headingY, flight.headingX) + Math.PI / 2; // sprite noses up
+    const sprite = aircraftSprite(
+      flight.payload === 'cargo' ? 'freighter' : 'airliner',
+      Math.floor(this.animTimer * 14) % AIRCRAFT_FRAMES
+    );
+
+    // The shadow, cast down and to one side, further out the higher it flies.
+    const throwDist = tileSize * 0.16 + alt * tileSize * 1.05;
+    ctx.save();
+    ctx.globalAlpha = 0.34 - alt * 0.16;
+    ctx.translate(cx + throwDist * 0.55, cy + throwDist);
+    ctx.rotate(angle);
+    ctx.filter = 'brightness(0)';
+    ctx.drawImage(sprite, -size * 0.5, -size * 0.5, size, size);
+    ctx.filter = 'none';
+    ctx.restore();
+
+    // A contrail behind it, only once it is high enough to leave one.
+    if (alt > 0.85 && tileSize >= 5) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(240, 246, 250, 0.30)';
+      ctx.lineWidth = Math.max(1, tileSize * 0.09);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - flight.headingX * size * 0.35, cy - flight.headingY * size * 0.35);
+      ctx.lineTo(cx - flight.headingX * size * 2.4, cy - flight.headingY * size * 2.4);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = size < AIRCRAFT_PX * 0.75;
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.drawImage(sprite, -size * 0.5, -size * 0.5, size, size);
+    ctx.restore();
+
+    // The operator's colours on the fin, and what it is carrying.
+    if (tileSize >= 8) {
+      ctx.fillStyle = flight.kingdomColor;
+      ctx.beginPath();
+      ctx.arc(cx - flight.headingX * size * 0.34, cy - flight.headingY * size * 0.34, Math.max(1.5, size * 0.07), 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 

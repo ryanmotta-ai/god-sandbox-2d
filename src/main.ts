@@ -523,6 +523,12 @@ class AethoriaGame implements GameContext {
       sound.playMagic();
     });
 
+    events.on('firstFlight', (d: any) => {
+      if (!this.inGame) return;
+      this.toast(`The first flight in history: ${d.from} to ${d.to}`, 'divine');
+      sound.playMagic();
+    });
+
     events.on('techUnlocked', (d: any) => {
       if (!this.inGame) return;
       this.toast(`${d.culture} discovers ${String(d.perk).replace('_', ' ')}`, 'success');
@@ -760,7 +766,8 @@ class AethoriaGame implements GameContext {
       this.brush.brushSize,
       this.sim.naval.activeShips.values(),
       this.sim.caravans.activeCaravans.values(),
-      this.sim.railways
+      this.sim.railways,
+      this.sim.air.flights.values()
     );
 
     requestAnimationFrame(t => this.gameLoop(t));

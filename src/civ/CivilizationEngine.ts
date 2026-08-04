@@ -797,7 +797,7 @@ export class CivilizationEngine {
       building.extractedGood = pick.spot.resourceGood;
     }
 
-    if (['mine', 'quarry', 'oil_well', 'harbor', 'port', 'academy', 'bank', 'factory', 'refinery', 'palace', 'stock_exchange', 'collective'].includes(pick.type)) {
+    if (['mine', 'quarry', 'oil_well', 'harbor', 'port', 'airport', 'academy', 'bank', 'factory', 'refinery', 'palace', 'stock_exchange', 'collective'].includes(pick.type)) {
       const resourceLabel = building.extractedGood ? ` over a ${GOODS[building.extractedGood].name} deposit` : '';
       chronicle.log(world.year, 'founding', `${city.name} completed its ${def.name}${resourceLabel}.`);
     }
@@ -1021,6 +1021,22 @@ export class CivilizationEngine {
       if (!city.hasBuilding('harbor')) return 0;
       score += population >= 45 ? 95 : 20;
       if (kingdom?.research.knows('engineering')) score += 35;
+    }
+
+    // An aerodrome is only worth its runway to a city with somewhere to fly
+    // to. A single realm's first airport is useless — the second one is what
+    // makes both of them valuable — so the pull rises sharply once a partner
+    // already has one, and a small town never bothers.
+    if (type === 'airport') {
+      if (population < 60) return 0;
+      let partners = 0;
+      for (const other of world.cities.values()) {
+        if (other.id === city.id) continue;
+        if (Math.hypot(other.x - city.x, other.y - city.y) < 12) continue;
+        if (other.hasBuilding('airport')) partners++;
+      }
+      score += 40 + partners * 55;
+      if (kingdom?.culture.mercantilism && kingdom.culture.mercantilism > 0.55) score += 30;
     }
 
     if (def.research) score += def.research * 4;

@@ -431,6 +431,18 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
     description: 'Light, motors and instant communication over any distance.',
     discovery: 'electrified its cities'
   },
+  aviation: {
+    id: 'aviation',
+    name: 'Aviation',
+    track: 'craft',
+    era: 'modern',
+    icon: '✈️',
+    cost: 2200,
+    requires: ['electricity'],
+    unlocks: { buildings: ['airport'], modifiers: { production: 1.15, research: 1.2 } },
+    description: 'Freight and passengers that ignore the ground entirely — and the aerodromes they need at both ends.',
+    discovery: 'took to the air'
+  },
   mass_media: {
     id: 'mass_media',
     name: 'Mass Media',

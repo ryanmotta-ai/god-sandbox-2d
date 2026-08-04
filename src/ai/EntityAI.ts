@@ -28,6 +28,7 @@ import { HUNGER_PER_DAY, HUNGER_SEEK_FOOD, HUNGER_STARVING, ENERGY_EXHAUSTED, ME
 import { GOVERNMENTS } from '../civ/Government';
 import { WarfareSystem, SIEGE_RADIUS } from '../civ/Warfare';
 import { NavalSystem } from '../civ/NavalSystem';
+import { AirSystem } from '../civ/AirSystem';
 import { CaravanSystem } from '../civ/CaravanSystem';
 import { RailwayNetwork } from '../civ/RailwayNetwork';
 
@@ -85,6 +86,7 @@ export class SimulationEngine {
   public trade: TradeNetwork = new TradeNetwork();
   /** Active maritime ships and naval trade routes. */
   public naval: NavalSystem = new NavalSystem();
+  public air: AirSystem = new AirSystem();
   /** Active overland caravans. */
   public caravans: CaravanSystem = new CaravanSystem();
   /** Railways: track, freight and AI line construction. Derived from tiles. */
@@ -273,9 +275,10 @@ export class SimulationEngine {
       }
     }
 
-    // Update maritime ships and overland caravans
+    // Update maritime ships, overland caravans and air services
     this.naval.updateShips(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
     this.caravans.updateCaravans(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
+    this.air.updateFlights(this.trade.routes, this.cities, this.kingdoms);
 
     // Process deaths
     for (const dead of deadEntities) this.handleEntityDeath(dead, particles);
@@ -321,9 +324,54 @@ export class SimulationEngine {
         tileMap,
         diplomacy: this.diplomacy
       });
+      this.reportAirService();
+      this.air.resetYear();
       this.tickGeopolitics();
       this.musterArmies();
     }
+  }
+
+  /** Whether the world has ever seen a scheduled flight, so the first is news. */
+  private airServiceOpened: boolean = false;
+
+  /**
+   * Records the year's air service.
+   *
+   * The first scheduled flight anywhere in the world is a genuine turning
+   * point — the moment distance stops being the thing that decides what a
+   * realm can reach — so it is chronicled once, by name. After that it is a
+   * yearly line about how much moved, and only when there was enough traffic
+   * to be worth a line at all.
+   */
+  private reportAirService(): void {
+    if (this.air.yearlyFlights === 0) return;
+    const anyFlight = this.air.flights.values().next().value;
+    if (!this.airServiceOpened) {
+      this.airServiceOpened = true;
+      chronicle.log(
+        this.currentYear,
+        'tech',
+        anyFlight
+          ? `The first scheduled service in the world lifted off from ${anyFlight.fromCityName} for ${anyFlight.toCityName}. Distance has stopped deciding what a realm can reach.`
+          : 'The first scheduled air service in the world took off.',
+        {
+          title: 'The First Flight',
+          importance: 'legendary',
+          scope: 'world',
+          tags: ['aviation', 'infrastructure', 'trade']
+        }
+      );
+      events.emit('firstFlight', {
+        from: anyFlight?.fromCityName ?? '', to: anyFlight?.toCityName ?? '', year: this.currentYear
+      });
+      return;
+    }
+    if (this.air.yearlyFlights < 8) return;
+    chronicle.log(
+      this.currentYear,
+      'trade',
+      `Air services flew ${this.air.yearlyFlights} times this year, carrying ${Math.round(this.air.yearlyPassengers)} travellers and ${Math.round(this.air.yearlyFreight)} tonnes of freight.`
+    );
   }
 
   // ===================== DAILY LIFE (needs + household economy) =====================

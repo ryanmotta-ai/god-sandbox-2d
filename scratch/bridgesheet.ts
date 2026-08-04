@@ -8,6 +8,7 @@
 import { bridgeSprite, type BridgeModel, type BridgeSlice } from '../src/renderer/BridgeSprites';
 import { roadProp, type RoadProp } from '../src/renderer/RoadSprites';
 import { caravanSprite, type CaravanKind, type CaravanView } from '../src/renderer/CaravanSprites';
+import { aircraftSprite, type AircraftKind } from '../src/renderer/AircraftSprites';
 
 const MODELS: BridgeModel[] = ['stones', 'timber', 'covered', 'arch', 'viaduct', 'imperial', 'truss', 'suspension'];
 const SLICES: BridgeSlice[] = ['single', 'approach', 'span'];
@@ -79,7 +80,7 @@ document.getElementById('sheet')!.append(table);
 
 // The caravans: every kind, every view, every frame of the gait.
 {
-  const kinds: CaravanKind[] = ['donkey', 'camel', 'cart'];
+  const kinds: CaravanKind[] = ['donkey', 'camel', 'cart', 'wagon', 'lorry', 'truck'];
   const views: CaravanView[] = ['back', 'side', 'front'];
   const table = document.createElement('table');
   const head = document.createElement('tr');
@@ -105,6 +106,26 @@ document.getElementById('sheet')!.append(table);
     table.append(row);
   }
   document.getElementById('sheet')!.append(table);
+}
+
+// Aircraft, at magnification and turned to a few headings.
+{
+  const kinds: AircraftKind[] = ['airliner', 'freighter'];
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;gap:24px;padding:24px 0;align-items:center';
+  for (const kind of kinds) {
+    const box = document.createElement('div');
+    const c = document.createElement('canvas');
+    c.width = 32 * 5 * 4;
+    c.height = 32 * 5;
+    c.style.background = '#4a7a52';
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    for (let f = 0; f < 4; f++) ctx.drawImage(aircraftSprite(kind, f), f * 160, 0, 160, 160);
+    box.append(c, Object.assign(document.createElement('div'), { textContent: `${kind} (nose up, 4 frames)` }));
+    wrap.append(box);
+  }
+  document.getElementById('sheet')!.append(wrap);
 }
 
 (window as unknown as { roadsReady: boolean }).roadsReady = true;

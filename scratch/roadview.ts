@@ -21,6 +21,7 @@ import { WorldEra } from '../src/world/WeatherEras';
 import { rng } from '../src/core/Random';
 import { surveyRoad, layRoad } from '../src/civ/RoadEngineering';
 import type { CaravanType, OverlandCaravan } from '../src/civ/CaravanSystem';
+import type { Flight } from '../src/civ/AirSystem';
 
 const params = new URLSearchParams(location.search);
 const SEED = Number(params.get('seed') ?? 20260804);
@@ -30,7 +31,8 @@ const host = document.getElementById('shots')!;
 function shot(
   label: string, map: TileMap, cities: Map<string, City>, kingdoms: Map<string, Kingdom>,
   at: { x: number; y: number }, zoom: number, w = 900, h = 560,
-  caravans?: OverlandCaravan[]
+  caravans?: OverlandCaravan[],
+  flights?: Flight[]
 ): void {
   const wrap = document.createElement('div');
   const title = document.createElement('div');
@@ -47,7 +49,7 @@ function shot(
   camera.centerOn(at.x, at.y, zoom);
   camera.zoom = zoom;
   camera.targetZoom = zoom;
-  new PixelRenderer(canvas).render(camera, map, [], cities, kingdoms, particles, 'none', WorldEra.GOLDEN_AGE, null, null, 1, undefined, caravans);
+  new PixelRenderer(canvas).render(camera, map, [], cities, kingdoms, particles, 'none', WorldEra.GOLDEN_AGE, null, null, 1, undefined, caravans, undefined, flights);
 }
 
 function stockedCity(id: string, name: string, x: number, y: number): City {
@@ -498,6 +500,50 @@ function stockedCity(id: string, name: string, x: number, y: number): City {
 
   shot('caravans — each kind, each heading, at map scale', map, new Map(), new Map(), { x: 13, y: 13 }, 3.0, 900, 700, caravans);
   shot('caravans — close', map, new Map(), new Map(), { x: 9, y: 12 }, 6.0, 900, 500, caravans);
+}
+
+// ============================================================
+// Scene 8 — aircraft: the same service at four points of its profile, so the
+// shadow separation that carries altitude can be judged
+// ============================================================
+{
+  rng.setSeed(21);
+  const SIZE = 40;
+  const map = new TileMap(SIZE, SIZE, 'single_continent', 21);
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      t.type = TerrainType.GRASS;
+      t.height = 0.5;
+      t.roadLevel = 0;
+      t.kingdomId = null;
+      t.cityId = null;
+      t.resourceType = null;
+      t.resourceAmount = 0;
+    }
+  }
+  const stages: { at: number; alt: number; label: string }[] = [
+    { at: 0.06, alt: 0.35, label: 'climbing out' },
+    { at: 0.30, alt: 1.0, label: 'cruise' },
+    { at: 0.62, alt: 1.0, label: 'cruise' },
+    { at: 0.95, alt: 0.2, label: 'on final' }
+  ];
+  const flights: Flight[] = stages.map((stage, i) => ({
+    id: `f${i}`, routeId: `r${i}`, fromCityId: 'a', toCityId: 'b',
+    fromCityName: 'A', toCityName: 'B',
+    startX: 4, startY: 8 + i * 8, endX: 36, endY: 8 + i * 8,
+    x: 4 + 32 * stage.at, y: 8 + i * 8,
+    progress: stage.at, direction: 1,
+    payload: i % 2 === 0 ? 'passengers' : 'cargo',
+    cargo: null, load: 100,
+    kingdomColor: '#fbbf24',
+    altitude: stage.alt, phase: 'cruise',
+    headingX: 1, headingY: 0, routeTiles: 32, turnaround: 0
+  }));
+
+  shot('aircraft — climb, cruise and approach, with the shadow carrying height',
+    map, new Map(), new Map(), { x: 20, y: 20 }, 2.4, 900, 700, undefined, flights);
+  shot('aircraft — close', map, new Map(), new Map(), { x: 14, y: 17 }, 5.0, 900, 500, undefined, flights);
 }
 
 document.title = 'roads ready';
