@@ -17,6 +17,10 @@ import { DiplomacyManager } from '../civ/Diplomacy';
 import { Ship, SHIP_TIERS } from '../civ/NavalSystem';
 import { OverlandCaravan } from '../civ/CaravanSystem';
 import { GOODS, type GoodTier } from '../civ/Goods';
+import {
+  BRIDGE_HALF_WIDTH, BRIDGE_SLICE_PX, bridgeModelFor, bridgeSprite, needsCable, throwsShadow
+} from './BridgeSprites';
+import { PROP_SCALE, propAspect, roadProp, type RoadProp } from './RoadSprites';
 
 /** Deposit tiers so plentiful that drawing every one clutters the whole map. */
 const COMMON_NODE_TIERS = new Set<GoodTier>(['common']);
@@ -67,6 +71,27 @@ for (let s = 0; s < MAX_SALT; s++) {
   SIN_SALT_TABLE[s] = Math.sin(b);
 }
 const HASH_SCALE = 43758.5453123;
+
+/** One tile of road, as the road pass sees it after building the network graph. */
+interface RoadNode {
+  x: number; y: number;
+  tile: Tile;
+  level: number;
+  key: string;
+  width: number;
+  /** Connected directions, as indices into ROAD_DIRS. */
+  links: number[];
+  /** Unit vector along the road through this tile. */
+  ax: number; ay: number;
+  /** True only for a through-run: two links, exactly opposite. */
+  straight: boolean;
+  water: boolean;
+}
+
+/** Clockwise from east; diagonals sit at odd indices between their cardinals. */
+const ROAD_DIRS: readonly [number, number][] = [
+  [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]
+];
 
 export class PixelRenderer {
   private canvas: HTMLCanvasElement;
@@ -2260,26 +2285,7 @@ export class PixelRenderer {
     const cxx = (x: number): number => x * tileSize + baseSX + tileSize / 2;
     const cyy = (y: number): number => y * tileSize + baseSY + tileSize / 2;
 
-    // Clockwise from east. Diagonals sit at odd indices, between the two
-    // cardinals they are the shortcut for.
-    const DIRS: readonly [number, number][] = [
-      [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]
-    ];
-
-    interface RoadNode {
-      x: number; y: number;
-      tile: Tile;
-      level: number;
-      key: string;
-      width: number;
-      /** Connected directions, as indices into DIRS. */
-      links: number[];
-      /** Unit vector along the road through this tile. */
-      ax: number; ay: number;
-      /** True only for a through-run: two links, exactly opposite. */
-      straight: boolean;
-      water: boolean;
-    }
+    const DIRS = ROAD_DIRS;
 
     // One tile of margin so a road leaving the viewport still joins up to the
     // half its neighbour draws.
@@ -2425,11 +2431,11 @@ export class PixelRenderer {
       return;
     }
 
-    // ---- Bridges: structures, drawn along the true bearing of the crossing.
-    for (const node of nodes) {
-      if (!node.water || node.links.length === 0) continue;
-      this.drawBridgeSpan(node.level, cxx(node.x), cyy(node.y), node.ax, node.ay, node.width, tileSize, fine);
-    }
+    // ---- Bridges. A crossing is one structure, not a row of water tiles that
+    //      happen to carry road paint, so the water nodes are first chained
+    //      into whole crossings and each is then built out of the slices of a
+    //      model chosen from what the settlement could afford and knew how.
+    this.drawCrossings(nodes, tileMap, kingdoms, cxx, cyy, tileSize, fine);
 
     if (detail < 2) {
       ctx.lineCap = 'butt';
@@ -2481,6 +2487,10 @@ export class PixelRenderer {
       // a cul-de-sac. Junctions and bends stay plain, as they do in life.
       if (!node.straight) {
         if (tile.cityId && townSquares.has(`${x},${y}`)) this.drawTownSquare(px, py, level, tileSize, surface.k);
+        // A fingerpost belongs where the road divides and nowhere else.
+        if (fine && node.links.length >= 3 && !tile.cityId) {
+          this.drawRoadProp('signpost', px + nx * tileSize * 0.42, py + ny * tileSize * 0.42, tileSize, x + y);
+        }
         continue;
       }
       // Half-length of the road within the tile: to the edge on a cardinal
@@ -2592,22 +2602,31 @@ export class PixelRenderer {
         joint.lineTo(ex - (-dy / jn) * w * 0.55, ey - (dx / jn) * w * 0.55);
       }
 
-      // Milestones: a paved road out in open country is measured, and the
-      // stones are the only thing on it for miles.
-      if (fine && level >= 2 && !tile.cityId && (x * 7 + y * 3) % 11 === 0) {
-        const mo = w / 2 + tileSize * 0.16;
-        fillMark(`milestone${level}`, surface.k)
-          .rect(px + nx * mo - tileSize * 0.05, py + ny * mo - tileSize * 0.06, tileSize * 0.1, tileSize * 0.12);
-        fillMark('milestoneFace', 'rgba(236, 231, 219, 0.75)')
-          .rect(px + nx * mo - tileSize * 0.035, py + ny * mo - tileSize * 0.05, tileSize * 0.07, tileSize * 0.04);
+      // What stands beside the road out in open country. A measured road
+      // carries its milestones; a shrine turns up at long intervals where
+      // travellers were glad to arrive. Both are deterministic in the tile
+      // position, so they never crawl about between frames.
+      if (fine && !tile.cityId) {
+        const hash = (x * 7 + y * 3) % 23;
+        const prop = level >= 2 && hash === 0 ? 'milestone' : hash === 11 && level >= 1 ? 'shrine' : null;
+        if (prop) {
+          const side = (x + y) % 2 === 0 ? 1 : -1;
+          const off = side * (w / 2 + tileSize * 0.2);
+          this.drawRoadProp(prop, px + nx * off, py + ny * off, tileSize, x + y);
+        }
       }
 
       // Street lighting: only on a modern paved road, and only where there is
       // a settlement to pay the lamplighter.
       if (fine && node.key === 'asphalt' && tile.cityId && (x + y) % 3 === 0) {
         const side = (x + y) % 6 === 0 ? 1 : -1; // staggered, as they are laid out
-        const off = side * (w / 2 + tileSize * 0.14);
-        this.drawStreetLamp(px + nx * off, py + ny * off, tileSize);
+        const off = side * (w / 2 + tileSize * 0.16);
+        this.drawRoadProp('lamp', px + nx * off, py + ny * off, tileSize, x);
+        // The pool of light the lantern throws, which the sprite cannot cast.
+        ctx.fillStyle = 'rgba(255, 224, 150, 0.13)';
+        ctx.beginPath();
+        ctx.arc(px + nx * off, py + ny * off, tileSize * 0.3, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       // A town square where the road reaches the heart of the settlement —
@@ -2638,10 +2657,10 @@ export class PixelRenderer {
         const far = tileMap.getTile(node.x + dx, node.y + dy);
         if (!far || !near.kingdomId || !far.kingdomId || near.kingdomId === far.kingdomId) continue;
         if (!kingdoms.has(near.kingdomId) || !kingdoms.has(far.kingdomId)) continue;
-        const jn = Math.hypot(dx, dy);
-        this.drawBorderPost(
+        this.drawRoadProp(
+          'frontier',
           cxx(node.x) + dx * tileSize * 0.5, cyy(node.y) + dy * tileSize * 0.5,
-          -dy / jn, dx / jn, node.width, tileSize
+          tileSize, node.x + node.y, Math.atan2(dy, dx) + Math.PI / 2
         );
       }
     }
@@ -2651,107 +2670,175 @@ export class PixelRenderer {
   }
 
   /**
-   * A bridge, drawn as a structure standing in the water rather than as road
-   * paint on a water tile. Timber goes up on trestles, stone on piers with the
-   * arch showing between them, and both throw a deck shadow onto the current —
-   * which is what tells the eye the road is above the water and not in it.
+   * Builds every bridge on screen.
+   *
+   * Water road tiles are first chained into whole crossings, because a bridge
+   * is one structure and not a run of independent tiles: the model, the span
+   * it is priced for, and the abutments at either end are all properties of
+   * the crossing, not of any tile in it. Each crossing is then laid out from
+   * the model's slices — an approach at each landfall, spans between — placed
+   * at each tile's own centre and turned to that tile's own bearing, so a
+   * crossing taken diagonally, or one that bends, still reads as one bridge.
    */
-  private drawBridgeSpan(
-    level: number,
-    px: number, py: number,
-    ax: number, ay: number,
-    roadW: number,
+  private drawCrossings(
+    nodes: RoadNode[],
+    tileMap: TileMap,
+    kingdoms: Map<string, Kingdom>,
+    cxx: (x: number) => number,
+    cyy: (y: number) => number,
     tileSize: number,
     fine: boolean
   ): void {
+    const water = nodes.filter(n => n.water && n.links.length > 0);
+    if (water.length === 0) return;
+
+    const byKey = new Map<string, RoadNode>();
+    for (const n of water) byKey.set(`${n.x},${n.y}`, n);
+    /** The neighbours of a water node that are themselves out over the water. */
+    const wetLinks = (n: RoadNode): RoadNode[] => {
+      const out: RoadNode[] = [];
+      for (const d of n.links) {
+        const next = byKey.get(`${n.x + ROAD_DIRS[d][0]},${n.y + ROAD_DIRS[d][1]}`);
+        if (next) out.push(next);
+      }
+      return out;
+    };
+
+    // Chain the water tiles, starting from the banks so a crossing is walked
+    // landfall to landfall. Anything left over is a loop and can start anywhere.
+    const seen = new Set<RoadNode>();
+    const crossings: RoadNode[][] = [];
+    const walk = (start: RoadNode): void => {
+      const chain: RoadNode[] = [];
+      let current: RoadNode | undefined = start;
+      let previous: RoadNode | undefined;
+      while (current && !seen.has(current)) {
+        seen.add(current);
+        chain.push(current);
+        const next: RoadNode | undefined = wetLinks(current).find(n => n !== previous && !seen.has(n));
+        previous = current;
+        current = next;
+      }
+      if (chain.length > 0) crossings.push(chain);
+    };
+    for (const n of water) if (!seen.has(n) && wetLinks(n).length <= 1) walk(n);
+    for (const n of water) if (!seen.has(n)) walk(n);
+
     const ctx = this.ctx;
-    const timber = level <= 1;
-    const deckHalf = roadW / 2 + Math.max(1, tileSize * 0.09);
-    // Slightly over a tile long, so consecutive spans of a long crossing read
-    // as one structure instead of a row of separate decks.
-    const half = tileSize * 0.54;
+    for (const chain of crossings) {
+      const head = chain[0];
+      const kingdom = head.tile.kingdomId ? kingdoms.get(head.tile.kingdomId) : undefined;
+      const era = kingdom ? kingdom.research.currentEra() : 'stone';
+      // Timber rots in the wet and splits in the frost, which is the whole
+      // reason a covered bridge exists — so the climate at the crossing, not
+      // a random roll, decides whether this one has a roof.
+      const bank = tileMap.getTile(head.x, head.y);
+      const harsh = !!bank && (bank.temperature < 4 || bank.moisture > 0.72);
+      const model = bridgeModelFor(head.level, era, chain.length, harsh);
+      const half = BRIDGE_HALF_WIDTH[model] * tileSize;
 
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(Math.atan2(ay, ax));
+      // The shadow the deck throws on the water, laid down under the whole
+      // crossing first so consecutive bays do not stripe each other.
+      if (throwsShadow(model)) {
+        ctx.fillStyle = 'rgba(6, 16, 28, 0.4)';
+        for (const n of chain) {
+          ctx.save();
+          ctx.translate(cxx(n.x) + tileSize * 0.07, cyy(n.y) + tileSize * 0.11);
+          ctx.rotate(Math.atan2(n.ay, n.ax));
+          ctx.fillRect(-tileSize * 0.52, -half, tileSize * 1.04, half * 2);
+          ctx.restore();
+        }
+      }
 
-    // The shadow the deck throws on the water.
-    ctx.fillStyle = 'rgba(6, 14, 24, 0.38)';
-    ctx.fillRect(-half, -deckHalf + tileSize * 0.12, half * 2, deckHalf * 2);
+      const smoothing = ctx.imageSmoothingEnabled;
+      // Pixel art stays pixel art on the way up; only a heavy downscale, where
+      // nearest-neighbour would drop whole rows of the lattice, is smoothed.
+      ctx.imageSmoothingEnabled = tileSize < BRIDGE_SLICE_PX * 0.75;
+      for (let i = 0; i < chain.length; i++) {
+        const n = chain[i];
+        const end = chain.length === 1 ? 'single' : i === 0 || i === chain.length - 1 ? 'approach' : 'span';
+        const sprite = bridgeSprite(model, end);
+        // An abutment is founded on the bank, not on the water — so a landfall
+        // slice runs a quarter-tile past the last wet tile and sits on dry
+        // ground. Without that the bridge appears to start in mid-river.
+        const bite = end === 'span' ? 0 : tileSize * 0.26;
+        const left = -tileSize * 0.52 - bite;
+        const length = tileSize * 1.04 + bite * (end === 'single' ? 2 : 1);
+        ctx.save();
+        ctx.translate(cxx(n.x), cyy(n.y));
+        ctx.rotate(Math.atan2(n.ay, n.ax));
+        // Approaches are drawn with the landfall on the left, so the far end
+        // is the same slice turned round.
+        if (end === 'approach' && i > 0) ctx.scale(-1, 1);
+        ctx.drawImage(sprite, left, -half * 1.14, length, half * 2.28);
+        ctx.restore();
+      }
+      ctx.imageSmoothingEnabled = smoothing;
 
-    // Substructure: trestle bents for timber, masonry piers for stone. They
-    // stand proud of the deck on both sides — a pier you cannot see under the
-    // road it carries may as well not be there.
-    ctx.fillStyle = timber ? '#3f2a16' : '#4c4740';
-    const bents = timber ? [-half * 0.62, 0, half * 0.62] : [-half * 0.55, half * 0.55];
-    const bentW = Math.max(1, tileSize * (timber ? 0.06 : 0.11));
-    const bentReach = deckHalf + tileSize * 0.11;
-    for (const b of bents) {
-      ctx.fillRect(b - bentW / 2, -bentReach, bentW, bentReach * 2);
-    }
-    if (!timber) {
-      // Cutwaters: the wedge on the upstream nose of each pier.
-      ctx.fillStyle = '#57514a';
-      for (const b of bents) {
-        ctx.beginPath();
-        ctx.moveTo(b - bentW * 0.9, -bentReach);
-        ctx.lineTo(b + bentW * 0.9, -bentReach);
-        ctx.lineTo(b, -bentReach - tileSize * 0.07);
-        ctx.closePath();
-        ctx.fill();
+      // The main cable: the one part of a bridge that a repeating slice cannot
+      // express, because its whole character is that it sags between towers.
+      if (fine && needsCable(model) && chain.length >= 2) {
+        const a = chain[0];
+        const b = chain[chain.length - 1];
+        const ax = cxx(a.x);
+        const ay = cyy(a.y);
+        const bx = cxx(b.x);
+        const by = cyy(b.y);
+        const nx = -(by - ay);
+        const ny = bx - ax;
+        const len = Math.hypot(nx, ny) || 1;
+        const top = tileSize * 0.34;
+        for (const side of [-1, 1]) {
+          const ox = (nx / len) * half * 0.86 * side;
+          const oy = (ny / len) * half * 0.86 * side;
+          // The sag: the cable is pulled toward the deck at midspan and rises
+          // to the tower tops at the ends.
+          const sagX = (ax + bx) / 2 + ox - (nx / len) * top * side;
+          const sagY = (ay + by) / 2 + oy - (ny / len) * top * side;
+          ctx.strokeStyle = '#0f1215';
+          ctx.lineWidth = Math.max(1.5, tileSize * 0.055);
+          ctx.beginPath();
+          ctx.moveTo(ax + ox, ay + oy);
+          ctx.quadraticCurveTo(sagX, sagY, bx + ox, by + oy);
+          ctx.stroke();
+          ctx.strokeStyle = '#98a1aa';
+          ctx.lineWidth = Math.max(1, tileSize * 0.03);
+          ctx.stroke();
+        }
       }
     }
-    if (!timber && fine) {
-      // The arch between the piers, catching light off the water.
-      ctx.strokeStyle = 'rgba(196, 188, 172, 0.35)';
-      ctx.lineWidth = Math.max(1, tileSize * 0.05);
-      ctx.beginPath();
-      ctx.arc(0, deckHalf * 0.2, half * 0.5, Math.PI, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // The deck.
-    ctx.fillStyle = timber ? '#6b4a2a' : level === 2 ? '#8b857a' : '#9c948a';
-    ctx.fillRect(-half, -deckHalf, half * 2, deckHalf * 2);
-
-    if (fine) {
-      // Planking across the deck, or paving joints along it.
-      ctx.fillStyle = timber ? 'rgba(46, 30, 15, 0.55)' : 'rgba(52, 48, 42, 0.4)';
-      const gap = Math.max(2, tileSize * (timber ? 0.16 : 0.28));
-      for (let t = -half + gap; t < half; t += gap) {
-        ctx.fillRect(t, -deckHalf, Math.max(1, tileSize * 0.03), deckHalf * 2);
-      }
-    }
-
-    // Railings, and the posts that carry them.
-    const railW = Math.max(1, tileSize * 0.055);
-    ctx.fillStyle = timber ? '#3f2a16' : '#5b564d';
-    ctx.fillRect(-half, -deckHalf - railW, half * 2, railW);
-    ctx.fillRect(-half, deckHalf, half * 2, railW);
-    if (fine) {
-      const postGap = Math.max(3, tileSize * 0.3);
-      for (let t = -half + postGap * 0.5; t < half; t += postGap) {
-        ctx.fillRect(t, -deckHalf - railW * 1.8, railW, railW * 1.8);
-        ctx.fillRect(t, deckHalf, railW, railW * 1.8);
-      }
-    }
-    ctx.restore();
   }
 
-  /** A lamp standard and the pool of light under it. */
-  private drawStreetLamp(lx: number, ly: number, tileSize: number): void {
+  /**
+   * Places a roadside prop. Props stand upright regardless of which way the
+   * road runs — a milestone does not lie down because the road turned — so
+   * only the frontier marker, which straddles the carriageway, takes a
+   * bearing. The sprite is anchored at its foot so it appears to stand on the
+   * verge rather than hover over it.
+   */
+  private drawRoadProp(
+    prop: RoadProp,
+    px: number, py: number,
+    tileSize: number,
+    seed: number,
+    bearing?: number
+  ): void {
     const ctx = this.ctx;
-    const post = Math.max(1, tileSize * 0.035);
-    ctx.fillStyle = '#2f3338';
-    ctx.fillRect(lx - post / 2, ly - tileSize * 0.15, post, tileSize * 0.15);
-    ctx.fillStyle = 'rgba(255, 224, 150, 0.16)';
-    ctx.beginPath();
-    ctx.arc(lx, ly - tileSize * 0.15, Math.max(2.5, tileSize * 0.16), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255, 232, 170, 0.9)';
-    ctx.beginPath();
-    ctx.arc(lx, ly - tileSize * 0.15, Math.max(1, tileSize * 0.04), 0, Math.PI * 2);
-    ctx.fill();
+    const sprite = roadProp(prop, seed);
+    const h = tileSize * PROP_SCALE[prop];
+    const w = h * propAspect(prop);
+    const smoothing = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = h < sprite.height * 0.75;
+    if (bearing === undefined) {
+      ctx.drawImage(sprite, px - w / 2, py - h * 0.82, w, h);
+    } else {
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(bearing);
+      ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
+    ctx.imageSmoothingEnabled = smoothing;
   }
 
   /**
@@ -2793,34 +2880,6 @@ export class PixelRenderer {
       ctx.strokeStyle = '#6f665c';
       ctx.lineWidth = Math.max(1, tileSize * 0.03);
       ctx.stroke();
-    }
-  }
-
-  /**
-   * A frontier post: two stones flanking the road where it leaves one realm
-   * for another, with the bar between them. Small, because a customs post is
-   * small — the old twin-tower gate buried the road it stood on.
-   */
-  private drawBorderPost(
-    px: number, py: number,
-    nx: number, ny: number,
-    roadW: number,
-    tileSize: number
-  ): void {
-    const ctx = this.ctx;
-    const reach = roadW / 2 + tileSize * 0.1;
-    const stone = Math.max(1.5, tileSize * 0.09);
-    ctx.strokeStyle = 'rgba(232, 226, 212, 0.75)';
-    ctx.lineWidth = Math.max(1, tileSize * 0.035);
-    ctx.beginPath();
-    ctx.moveTo(px + nx * reach, py + ny * reach);
-    ctx.lineTo(px - nx * reach, py - ny * reach);
-    ctx.stroke();
-    ctx.fillStyle = '#2b2823';
-    for (const side of [-1, 1]) {
-      ctx.beginPath();
-      ctx.arc(px + nx * reach * side, py + ny * reach * side, stone / 2, 0, Math.PI * 2);
-      ctx.fill();
     }
   }
 }

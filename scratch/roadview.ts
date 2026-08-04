@@ -211,5 +211,72 @@ function stockedCity(id: string, name: string, x: number, y: number): City {
   shot('bench — surfaces and wear, close', map, cities, kingdoms, { x: 29, y: 15 }, 4.5, 900, 560);
 }
 
+// ============================================================
+// Scene 3 — the bridge catalogue: every model, at the span and era that
+// actually produces it, so each can be judged next to the others.
+// ============================================================
+{
+  const SIZE = 52;
+  const map = new TileMap(SIZE, SIZE, 'single_continent', 5);
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      t.type = TerrainType.GRASS;
+      t.height = 0.5;
+      t.temperature = 18;
+      t.moisture = 0.5;
+      t.roadLevel = 0;
+      t.roadDamage = 0;
+      t.buildingId = null;
+      t.cityId = null;
+      t.kingdomId = null;
+      t.resourceType = null;
+      t.resourceAmount = 0;
+    }
+  }
+
+  const cities = new Map<string, City>();
+  const kingdoms = new Map<string, Kingdom>();
+  const ancient = new Kingdom('anc', 'Ancient', SpeciesType.HUMAN, getNextKingdomColor(), 'anc_c', 0);
+  const modern = new Kingdom('mod', 'Modern', SpeciesType.HUMAN, getNextKingdomColor(), 'mod_c', 0);
+  for (const id of ['roads', 'masonry', 'engineering', 'industrialization']) modern.research.complete(id);
+  kingdoms.set(ancient.id, ancient);
+  kingdoms.set(modern.id, modern);
+
+  /**
+   * One crossing per row: a river of the given width, a road of the given
+   * grade over it, and the realm whose era decides how it gets built.
+   */
+  const rows: { y: number; width: number; grade: number; realm: Kingdom; cold?: boolean; label: string }[] = [
+    { y: 4, width: 1, grade: 1, realm: ancient, label: 'ford' },
+    { y: 10, width: 3, grade: 1, realm: ancient, label: 'timber trestle' },
+    { y: 16, width: 3, grade: 1, realm: ancient, cold: true, label: 'covered' },
+    { y: 22, width: 2, grade: 2, realm: ancient, label: 'stone arch' },
+    { y: 28, width: 5, grade: 2, realm: ancient, label: 'viaduct' },
+    { y: 34, width: 4, grade: 3, realm: ancient, label: 'imperial' },
+    { y: 40, width: 2, grade: 3, realm: modern, label: 'iron truss' },
+    { y: 46, width: 5, grade: 3, realm: modern, label: 'suspension' }
+  ];
+  for (const row of rows) {
+    const from = Math.floor((SIZE - row.width) / 2);
+    for (let x = 0; x < SIZE; x++) {
+      const t = map.grid[x][row.y];
+      t.roadLevel = row.grade;
+      t.kingdomId = row.realm.id;
+      if (row.cold) { t.temperature = -6; t.moisture = 0.85; }
+      map.grid[x][row.y - 1].kingdomId = row.realm.id;
+      map.grid[x][row.y + 1].kingdomId = row.realm.id;
+    }
+    for (let x = from; x < from + row.width; x++) {
+      map.grid[x][row.y].type = TerrainType.SHALLOW_WATER;
+      for (let y = 0; y < SIZE; y++) if (Math.abs(y - row.y) <= 2) map.grid[x][y].type = TerrainType.SHALLOW_WATER;
+    }
+  }
+  shot(`bridge catalogue — ${rows.map(r => r.label).join(', ')}`, map, cities, kingdoms, { x: 26, y: 25 }, 1.9, 900, 1560);
+  shot('catalogue close — ford, timber, covered', map, cities, kingdoms, { x: 26, y: 10 }, 4.2, 900, 760);
+  shot('catalogue close — arch, viaduct, imperial', map, cities, kingdoms, { x: 26, y: 28 }, 4.2, 900, 760);
+  shot('catalogue close — truss, suspension', map, cities, kingdoms, { x: 26, y: 43 }, 4.2, 900, 620);
+}
+
 document.title = 'roads ready';
 (window as unknown as { roadsReady: boolean }).roadsReady = true;
