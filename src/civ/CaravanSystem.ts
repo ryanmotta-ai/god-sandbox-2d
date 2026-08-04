@@ -31,6 +31,11 @@ export interface OverlandCaravan {
   kingdomColor: string;
   speed: number;
   path?: { x: number; y: number }[];
+  /** Length of the surveyed route in tiles — what turns ground speed into progress. */
+  routeTiles: number;
+  /** Unit heading the caravan is actually facing, for picking its sprite. */
+  headingX: number;
+  headingY: number;
 }
 
 /** Road speed multiplier per road level — shared with every mover on the map. */
@@ -53,6 +58,28 @@ const TERRAIN_AFFINITY: Record<CaravanType, Partial<Record<string, number>>> = {
     grass: 1.1, soil: 1.05, savanna: 1.05, sand: 0.95, forest: 0.95,
     swamp: 0.75, tundra: 0.85, snow: 0.7, mountain: 0.35
   }
+};
+
+/**
+ * Ground speed of each kind of traffic, in tiles per tick, before roads and
+ * terrain have their say.
+ *
+ * These used to be a fraction of the *route* covered per tick, which meant a
+ * caravan crossed a sixty-tile route and a six-tile route in the same number
+ * of ticks — so the long-haul ones tore across the map at ten times the speed
+ * of the short-haul ones. Worse, the long routes were the ones given camels,
+ * which had the highest number of the three. Speed is now measured in ground
+ * covered, so distance costs time, as it should.
+ *
+ * Scaled against a citizen on foot, who manages MOVE_PER_TICK (0.055) at
+ * baseSpeed 1: a loaded pack train is slower than a man walking unburdened.
+ * A camel out-walks a donkey and keeps it up all day, which is the entire
+ * reason anyone used them for the long hauls.
+ */
+const CARAVAN_SPEED: Record<CaravanType, number> = {
+  donkey: 0.030,
+  camel: 0.038,
+  cart: 0.034
 };
 
 /** Road traffic thresholds for road evolution */
@@ -120,11 +147,20 @@ export class CaravanSystem {
       if (!this.activeCaravans.has(route.id)) {
         const dist = Math.hypot(toCity.x - fromCity.x, toCity.y - fromCity.y);
         const caravanType: CaravanType = dist > 15 ? 'camel' : dist > 8 ? 'cart' : 'donkey';
-        const baseSpeed = caravanType === 'camel' ? 0.015 : caravanType === 'cart' ? 0.012 : 0.009;
         const landPath = SimplePathfinder.findPath(fromCity.x, fromCity.y, toCity.x, toCity.y, tileMap, 'land');
 
         // Don't spawn caravan if no valid land path exists
         if (landPath.length === 0) continue;
+
+        // Progress runs 0..1 over the route, so a ground speed has to be
+        // divided by how much ground there is. This is the whole fix: the
+        // route's real length, walked at the animal's real pace.
+        let routeTiles = 0;
+        for (let i = 1; i < landPath.length; i++) {
+          routeTiles += Math.hypot(landPath[i].x - landPath[i - 1].x, landPath[i].y - landPath[i - 1].y);
+        }
+        routeTiles = Math.max(1, routeTiles);
+        const baseSpeed = CARAVAN_SPEED[caravanType] / routeTiles;
 
         const caravan: OverlandCaravan = {
           id: route.id,
@@ -146,7 +182,10 @@ export class CaravanSystem {
           cargoAmount: Math.min(route.volume * 5, Math.floor(route.volume * (3 + (currentYear % 5) * 0.4))),
           kingdomColor: fromKingdom?.color ?? '#fbbf24',
           speed: baseSpeed,
-          path: landPath
+          path: landPath,
+          routeTiles,
+          headingX: 1,
+          headingY: 0
         };
         this.activeCaravans.set(route.id, caravan);
       }
@@ -191,6 +230,17 @@ export class CaravanSystem {
         if (p1 && p2) {
           caravan.x = p1.x + (p2.x - p1.x) * subFrac;
           caravan.y = p1.y + (p2.y - p1.y) * subFrac;
+          // Which way it is pointing: along the leg it is on, reversed when it
+          // is walking home. Drawing this from the trip direction alone, as
+          // the renderer used to, faced every caravan east or west whatever
+          // the road was doing.
+          const legX = (p2.x - p1.x) * caravan.direction;
+          const legY = (p2.y - p1.y) * caravan.direction;
+          const len = Math.hypot(legX, legY);
+          if (len > 0.0001) {
+            caravan.headingX = legX / len;
+            caravan.headingY = legY / len;
+          }
         }
       } else {
         caravan.x = caravan.startX + (caravan.endX - caravan.startX) * caravan.progress;

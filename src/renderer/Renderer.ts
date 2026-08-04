@@ -21,6 +21,7 @@ import {
   BRIDGE_HALF_WIDTH, BRIDGE_SLICE_PX, bridgeModelFor, bridgeSprite, needsCable, throwsShadow
 } from './BridgeSprites';
 import { PROP_SCALE, propAspect, roadProp, type RoadProp } from './RoadSprites';
+import { CARAVAN_FRAMES, CARAVAN_PX, STRIDE_TILES, caravanSprite, type CaravanView } from './CaravanSprites';
 
 /** Deposit tiers so plentiful that drawing every one clutters the whole map. */
 const COMMON_NODE_TIERS = new Set<GoodTier>(['common']);
@@ -175,10 +176,29 @@ export class PixelRenderer {
     return 'idle';
   }
 
+  /**
+   * How far a citizen walks per complete four-frame stride, in tiles. Roughly
+   * one tile per cycle keeps a footfall on the ground rather than skating over
+   * it, whatever the road bonus and the terrain cost are doing to their speed.
+   */
+  private static readonly STRIDE_TILES = 0.9;
+
+  /**
+   * The frame to draw.
+   *
+   * Anything driven by the body — walking, fleeing, hauling a load — is
+   * clocked off the ground covered, not off wall time. Running the legs at a
+   * fixed cadence while the body moved at whatever speed the road allowed is
+   * what made citizens look like they were gliding: the faster they went, the
+   * less their feet had to do with it. Work that happens on the spot keeps a
+   * wall-clock rate, because there is no ground going past to key it to.
+   */
   private getAnimationFrame(e: Entity, animation: EntitySpriteAnimation, idHash: number): number {
+    if (animation === 'walk' || animation === 'carry' || animation === 'flee') {
+      const stride = PixelRenderer.STRIDE_TILES * (animation === 'flee' ? 0.72 : 1);
+      return Math.floor(e.renderWalked / (stride / 4) + idHash) % 4;
+    }
     const rate = animation === 'attack' || animation === 'shoot' ? 11
-      : animation === 'flee' ? 13
-      : animation === 'walk' || animation === 'carry' ? 8
       : animation === 'gather' || animation === 'build' ? 6
       : animation === 'heal' || animation === 'socialize' ? 4
       : animation === 'rest' ? 1.5
@@ -1622,12 +1642,18 @@ export class PixelRenderer {
         const idHash = parseInt(e.id.slice(-4) || '0', 16);
         const safeHash = Number.isNaN(idHash) ? 0 : idHash;
         const movement = Math.hypot(e.x - e.prevX, e.y - e.prevY);
+        // Teleports — a respawn, a load, a camera jump — must not be counted
+        // as ground walked, or the legs spin up for a step that never happened.
+        if (movement < 0.5) e.renderWalked += movement;
         const isMoving = movement > 0.0005 || (e.targetX !== null && e.targetY !== null && e.aiState !== 'idle');
         const direction = this.getEntityDirection(e, isMoving);
         const animation = this.getEntityAnimation(e, isMoving);
         const frame = this.getAnimationFrame(e, animation, safeHash);
-        const strideSpeed = Math.min(18, Math.max(8, movement * 350));
-        const bob = (animation === 'walk' || animation === 'flee' || animation === 'carry') ? Math.sin(this.animTimer * strideSpeed + safeHash) * 1.2 : 0;
+        // The body's bob rides the same stride as the feet, so a citizen
+        // bounces once per step instead of at a rate of its own.
+        const bob = (animation === 'walk' || animation === 'flee' || animation === 'carry')
+          ? Math.sin((e.renderWalked / PixelRenderer.STRIDE_TILES) * Math.PI * 2 + safeHash) * 1.2
+          : 0;
         const breathe = animation === 'idle' ? Math.sin(this.animTimer * 2.2 + safeHash * 0.01) * 0.45 : 0;
         const entitySize = tileSize;
         const ageScale = e.lifeStage === 'infant' ? 0.52
@@ -1788,33 +1814,55 @@ export class PixelRenderer {
         if (caravan.x < minX || caravan.x > maxX || caravan.y < minY || caravan.y > maxY) continue;
         const screenPos = camera.worldToScreen(caravan.x, caravan.y, width, height);
         const caravanSize = Math.max(14, tileSize * 1.15);
+        // The animal stands *on* the point it occupies. Anchoring the sprite's
+        // corner there, as this used to, left it standing half a tile off the
+        // road it was supposed to be walking down.
+        const footX = screenPos.x + tileSize * 0.5;
+        const footY = screenPos.y + tileSize * 0.5;
+        const drawX = footX - caravanSize * 0.5;
+        const drawY = footY - caravanSize * 0.94;
 
-        // Ground dust trail effect
-        this.ctx.fillStyle = 'rgba(217, 119, 6, 0.25)';
-        this.ctx.beginPath();
-        this.ctx.arc(screenPos.x + caravanSize * 0.5, screenPos.y + caravanSize * 0.8, caravanSize * 0.35, 0, Math.PI * 2);
-        this.ctx.fill();
-
-        // Pixel-Art Caravan Sprite
-        const spriteKey = `caravan_${caravan.caravanType}`;
-        const sprite = SpriteGenerator.has(spriteKey)
-          ? SpriteGenerator.getSprite(spriteKey, () => {}, 24, 24)
-          : SpriteGenerator.getSprite('caravan_donkey', () => {}, 64, 64);
+        // Which side of the animal is toward the camera, from where it is
+        // actually pointing: away up the road, toward the camera coming down
+        // it, and side-on across it — with the left side being the right side
+        // mirrored, exactly as the animal itself is.
+        const hx = caravan.headingX;
+        const hy = caravan.headingY;
+        const view: CaravanView = Math.abs(hx) > Math.abs(hy) ? 'side' : hy < 0 ? 'back' : 'front';
+        // The gait is measured in ground covered, never in wall-clock time, so
+        // the legs cannot outrun the movement however the road and the terrain
+        // are scaling it.
+        const walked = caravan.progress * caravan.routeTiles;
+        const frame = Math.floor(walked / (STRIDE_TILES[caravan.caravanType] / CARAVAN_FRAMES));
+        const sprite = caravanSprite(caravan.caravanType, view, frame);
 
         this.ctx.save();
-        if (caravan.direction < 0) {
-          this.ctx.translate(screenPos.x + caravanSize, screenPos.y);
+        this.ctx.imageSmoothingEnabled = caravanSize < CARAVAN_PX * 0.75;
+        if (view === 'side' && hx < 0) {
+          this.ctx.translate(drawX + caravanSize, drawY);
           this.ctx.scale(-1, 1);
           this.ctx.drawImage(sprite, 0, 0, caravanSize, caravanSize);
         } else {
-          this.ctx.drawImage(sprite, screenPos.x, screenPos.y, caravanSize, caravanSize);
+          this.ctx.drawImage(sprite, drawX, drawY, caravanSize, caravanSize);
         }
         this.ctx.restore();
+
+        // Dust kicked up behind it, on the side it came from — only on a dirt
+        // road, because that is the only surface that gives any up.
+        const dustTile = tileMap.getTile(Math.floor(caravan.x), Math.floor(caravan.y));
+        if (tileSize > 6 && dustTile && dustTile.roadLevelEffective <= 1) {
+          const puff = 0.6 + Math.sin(walked * 7) * 0.2;
+          this.ctx.fillStyle = 'rgba(180, 150, 105, 0.24)';
+          this.ctx.beginPath();
+          this.ctx.arc(footX - hx * caravanSize * 0.4, footY - hy * caravanSize * 0.18,
+            caravanSize * 0.16 * puff, 0, Math.PI * 2);
+          this.ctx.fill();
+        }
 
         // Kingdom Banner on Pack Saddle
         if (tileSize > 6) {
           this.ctx.fillStyle = caravan.kingdomColor ?? '#fbbf24';
-          this.ctx.fillRect(screenPos.x + caravanSize * 0.4, screenPos.y - 2, 7, 4);
+          this.ctx.fillRect(footX - 3, drawY + caravanSize * 0.06, 7, 4);
         }
       }
     }

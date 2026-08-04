@@ -31,6 +31,11 @@ export class Entity implements HasPosition {
   public y: number;
   public targetX: number | null = null;
   public targetY: number | null = null;
+  /**
+   * Renderer cache: ground covered on foot, in tiles. Drives the walk cycle so
+   * a stride is a stride and never a fixed cadence the body outruns.
+   */
+  public renderWalked: number = 0;
   public prevX: number = 0;
   public prevY: number = 0;
   public facing: number = 1; // 1 = right, -1 = left

@@ -7,6 +7,7 @@
  */
 import { bridgeSprite, type BridgeModel, type BridgeSlice } from '../src/renderer/BridgeSprites';
 import { roadProp, type RoadProp } from '../src/renderer/RoadSprites';
+import { caravanSprite, type CaravanKind, type CaravanView } from '../src/renderer/CaravanSprites';
 
 const MODELS: BridgeModel[] = ['stones', 'timber', 'covered', 'arch', 'viaduct', 'imperial', 'truss', 'suspension'];
 const SLICES: BridgeSlice[] = ['single', 'approach', 'span'];
@@ -74,6 +75,36 @@ document.getElementById('sheet')!.append(table);
     row.append(wrap);
   }
   document.getElementById('sheet')!.append(row);
+}
+
+// The caravans: every kind, every view, every frame of the gait.
+{
+  const kinds: CaravanKind[] = ['donkey', 'camel', 'cart'];
+  const views: CaravanView[] = ['back', 'side', 'front'];
+  const table = document.createElement('table');
+  const head = document.createElement('tr');
+  head.innerHTML = '<th></th>' + views.map(v => `<th>${v} (4-frame gait)</th>`).join('');
+  table.append(head);
+  for (const kind of kinds) {
+    const row = document.createElement('tr');
+    const label = document.createElement('th');
+    label.textContent = kind;
+    row.append(label);
+    for (const view of views) {
+      const cell = document.createElement('td');
+      const c = document.createElement('canvas');
+      c.width = 32 * 4 * 4;
+      c.height = 32 * 4;
+      c.style.background = '#5c7a3f';
+      const ctx = c.getContext('2d')!;
+      ctx.imageSmoothingEnabled = false;
+      for (let f = 0; f < 4; f++) ctx.drawImage(caravanSprite(kind, view, f), f * 128, 0, 128, 128);
+      cell.append(c);
+      row.append(cell);
+    }
+    table.append(row);
+  }
+  document.getElementById('sheet')!.append(table);
 }
 
 (window as unknown as { roadsReady: boolean }).roadsReady = true;

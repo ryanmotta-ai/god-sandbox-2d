@@ -20,6 +20,7 @@ import { ParticleManager } from '../src/renderer/Particles';
 import { WorldEra } from '../src/world/WeatherEras';
 import { rng } from '../src/core/Random';
 import { surveyRoad, layRoad } from '../src/civ/RoadEngineering';
+import type { CaravanType, OverlandCaravan } from '../src/civ/CaravanSystem';
 
 const params = new URLSearchParams(location.search);
 const SEED = Number(params.get('seed') ?? 20260804);
@@ -28,7 +29,8 @@ const host = document.getElementById('shots')!;
 
 function shot(
   label: string, map: TileMap, cities: Map<string, City>, kingdoms: Map<string, Kingdom>,
-  at: { x: number; y: number }, zoom: number, w = 900, h = 560
+  at: { x: number; y: number }, zoom: number, w = 900, h = 560,
+  caravans?: OverlandCaravan[]
 ): void {
   const wrap = document.createElement('div');
   const title = document.createElement('div');
@@ -45,7 +47,7 @@ function shot(
   camera.centerOn(at.x, at.y, zoom);
   camera.zoom = zoom;
   camera.targetZoom = zoom;
-  new PixelRenderer(canvas).render(camera, map, [], cities, kingdoms, particles, 'none', WorldEra.GOLDEN_AGE, null, null, 1);
+  new PixelRenderer(canvas).render(camera, map, [], cities, kingdoms, particles, 'none', WorldEra.GOLDEN_AGE, null, null, 1, undefined, caravans);
 }
 
 function stockedCity(id: string, name: string, x: number, y: number): City {
@@ -446,6 +448,56 @@ function stockedCity(id: string, name: string, x: number, y: number): City {
   frame(canvases[1]);      // the frame the land is taken
   for (let i = 0; i < 25; i++) shared.render(camera, map, [], cities, kingdoms, particles, 'none', WorldEra.GOLDEN_AGE, null, null, 1);
   frame(canvases[2]);      // fading back down
+}
+
+// ============================================================
+// Scene 7 — caravans on the road at map scale, one heading each way, so the
+// facing and the mirroring can be checked through the real render path
+// ============================================================
+{
+  rng.setSeed(11);
+  const SIZE = 26;
+  const map = new TileMap(SIZE, SIZE, 'single_continent', 11);
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      t.type = TerrainType.GRASS;
+      t.height = 0.5;
+      t.roadLevel = 0;
+      t.kingdomId = null;
+      t.cityId = null;
+      t.resourceType = null;
+      t.resourceAmount = 0;
+    }
+  }
+  // A cross of roads, so there is a road running each way to walk along.
+  for (let i = 2; i < SIZE - 2; i++) {
+    map.grid[i][13].roadLevel = 2;
+    map.grid[13][i].roadLevel = 2;
+  }
+
+  const caravans: OverlandCaravan[] = [];
+  const kinds: CaravanType[] = ['donkey', 'camel', 'cart'];
+  // One of each kind walking each of the four ways.
+  const headings: [number, number][] = [[1, 0], [-1, 0], [0, -1], [0, 1]];
+  kinds.forEach((kind, k) => {
+    headings.forEach(([hx, hy], h) => {
+      const along = 4 + h * 5;
+      caravans.push({
+        id: `c${k}${h}`, routeId: 'r', fromKingdomId: '', toKingdomId: '',
+        fromCityName: '', toCityName: '',
+        startX: 0, startY: 0, endX: 0, endY: 0,
+        x: hy === 0 ? along : 13 - 3 + k * 3,
+        y: hy === 0 ? 13 - 3 + k * 3 : along,
+        progress: 0.1 + k * 0.08, direction: 1, caravanType: kind,
+        cargo: 'grain' as never, cargoAmount: 10, kingdomColor: '#fbbf24',
+        speed: 0.001, routeTiles: 20, headingX: hx, headingY: hy
+      });
+    });
+  });
+
+  shot('caravans — each kind, each heading, at map scale', map, new Map(), new Map(), { x: 13, y: 13 }, 3.0, 900, 700, caravans);
+  shot('caravans — close', map, new Map(), new Map(), { x: 9, y: 12 }, 6.0, 900, 500, caravans);
 }
 
 document.title = 'roads ready';
