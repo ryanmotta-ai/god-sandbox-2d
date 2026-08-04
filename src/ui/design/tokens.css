@@ -1,0 +1,232 @@
+/* ==========================================================================
+   AETHORIA — DESIGN TOKENS
+   The single source of truth for colour, spacing, type, depth and layering.
+
+   Loaded before style.css so that the legacy aliases at the bottom of this
+   file re-point the older variable names at the new palette. That is what lets
+   twenty screens written against `--surface-1` / `--text-dim` inherit the warm
+   stone look without being rewritten one at a time.
+
+   Rule for new UI: never hardcode a colour, a gap or a radius. If a value is
+   missing here, add it here.
+   ========================================================================== */
+
+:root {
+  /* ======================= SURFACES =======================
+     Warm charcoal and stone, layered from the world upward. The map is the
+     protagonist, so every surface stays dark enough to sit under it without
+     competing, and warm enough to belong to the same world. */
+  --ae-bg: #100e0c;
+  --ae-bg-deep: #0a0908;
+  --ae-panel: #191614;
+  --ae-panel-raised: #221e1b;
+  --ae-panel-sunken: #131110;
+  /* Parchment surface: for the few places that should read as written-on
+     material rather than stone — tooltips, chronicle entries, documents. */
+  --ae-parchment: #241f1a;
+  --ae-parchment-ink: #e8dfcd;
+  /* Translucent variants, for panels that float over the map. */
+  --ae-panel-veil: rgba(25, 22, 20, 0.94);
+  --ae-panel-veil-soft: rgba(19, 17, 16, 0.86);
+  --ae-scrim: rgba(8, 7, 6, 0.78);
+
+  /* ======================= LINES ======================= */
+  --ae-border: rgba(214, 197, 168, 0.11);
+  --ae-border-strong: rgba(214, 197, 168, 0.24);
+  /* Engraved separator: the hairline used inside lists and tables. */
+  --ae-border-inset: rgba(214, 197, 168, 0.07);
+
+  /* ======================= TEXT ======================= */
+  --ae-text: #e9e1d2;
+  --ae-text-secondary: #a79c89;
+  --ae-text-muted: #756c5e;
+  /* Text drawn on top of an accent fill. */
+  --ae-text-on-accent: #1a1408;
+
+  /* ======================= STATUS =======================
+     Four states, and only four. Muted on purpose: a warning has to be
+     noticeable against dark stone without turning into a neon sign. */
+  --ae-positive: #7ba05b;
+  --ae-neutral: #6f8fa8;
+  --ae-warning: #d98324;
+  --ae-critical: #b8453c;
+  /* Tinted fills/borders derived from the above, so status chips and rows do
+     not each invent their own alpha. */
+  --ae-positive-fill: rgba(123, 160, 91, 0.14);
+  --ae-neutral-fill: rgba(111, 143, 168, 0.14);
+  --ae-warning-fill: rgba(217, 131, 36, 0.14);
+  --ae-critical-fill: rgba(184, 69, 60, 0.15);
+  --ae-positive-line: rgba(123, 160, 91, 0.4);
+  --ae-neutral-line: rgba(111, 143, 168, 0.4);
+  --ae-warning-line: rgba(217, 131, 36, 0.42);
+  --ae-critical-line: rgba(184, 69, 60, 0.44);
+
+  /* ======================= ACCENT =======================
+     Bronze and old gold. Used for emphasis and selection, never for decoration
+     — if everything is gold, nothing is. */
+  --ae-accent: #c9a153;
+  --ae-accent-bright: #e2bd6d;
+  --ae-accent-deep: #8a6a2f;
+  --ae-accent-fill: rgba(201, 161, 83, 0.13);
+  --ae-accent-line: rgba(201, 161, 83, 0.38);
+
+  /* Realm accent: rewritten per element by whatever realm is in scope, so a
+     panel about a kingdom can be tinted by that kingdom's own colour. Falls
+     back to bronze wherever no realm is in scope. */
+  --ae-realm: var(--ae-accent);
+  --ae-realm-fill: rgba(201, 161, 83, 0.12);
+  --ae-realm-line: rgba(201, 161, 83, 0.36);
+
+  /* ======================= SPACING =======================
+     A 4px base. Anything between these steps is almost certainly a mistake. */
+  --ae-space-1: 2px;
+  --ae-space-2: 4px;
+  --ae-space-3: 6px;
+  --ae-space-4: 8px;
+  --ae-space-5: 12px;
+  --ae-space-6: 16px;
+  --ae-space-7: 20px;
+  --ae-space-8: 24px;
+  --ae-space-9: 32px;
+
+  /* Standard interior padding for a panel and for its header. */
+  --ae-pad-panel: 12px 14px;
+  --ae-pad-head: 9px 14px;
+  --ae-pad-tight: 6px 10px;
+
+  /* ======================= SHAPE =======================
+     Tight radii. Pixel art has square corners; a 26px radius reads as a web
+     dashboard, not a strategy console. */
+  --ae-radius-0: 0px;
+  --ae-radius-1: 2px;
+  --ae-radius-2: 3px;
+  --ae-radius-3: 5px;
+  --ae-radius-4: 8px;
+
+  /* ======================= TYPE ======================= */
+  --ae-font: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --ae-font-pixel: 'Silkscreen', monospace;
+  /* Figures are compared far more often than they are read, so numeric UI runs
+     on tabular figures — columns of values line up digit for digit. */
+  --ae-font-numeric: 'Outfit', ui-monospace, monospace;
+
+  --ae-text-screen-title: 1.375rem;
+  --ae-text-section-title: 0.75rem;
+  --ae-text-object-name: 1rem;
+  --ae-text-value-primary: 1.125rem;
+  --ae-text-body: 0.875rem;
+  --ae-text-secondary-size: 0.8125rem;
+  --ae-text-meta: 0.6875rem;
+
+  --ae-tracking-title: -0.3px;
+  --ae-tracking-section: 0.09em;
+  --ae-tracking-meta: 0.06em;
+
+  /* ======================= ROWS =======================
+     Fixed row heights are what make a list scannable — a column of values the
+     eye can run down without re-finding the baseline on every line. */
+  --ae-row-h: 28px;
+  --ae-row-h-lg: 34px;
+  --ae-row-h-sm: 22px;
+  --ae-control-h: 30px;
+  --ae-control-h-sm: 24px;
+
+  /* ======================= DEPTH =======================
+     Shadow, not glow. A panel casts a shadow because it is above the map; it
+     does not emit light. */
+  --ae-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --ae-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.55);
+  --ae-shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.62);
+  /* The one legitimate "lit" state: a focused or selected element, drawn as an
+     inset bronze edge rather than an outer halo. */
+  --ae-edge-accent: inset 0 0 0 1px var(--ae-accent-line);
+  --ae-edge-focus: 0 0 0 2px rgba(201, 161, 83, 0.45);
+
+  /* ======================= PANEL SIZING =======================
+     Side panels flex between a floor and a ceiling instead of pinning one
+     absolute width, so the UI holds together from a laptop to an ultrawide. */
+  --ae-side-min: 280px;
+  --ae-side-pref: 22vw;
+  --ae-side-max: 380px;
+  --ae-side-w: clamp(var(--ae-side-min), var(--ae-side-pref), var(--ae-side-max));
+  --ae-screen-max: 1180px;
+  --ae-screen-max-narrow: 780px;
+  --ae-tooltip-max: 260px;
+
+  /* ======================= LAYERS =======================
+     Every fixed/absolute element in the UI picks its z-index from this list.
+     Values are spaced so a new layer can be slotted between two without
+     renumbering the ones around it. */
+  --ae-z-map: 1;
+  --ae-z-map-overlay: 5;
+  --ae-z-hud: 10;
+  --ae-z-drawer: 20;
+  --ae-z-screen: 40;
+  --ae-z-dock: 50;
+  --ae-z-modal: 60;
+  --ae-z-toast: 80;
+  /* Tooltips sit above everything, including modals — they annotate whatever
+     is topmost, so they cannot live underneath it. */
+  --ae-z-tooltip: 95;
+
+  /* ======================= MOTION =======================
+     Short and unfussy. UI that animates slowly reads as sluggish in a game
+     the player is already waiting on. */
+  --ae-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --ae-fast: 0.12s var(--ae-ease);
+  --ae-med: 0.2s var(--ae-ease);
+}
+
+/* ==========================================================================
+   LEGACY ALIASES
+
+   The pre-UI-0 stylesheet is written against these names. Re-pointing them
+   here migrates the whole existing interface onto the new palette in one move,
+   which is why UI-0 does not need to touch nineteen per-screen CSS sections.
+
+   Do not use these names in new UI — they exist to keep the old screens
+   coherent until each is migrated in a later phase.
+   ========================================================================== */
+:root {
+  --bg-void: var(--ae-bg-deep);
+  --bg-deep: var(--ae-bg);
+  --surface-1: var(--ae-panel-veil);
+  --surface-2: var(--ae-panel-raised);
+  --surface-3: #2b2622;
+  --surface-solid: var(--ae-panel);
+
+  --line: var(--ae-border);
+  --line-strong: var(--ae-border-strong);
+
+  --text: var(--ae-text);
+  --text-dim: var(--ae-text-secondary);
+  --text-faint: var(--ae-text-muted);
+
+  --gold: var(--ae-accent);
+  --gold-deep: var(--ae-accent-deep);
+  --green: var(--ae-positive);
+  --red: var(--ae-critical);
+  --orange: var(--ae-warning);
+  --blue: var(--ae-neutral);
+  --cyan: #7fa8b8;
+  --purple: #9b7fa8;
+
+  --r-sm: var(--ae-radius-2);
+  --r-md: var(--ae-radius-3);
+  --r-lg: var(--ae-radius-4);
+  --r-xl: var(--ae-radius-4);
+
+  --shadow-sm: var(--ae-shadow-sm);
+  --shadow-md: var(--ae-shadow-md);
+  --shadow-lg: var(--ae-shadow-lg);
+  /* Deliberately no longer a glow. The old value ringed half the HUD in
+     luminous gold, which fought the map for attention. */
+  --glow-gold: var(--ae-shadow-md);
+
+  --font: var(--ae-font);
+  --font-pixel: var(--ae-font-pixel);
+
+  --ease: var(--ae-ease);
+  --fast: var(--ae-fast);
+  --med: var(--ae-med);
+}

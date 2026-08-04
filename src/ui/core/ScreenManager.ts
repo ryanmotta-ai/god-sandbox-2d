@@ -1,5 +1,6 @@
 import { clear, el } from './Dom';
 import { sound } from '../../core/SoundSynth';
+import { tooltip } from '../kit/Tooltip';
 import type { GameContext } from './GameContext';
 
 export type ScreenId =
@@ -23,7 +24,9 @@ export type ScreenId =
   | 'dynasty'
   | 'ecosystem'
   | 'techtree'
-  | 'infrastructure';
+  | 'infrastructure'
+  /** Development-only gallery of the design system. Reached from the debug panel. */
+  | 'ui-kit';
 
 /**
  * The vocabulary of cross-screen navigation.
@@ -174,6 +177,10 @@ export class ScreenManager {
 
   private render(): void {
     if (!this.ctx) return;
+    // Any open tooltip is anchored to an element that is about to be discarded,
+    // so it is dismissed before the DOM goes away rather than left hovering over
+    // a screen it no longer describes.
+    tooltip.hide();
     clear(this.root);
     this.currentNode = null;
 

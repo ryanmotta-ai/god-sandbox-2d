@@ -1,0 +1,961 @@
+/* ==========================================================================
+   AETHORIA — UI KIT
+   Styles for the components in `src/ui/kit/`. Every declaration reads from
+   `tokens.css`; there are no colour, spacing or radius literals below.
+
+   Namespaced `ae-` so this layer cannot collide with the pre-UI-0 stylesheet
+   while the two coexist. Screens are migrated one phase at a time, so both sets
+   of rules have to be loadable at once without fighting.
+   ========================================================================== */
+
+/* ============================ ICONS ============================
+   Pixel art is scaled by whole multiples of its 16px source grid and never
+   smoothed — a half-pixel of interpolation turns a 16×16 sprite to mush. */
+.ae-icon {
+  display: block;
+  flex: 0 0 auto;
+  image-rendering: pixelated;
+  -ms-interpolation-mode: nearest-neighbor;
+}
+.ae-icon-16 { width: 16px; height: 16px; }
+.ae-icon-32 { width: 32px; height: 32px; }
+.ae-icon-48 { width: 48px; height: 48px; }
+
+/* ============================ SCROLLING ============================
+   One scrolling idiom for the whole interface. Panels scroll their bodies; the
+   page itself does not scroll sideways, ever. */
+.ae-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ae-border-strong) transparent;
+}
+.ae-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.ae-scroll::-webkit-scrollbar-track { background: transparent; }
+.ae-scroll::-webkit-scrollbar-thumb {
+  background: var(--ae-border-strong);
+  border-radius: var(--ae-radius-1);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.ae-scroll::-webkit-scrollbar-thumb:hover { background: var(--ae-accent-deep); background-clip: content-box; }
+
+/* Wide content — tables, charts — scrolls inside its own box rather than
+   pushing the layout sideways. */
+.ae-scroll-x { overflow-x: auto; max-width: 100%; }
+
+/* ============================ PANEL ============================ */
+.ae-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--ae-panel);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-3);
+  box-shadow: var(--ae-shadow-sm);
+}
+.ae-panel-raised { background: var(--ae-panel-raised); box-shadow: var(--ae-shadow-md); }
+.ae-panel-sunken {
+  background: var(--ae-panel-sunken);
+  border-color: var(--ae-border-inset);
+  box-shadow: none;
+}
+
+.ae-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  padding: var(--ae-pad-head);
+  min-height: var(--ae-row-h-lg);
+  background: var(--ae-panel-sunken);
+  border-bottom: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-3) var(--ae-radius-3) 0 0;
+}
+.ae-panel-heading { min-width: 0; flex: 1 1 auto; }
+.ae-panel-title {
+  font-size: var(--ae-text-body);
+  font-weight: 700;
+  color: var(--ae-text);
+  letter-spacing: 0;
+  /* A long realm name truncates rather than wrapping the header onto a second
+     line and shifting everything below it. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-panel-sub {
+  margin-top: var(--ae-space-1);
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-muted);
+}
+.ae-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  flex: 0 0 auto;
+}
+.ae-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-5);
+  padding: var(--ae-pad-panel);
+  min-height: 0;
+}
+.ae-panel-body-flush { padding: 0; gap: 0; }
+
+/* ============================ SECTION ============================
+   A grouping inside a panel. A rule and a small-caps label — not another box.
+   Bordered containers nested three deep are how a dense screen stops being
+   readable. */
+.ae-section { display: flex; flex-direction: column; gap: var(--ae-space-4); min-width: 0; }
+.ae-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  padding-bottom: var(--ae-space-2);
+  border-bottom: 1px solid var(--ae-border-inset);
+}
+.ae-section-icon { opacity: 0.75; }
+.ae-section-title {
+  font-size: var(--ae-text-section-title);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-section);
+  color: var(--ae-text-secondary);
+  white-space: nowrap;
+}
+.ae-section-hint {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-muted);
+  margin-left: auto;
+}
+.ae-section-actions { display: flex; gap: var(--ae-space-3); margin-left: auto; }
+.ae-section-head .ae-section-hint + .ae-section-actions { margin-left: var(--ae-space-4); }
+.ae-section-body { display: flex; flex-direction: column; gap: var(--ae-space-4); min-width: 0; }
+
+/* ============================ DIVIDER ============================ */
+.ae-divider { height: 1px; background: var(--ae-border-inset); }
+.ae-divider-labelled {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  height: auto;
+  background: none;
+}
+.ae-divider-labelled::before,
+.ae-divider-labelled::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--ae-border-inset);
+}
+.ae-divider-label {
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-muted);
+}
+
+/* ============================ TABS ============================ */
+.ae-tabs {
+  display: flex;
+  gap: var(--ae-space-1);
+  padding: var(--ae-space-1);
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-3);
+  align-self: flex-start;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.ae-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  height: var(--ae-control-h);
+  padding: 0 var(--ae-space-5);
+  border: none;
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ae-fast), color var(--ae-fast);
+}
+.ae-tab:hover:not(:disabled) { color: var(--ae-text); background: rgba(214, 197, 168, 0.05); }
+.ae-tab:disabled { opacity: 0.4; cursor: default; }
+.ae-tab-active,
+.ae-tab-active:hover {
+  background: var(--ae-panel-raised);
+  color: var(--ae-accent-bright);
+  /* An inset bronze edge marks the active tab. An outer glow would be the
+     brightest thing on a screen whose subject is the map. */
+  box-shadow: var(--ae-edge-accent);
+}
+.ae-tab-icon { opacity: 0.8; }
+.ae-tab-active .ae-tab-icon { opacity: 1; }
+.ae-tab-badge {
+  padding: 0 var(--ae-space-3);
+  border-radius: var(--ae-radius-1);
+  background: rgba(214, 197, 168, 0.1);
+  color: var(--ae-text-secondary);
+  font-size: var(--ae-text-meta);
+  font-variant-numeric: tabular-nums;
+}
+.ae-tab-active .ae-tab-badge { background: var(--ae-accent-fill); color: var(--ae-accent-bright); }
+
+/* ============================ SCREEN SHELL ============================ */
+.ae-screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-6);
+  width: 100%;
+  max-width: var(--ae-screen-max);
+  /* The shell owns the height so its body is the one scrolling region. */
+  height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+}
+.ae-screen-narrow { max-width: var(--ae-screen-max-narrow); }
+.ae-screen-wide { max-width: none; }
+
+.ae-screen-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-5);
+  padding-bottom: var(--ae-space-5);
+  border-bottom: 1px solid var(--ae-border);
+  flex: 0 0 auto;
+}
+.ae-screen-icon { flex: 0 0 auto; }
+.ae-screen-heading { flex: 1 1 auto; min-width: 0; }
+.ae-screen-title {
+  font-size: var(--ae-text-screen-title);
+  font-weight: 800;
+  letter-spacing: var(--ae-tracking-title);
+  color: var(--ae-text);
+}
+.ae-screen-sub {
+  margin-top: var(--ae-space-2);
+  font-size: var(--ae-text-secondary-size);
+  color: var(--ae-text-secondary);
+  max-width: 68ch;
+}
+.ae-screen-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.ae-screen-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--ae-control-h);
+  height: var(--ae-control-h);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel);
+  cursor: pointer;
+  transition: background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-screen-close:hover { background: var(--ae-panel-raised); border-color: var(--ae-border-strong); }
+
+.ae-screen-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-6);
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Room for the scrollbar so content does not shift when one appears. */
+  padding-right: var(--ae-space-2);
+}
+
+/* ============================ BUTTON ============================ */
+.ae-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ae-space-4);
+  height: var(--ae-control-h);
+  padding: 0 var(--ae-space-5);
+  border: 1px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-raised);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ae-fast), border-color var(--ae-fast), color var(--ae-fast);
+}
+.ae-btn:hover:not(:disabled) { background: #2b2622; border-color: var(--ae-accent-line); }
+.ae-btn:active:not(:disabled) { background: var(--ae-panel-sunken); }
+.ae-btn:disabled { opacity: 0.42; cursor: default; }
+.ae-btn-sm { height: var(--ae-control-h-sm); padding: 0 var(--ae-space-4); font-size: var(--ae-text-meta); }
+.ae-btn-block { width: 100%; }
+
+.ae-btn-primary {
+  background: var(--ae-accent-deep);
+  border-color: var(--ae-accent);
+  color: var(--ae-text);
+}
+.ae-btn-primary:hover:not(:disabled) { background: #9c7935; border-color: var(--ae-accent-bright); }
+.ae-btn-ghost { background: transparent; border-color: transparent; color: var(--ae-text-secondary); }
+.ae-btn-ghost:hover:not(:disabled) { background: rgba(214, 197, 168, 0.06); color: var(--ae-text); border-color: var(--ae-border); }
+.ae-btn-danger { background: transparent; border-color: var(--ae-critical-line); color: var(--ae-critical); }
+.ae-btn-danger:hover:not(:disabled) { background: var(--ae-critical-fill); border-color: var(--ae-critical); }
+
+.ae-btn-key,
+.ae-tip-key {
+  padding: 0 var(--ae-space-2);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-1);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text-muted);
+  font-family: var(--ae-font-pixel);
+  font-size: 0.625rem;
+  line-height: 1.5;
+}
+
+/* ============================ ICON BUTTON ============================ */
+.ae-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ae-control-h);
+  height: var(--ae-control-h);
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-icon-btn:hover:not(:disabled) { background: rgba(214, 197, 168, 0.07); border-color: var(--ae-border); }
+.ae-icon-btn:disabled { opacity: 0.4; cursor: default; }
+.ae-icon-btn-sm { width: var(--ae-control-h-sm); height: var(--ae-control-h-sm); }
+.ae-icon-btn-secondary { background: var(--ae-panel-raised); border-color: var(--ae-border-strong); }
+.ae-icon-btn-active {
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+  box-shadow: var(--ae-edge-accent);
+}
+
+/* Focus is drawn once, here, for everything interactive in the kit. */
+.ae-btn:focus-visible,
+.ae-icon-btn:focus-visible,
+.ae-tab:focus-visible,
+.ae-filter:focus-visible,
+.ae-row-live:focus-visible,
+.ae-object-live:focus-visible,
+.ae-table-row-live:focus-visible,
+.ae-screen-close:focus-visible,
+.ae-stat-live:focus-visible {
+  outline: none;
+  box-shadow: var(--ae-edge-focus);
+}
+
+/* ============================ SEARCH ============================ */
+.ae-search {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  height: var(--ae-control-h);
+  padding: 0 var(--ae-space-4);
+  /* Flexes instead of pinning a width, so the same field works in a drawer
+     header and across a full screen. */
+  width: clamp(140px, 20vw, 260px);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  transition: border-color var(--ae-fast);
+}
+.ae-search:focus-within { border-color: var(--ae-accent-line); box-shadow: var(--ae-edge-focus); }
+.ae-search-icon { opacity: 0.55; }
+.ae-search-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-secondary-size);
+  outline: none;
+}
+.ae-search-field::placeholder { color: var(--ae-text-muted); }
+.ae-search-field::-webkit-search-cancel-button { filter: grayscale(1) opacity(0.5); }
+
+/* ============================ FILTERS ============================ */
+.ae-filters { display: flex; flex-wrap: wrap; gap: var(--ae-space-3); }
+.ae-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  height: var(--ae-control-h-sm);
+  padding: 0 var(--ae-space-4);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ae-fast), border-color var(--ae-fast), color var(--ae-fast);
+}
+.ae-filter:hover { color: var(--ae-text); border-color: var(--ae-border-strong); }
+.ae-filter-active {
+  /* Falls back to bronze when the filter carries no status of its own. */
+  color: var(--ae-filter-accent, var(--ae-accent-bright));
+  border-color: currentColor;
+  background: rgba(214, 197, 168, 0.06);
+}
+.ae-filter-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--ae-text-muted);
+  padding-left: var(--ae-space-2);
+  border-left: 1px solid var(--ae-border);
+}
+.ae-filter-active .ae-filter-count { color: inherit; border-color: currentColor; }
+
+/* ============================ STAT ============================ */
+.ae-stat-grid {
+  display: grid;
+  /* Reflows by available width instead of a fixed column count — the same block
+     has to work in a 280px drawer and across a 1180px screen. */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--ae-space-4);
+}
+.ae-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  padding: var(--ae-space-4) var(--ae-space-5);
+  min-width: 0;
+  border: 1px solid var(--ae-border);
+  border-left: 2px solid var(--ae-realm);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  text-align: left;
+  font-family: var(--ae-font);
+}
+.ae-stat-live { cursor: pointer; transition: background var(--ae-fast), border-color var(--ae-fast); }
+.ae-stat-live:hover { background: var(--ae-panel-raised); border-color: var(--ae-border-strong); }
+.ae-stat-positive { border-left-color: var(--ae-positive); }
+.ae-stat-neutral { border-left-color: var(--ae-neutral); }
+.ae-stat-warning { border-left-color: var(--ae-warning); }
+.ae-stat-critical { border-left-color: var(--ae-critical); }
+
+.ae-stat-top { display: flex; align-items: center; gap: var(--ae-space-3); min-width: 0; }
+.ae-stat-icon { opacity: 0.7; }
+.ae-stat-label {
+  font-size: var(--ae-text-meta);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-stat-figure { display: flex; align-items: baseline; gap: var(--ae-space-2); }
+.ae-stat-value {
+  font-size: var(--ae-text-value-primary);
+  font-weight: 700;
+  color: var(--ae-text);
+  /* Tabular figures: a column of these has to line up digit for digit. */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+.ae-stat-unit { font-size: var(--ae-text-meta); color: var(--ae-text-muted); font-weight: 600; }
+.ae-stat-meta { font-size: var(--ae-text-meta); color: var(--ae-text-muted); }
+
+/* ============================ ROWS ============================ */
+.ae-row-list { display: flex; flex-direction: column; }
+.ae-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  min-height: var(--ae-row-h);
+  padding: 0 var(--ae-space-2);
+  border-bottom: 1px solid var(--ae-border-inset);
+  font-size: var(--ae-text-secondary-size);
+}
+.ae-row:last-child { border-bottom: none; }
+.ae-row-icon { opacity: 0.7; }
+.ae-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ae-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Values share a right edge across the whole stack. */
+.ae-row-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ae-space-2);
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+.ae-row-figure {
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+}
+.ae-row-unit { font-size: var(--ae-text-meta); color: var(--ae-text-muted); }
+.ae-row-arrow { flex: 0 0 auto; color: var(--ae-text-muted); font-weight: 700; }
+
+.ae-row-live { cursor: pointer; transition: background var(--ae-fast); }
+.ae-row-live:hover { background: var(--ae-accent-fill); }
+.ae-row-live:hover .ae-row-arrow,
+.ae-row-live:hover .ae-row-label { color: var(--ae-accent-bright); }
+
+/* Where a cross-reference dropped the player, so the row they asked for is the
+   row they see. */
+.ae-row-focused {
+  background: var(--ae-accent-fill);
+  box-shadow: inset 2px 0 0 var(--ae-accent);
+}
+
+/* ============================ TREND ============================ */
+.ae-trend {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ae-space-2);
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ae-trend-arrow { font-size: 0.5625rem; line-height: 1; }
+.ae-trend-period { font-weight: 500; color: var(--ae-text-muted); }
+.ae-trend-compact { font-size: 0.625rem; }
+/* Flat readings are never news, whatever the sentiment. */
+.ae-trend-flat { color: var(--ae-text-muted) !important; }
+
+/* ============================ PROGRESS ============================ */
+.ae-progress { display: flex; flex-direction: column; gap: var(--ae-space-2); min-width: 0; }
+.ae-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ae-space-4);
+  font-size: var(--ae-text-meta);
+}
+.ae-progress-label {
+  color: var(--ae-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-progress-value { font-weight: 700; color: var(--ae-text); font-variant-numeric: tabular-nums; }
+.ae-progress-track {
+  position: relative;
+  height: 6px;
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border-inset);
+  border-radius: var(--ae-radius-1);
+  overflow: hidden;
+}
+.ae-progress-sm .ae-progress-track { height: 4px; }
+.ae-progress-fill {
+  height: 100%;
+  border-radius: var(--ae-radius-1) 0 0 var(--ae-radius-1);
+  transition: width var(--ae-med);
+}
+/* A reference mark on the track: a target, a threshold, last year's level. */
+.ae-progress-marker {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ae-text);
+  opacity: 0.55;
+}
+
+/* ============================ BADGE ============================ */
+.ae-badge-row { display: flex; flex-wrap: wrap; gap: var(--ae-space-3); }
+.ae-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  height: var(--ae-control-h-sm);
+  padding: 0 var(--ae-space-4);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  letter-spacing: var(--ae-tracking-meta);
+  white-space: nowrap;
+}
+.ae-badge-sm { height: 18px; padding: 0 var(--ae-space-3); }
+.ae-badge-icon { opacity: 0.9; }
+
+/* ============================ TABLE ============================ */
+.ae-table {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-3);
+  background: var(--ae-panel);
+  overflow: hidden;
+}
+.ae-table-head {
+  display: grid;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-3) var(--ae-space-5);
+  background: var(--ae-panel-sunken);
+  border-bottom: 1px solid var(--ae-border);
+}
+.ae-table-th {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-muted);
+  text-align: left;
+}
+.ae-table-th-sortable { cursor: pointer; transition: color var(--ae-fast); }
+.ae-table-th-sortable:hover { color: var(--ae-text-secondary); }
+.ae-table-th-active { color: var(--ae-accent-bright); }
+.ae-table-sort { font-size: 0.5rem; line-height: 1; }
+
+.ae-table-body { display: flex; flex-direction: column; }
+.ae-table-row {
+  display: grid;
+  gap: var(--ae-space-4);
+  align-items: center;
+  min-height: var(--ae-row-h-lg);
+  padding: 0 var(--ae-space-5);
+  border: none;
+  border-bottom: 1px solid var(--ae-border-inset);
+  background: transparent;
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-secondary-size);
+  text-align: left;
+}
+.ae-table-row:last-child { border-bottom: none; }
+.ae-table-row-live { cursor: pointer; transition: background var(--ae-fast); }
+.ae-table-row-live:hover { background: var(--ae-accent-fill); }
+.ae-table-td {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Numeric columns right-align with tabular figures. That alignment is the whole
+   reason a table beats a stack of rows. */
+.ae-align-right { justify-content: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
+.ae-table-th.ae-align-right { justify-content: flex-end; }
+
+/* A status on a row is drawn as an edge, not a fill — a table of coloured
+   backgrounds is unreadable. */
+.ae-table-row-warning { box-shadow: inset 2px 0 0 var(--ae-warning); }
+.ae-table-row-critical { box-shadow: inset 2px 0 0 var(--ae-critical); }
+.ae-table-row-positive { box-shadow: inset 2px 0 0 var(--ae-positive); }
+.ae-table-row-neutral { box-shadow: inset 2px 0 0 var(--ae-neutral); }
+
+/* ============================ OBJECT LINK ============================ */
+.ae-object {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid transparent;
+  background: none;
+  padding: 0;
+  font-family: var(--ae-font);
+  font-size: inherit;
+  color: var(--ae-text);
+  text-align: left;
+  vertical-align: baseline;
+}
+.ae-object-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-object-qualifier {
+  font-size: var(--ae-text-meta);
+  font-weight: 500;
+  color: var(--ae-text-muted);
+  white-space: nowrap;
+}
+.ae-object-status {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--ae-radius-1);
+}
+
+/* A live link is underlined on the diagonal in realm colour. A reference with no
+   destination yet is styled but inert — it must not look like a button that
+   does nothing when clicked. */
+.ae-object-live {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--ae-realm) 45%, transparent);
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  transition: color var(--ae-fast);
+}
+.ae-object-live:hover { color: var(--ae-realm); text-decoration-color: var(--ae-realm); }
+.ae-object-static { cursor: default; }
+.ae-object-static .ae-object-name { color: var(--ae-text-secondary); }
+
+.ae-object-chip {
+  height: var(--ae-control-h-sm);
+  padding: 0 var(--ae-space-4);
+  border-color: var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  font-size: var(--ae-text-secondary-size);
+  text-decoration: none;
+}
+.ae-object-chip.ae-object-live:hover {
+  border-color: var(--ae-realm-line);
+  background: var(--ae-realm-fill);
+  text-decoration: none;
+}
+
+/* ============================ EMPTY STATE ============================ */
+.ae-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-9) var(--ae-space-7);
+  text-align: center;
+}
+.ae-empty-compact { padding: var(--ae-space-6) var(--ae-space-5); }
+.ae-empty-icon { opacity: 0.4; }
+.ae-empty-title { font-size: var(--ae-text-body); font-weight: 700; color: var(--ae-text-secondary); }
+.ae-empty-hint {
+  font-size: var(--ae-text-secondary-size);
+  color: var(--ae-text-muted);
+  max-width: 42ch;
+  line-height: 1.55;
+}
+
+/* ============================ TOOLTIP ============================
+   Dark parchment, above every other layer, and never able to intercept a
+   pointer — the map underneath stays clickable through it. */
+.ae-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--ae-z-tooltip);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-3);
+  width: max-content;
+  max-width: var(--ae-tooltip-max);
+  padding: var(--ae-space-4) var(--ae-space-5);
+  background: var(--ae-parchment);
+  border: 1px solid var(--ae-border-strong);
+  border-left: 2px solid var(--ae-tip-accent, var(--ae-accent));
+  border-radius: var(--ae-radius-2);
+  box-shadow: var(--ae-shadow-lg);
+  color: var(--ae-parchment-ink);
+  font-family: var(--ae-font);
+  /* No entrance animation. A tooltip that fades in is a tooltip that arrives
+     after the player has already moved on. */
+  will-change: transform;
+}
+.ae-tooltip.hidden { display: none; }
+
+.ae-tip-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ae-space-3);
+}
+.ae-tip-icon { align-self: center; }
+.ae-tip-title {
+  flex: 1 1 auto;
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-tip-accent, var(--ae-accent-bright));
+}
+.ae-tip-value {
+  flex: 0 0 auto;
+  font-size: var(--ae-text-body);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ae-parchment-ink);
+}
+.ae-tip-desc {
+  font-size: var(--ae-text-meta);
+  line-height: 1.55;
+  color: var(--ae-text-secondary);
+}
+.ae-tip-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-1);
+  padding-top: var(--ae-space-3);
+  border-top: 1px solid var(--ae-border-inset);
+}
+.ae-tip-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ae-space-5);
+  font-size: var(--ae-text-meta);
+}
+.ae-tip-row-label { color: var(--ae-text-secondary); }
+.ae-tip-row-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ae-tip-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ae-space-4);
+  padding-top: var(--ae-space-3);
+  border-top: 1px solid var(--ae-border-inset);
+}
+.ae-tip-note { font-size: var(--ae-text-meta); color: var(--ae-text-muted); font-style: italic; }
+.ae-tip-foot .ae-tip-key { margin-left: auto; }
+
+/* ============================ RESPONSIVE ============================
+   Panels flex between a floor and a ceiling rather than pinning one width. Below
+   the narrow breakpoint the kit gives up horizontal room first — tab strips
+   scroll instead of wrapping into three rows, stat grids drop to two columns —
+   because vertical space is what a map-first interface can least afford. */
+@media (max-width: 1100px) {
+  :root { --ae-side-max: 320px; }
+}
+@media (max-width: 860px) {
+  :root {
+    --ae-side-min: 240px;
+    --ae-side-max: 280px;
+  }
+  .ae-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    align-self: stretch;
+  }
+  .ae-tabs::-webkit-scrollbar { display: none; }
+  .ae-stat-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+  .ae-screen-head { flex-wrap: wrap; }
+  .ae-screen-actions { width: 100%; justify-content: flex-start; }
+}
+@media (max-width: 640px) {
+  .ae-screen { gap: var(--ae-space-5); }
+  .ae-tab-label { display: none; }
+  .ae-tab { padding: 0 var(--ae-space-4); }
+  /* A label-less tab strip is unusable without its icons, so any tab that had
+     no icon keeps its text. */
+  .ae-tab:not(:has(.ae-tab-icon)) .ae-tab-label { display: inline; }
+}
+
+/* Respect the platform's motion preference: every transition here is
+   decoration, and none of it carries meaning. */
+@media (prefers-reduced-motion: reduce) {
+  .ae-btn, .ae-icon-btn, .ae-tab, .ae-filter, .ae-row-live,
+  .ae-object-live, .ae-table-row-live, .ae-progress-fill,
+  .ae-stat-live, .ae-search, .ae-screen-close {
+    transition: none;
+  }
+}
+
+/* ============================ UI KIT GALLERY ============================
+   Layout for the development gallery in `screens/UIKitScreen.ts`. Scoped to that
+   screen; nothing in the game uses these. */
+.kit-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--ae-space-4);
+}
+.kit-swatch {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  min-width: 0;
+}
+.kit-swatch-chip {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border: 1px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-1);
+}
+.kit-swatch-name {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.kit-swatch-var {
+  margin-left: auto;
+  font-family: var(--ae-font-pixel);
+  font-size: 0.5625rem;
+  color: var(--ae-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kit-type { display: flex; flex-direction: column; gap: var(--ae-space-4); }
+
+.kit-icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: var(--ae-space-4);
+}
+.kit-icon-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ae-space-3);
+  padding: var(--ae-space-4) var(--ae-space-2);
+  border: 1px solid var(--ae-border-inset);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  min-width: 0;
+}
+.kit-icon-name {
+  font-size: 0.625rem;
+  color: var(--ae-text-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A missing icon is called out here, since this is the screen where someone
+   would notice it. */
+.kit-icon-cell:has([data-icon-missing]) { border-color: var(--ae-warning-line); }
+
+.kit-note {
+  font-size: var(--ae-text-secondary-size);
+  line-height: 1.6;
+  color: var(--ae-text-secondary);
+  max-width: 78ch;
+}

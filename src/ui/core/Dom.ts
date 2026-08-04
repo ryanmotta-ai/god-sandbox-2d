@@ -1,8 +1,18 @@
 /**
  * Minimal DOM building helpers used across every screen.
  * Keeps screen code declarative instead of a soup of innerHTML strings.
+ *
+ * `el` / `append` / `clear` are the foundation the whole UI is built on and are
+ * unchanged. The component helpers below (`button`, `emptyState`, …) are the
+ * pre-UI-0 generation: they keep their signatures and their CSS classes so the
+ * twenty existing screens continue to work untouched, but they now render their
+ * icons through the pixel-art vocabulary and can carry a real tooltip.
+ *
+ * New UI should import from `../kit` instead. These stay until the last screen
+ * has been migrated.
  */
-import { PixelIcons } from '../../renderer/PixelIcons';
+import { icon as pixelIcon, hasIcon } from '../kit/Icon';
+import { withTooltip, TooltipSource } from '../kit/Tooltip';
 
 export type Child = Node | string | number | null | undefined | false;
 
@@ -12,7 +22,8 @@ export interface ElProps {
   text?: string;
   html?: string;
   title?: string;
-  style?: Partial<CSSStyleDeclaration> | string;
+  /** Inline styles. Keys beginning `--` are set as custom properties. */
+  style?: (Partial<CSSStyleDeclaration> & Record<`--${string}`, string>) | string;
   dataset?: Record<string, string>;
   attrs?: Record<string, string | number | boolean>;
   on?: Record<string, (ev: any) => void>;
@@ -34,7 +45,14 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (typeof props.style === 'string') {
     node.setAttribute('style', props.style);
   } else if (props.style) {
-    Object.assign(node.style, props.style);
+    for (const [key, value] of Object.entries(props.style)) {
+      if (value === undefined || value === null) continue;
+      // Custom properties have to go through setProperty — assigning them onto
+      // `style` is silently ignored, which made every `--ae-*` override handed
+      // in via `style` disappear without an error.
+      if (key.startsWith('--')) node.style.setProperty(key, String(value));
+      else (node.style as any)[key] = value;
+    }
   }
 
   if (props.dataset) {
@@ -72,10 +90,11 @@ export function clear(node: HTMLElement): void {
 /**
  * Standard app button. `variant` maps to the CSS button styles.
  *
- * `pixelIcon` names an icon from the game's own pixel-art generator and wins
- * over `icon`, which is a plain glyph. The two are kept separate so a screen
- * that has been moved onto real artwork cannot silently fall back to a
- * system-font emoji that renders differently on every machine.
+ * `pixelIcon` names an icon from the game's own pixel-art generator. `icon`
+ * used to be a plain glyph and is now resolved through the same vocabulary, so a
+ * caller that still passes `'⚔️'` gets the game's crossed-swords sprite rather
+ * than whatever the system font decides that emoji looks like today. A glyph
+ * with no artwork behind it is still drawn as text, so nothing disappears.
  */
 export function button(
   label: string,
@@ -87,30 +106,41 @@ export function button(
     hint?: string;
     class?: string;
     title?: string;
+    /** Rich hover panel. Prefer this over `title`, which the browser shows a
+     *  second late and styles however it likes. */
+    tooltip?: TooltipSource;
   } = {}
 ): HTMLButtonElement {
   const variant = opts.variant ?? 'ghost';
   const children: Child[] = [];
-  if (opts.pixelIcon) {
-    children.push(el('img', {
-      class: 'btn-icon btn-icon-pixel',
-      attrs: { src: PixelIcons.getIconUrl(opts.pixelIcon), alt: '', 'aria-hidden': 'true' }
-    }));
-  } else if (opts.icon) {
-    children.push(el('span', { class: 'btn-icon', text: opts.icon }));
+  const iconName = opts.pixelIcon ?? opts.icon;
+
+  if (iconName) {
+    children.push(
+      hasIcon(iconName)
+        ? pixelIcon(iconName, { size: 16, class: 'btn-icon btn-icon-pixel' })
+        : el('span', { class: 'btn-icon', text: iconName })
+    );
   }
   children.push(el('span', { class: 'btn-label', text: label }));
   if (opts.hint) children.push(el('kbd', { class: 'btn-hint', text: opts.hint }));
 
-  return el(
+  const node = el(
     'button',
     {
       class: `btn btn-${variant}${opts.class ? ' ' + opts.class : ''}`,
-      title: opts.title ?? '',
+      // Only kept when there is no real tooltip — two hover explanations for one
+      // button is worse than either alone.
+      title: opts.tooltip ? '' : (opts.title ?? ''),
       on: { click: onClick }
     },
     children
   );
+
+  const tip = opts.tooltip ?? (opts.hint ? { title: label, description: opts.title, shortcut: opts.hint } : null);
+  if (tip) withTooltip(node, tip);
+
+  return node;
 }
 
 /** Titled section block used inside screens. */
@@ -182,9 +212,15 @@ export function badge(text: string, color?: string, extraClass = ''): HTMLElemen
   });
 }
 
+/**
+ * Empty state. `icon` is resolved through the pixel-art vocabulary, so the
+ * existing callers that pass a glyph now render real artwork at 32px.
+ */
 export function emptyState(icon: string, title: string, hint: string): HTMLElement {
   return el('div', { class: 'empty-state' }, [
-    el('div', { class: 'empty-icon', text: icon }),
+    el('div', { class: 'empty-icon' }, [
+      hasIcon(icon) ? pixelIcon(icon, { size: 32 }) : el('span', { text: icon })
+    ]),
     el('div', { class: 'empty-title', text: title }),
     el('div', { class: 'empty-hint', text: hint })
   ]);

@@ -48,6 +48,7 @@ import { DynastyScreen } from './ui/screens/DynastyScreen';
 import { EcosystemScreen } from './ui/screens/EcosystemScreen';
 import { TechTreeScreen } from './ui/screens/TechTreeScreen';
 import { InfrastructureScreen } from './ui/screens/InfrastructureScreen';
+import { UIKitScreen } from './ui/screens/UIKitScreen';
 
 type AppState = 'menu' | 'loading' | 'playing';
 
@@ -168,6 +169,9 @@ class AethoriaGame implements GameContext {
     this.screens.register(new EcosystemScreen());
     this.screens.register(new TechTreeScreen());
     this.screens.register(new InfrastructureScreen());
+    // Development gallery for the UI kit. Not on any navigation path — opened
+    // from the debug panel.
+    this.screens.register(new UIKitScreen());
   }
 
   // ============================ WORLD LIFECYCLE ============================

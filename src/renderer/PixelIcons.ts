@@ -357,11 +357,303 @@ export class PixelIcons {
         break;
       }
 
+      // ===================== CIVIC & PEOPLE =====================
+      case 'person':
+      case '👤': {
+        // A citizen, drawn as a bust: hooded head over shoulders.
+        this.rect(ctx, 5, 1, 6, 2, '#4a3728');   // Hood
+        this.rect(ctx, 5, 3, 1, 3, '#4a3728');
+        this.rect(ctx, 10, 3, 1, 3, '#4a3728');
+        this.rect(ctx, 6, 3, 4, 4, '#c99a6e');   // Face
+        this.px(ctx, 7, 4, '#2b1d12');           // Eyes
+        this.px(ctx, 9, 4, '#2b1d12');
+        this.rect(ctx, 6, 7, 4, 1, '#a87d55');   // Neck in shadow
+        this.rect(ctx, 3, 8, 10, 7, '#7a6a52');  // Shoulders
+        this.rect(ctx, 3, 8, 10, 1, '#94836a');  // Lit collar
+        this.rect(ctx, 7, 9, 2, 6, '#5e5140');   // Cloak seam
+        break;
+      }
+      case 'people':
+      case '👥': {
+        // Population: two citizens, the near one overlapping the far one.
+        this.rect(ctx, 8, 2, 5, 2, '#3d2e22');   // Far figure, set back
+        this.rect(ctx, 9, 4, 3, 3, '#a87d55');
+        this.rect(ctx, 7, 7, 7, 8, '#5e5140');
+        this.rect(ctx, 3, 3, 5, 2, '#4a3728');   // Near figure
+        this.rect(ctx, 3, 5, 1, 2, '#4a3728');
+        this.rect(ctx, 7, 5, 1, 2, '#4a3728');
+        this.rect(ctx, 4, 5, 3, 3, '#c99a6e');
+        this.px(ctx, 4, 6, '#2b1d12');
+        this.px(ctx, 6, 6, '#2b1d12');
+        this.rect(ctx, 1, 9, 8, 6, '#7a6a52');
+        this.rect(ctx, 1, 9, 8, 1, '#94836a');
+        break;
+      }
+      case 'city':
+      case '🏙': {
+        // A settlement seen in profile: towers behind a curtain wall.
+        this.rect(ctx, 2, 6, 3, 5, '#6b5c48');   // Left tower
+        this.rect(ctx, 2, 5, 3, 1, '#8a7860');
+        this.rect(ctx, 6, 3, 4, 8, '#7a6a52');   // Keep
+        this.rect(ctx, 6, 2, 4, 1, '#94836a');
+        this.rect(ctx, 7, 0, 2, 2, '#c9a153');   // Banner on the keep
+        this.rect(ctx, 11, 7, 3, 4, '#6b5c48');  // Right tower
+        this.rect(ctx, 11, 6, 3, 1, '#8a7860');
+        this.rect(ctx, 1, 11, 14, 4, '#5a4d3c'); // Curtain wall
+        this.rect(ctx, 1, 11, 14, 1, '#7a6a52');
+        this.rect(ctx, 3, 8, 1, 2, '#2b2318');   // Windows, lit at dusk
+        this.rect(ctx, 7, 5, 1, 2, '#d9a94e');
+        this.rect(ctx, 12, 9, 1, 1, '#d9a94e');
+        this.rect(ctx, 7, 12, 2, 3, '#2b2318');  // Gate
+        break;
+      }
+      case 'building':
+      case '🏠': {
+        // A single structure: pitched roof over a timbered front.
+        this.rect(ctx, 7, 1, 2, 1, '#8a4a35');   // Ridge
+        this.rect(ctx, 5, 2, 6, 1, '#8a4a35');
+        this.rect(ctx, 3, 3, 10, 2, '#a3583f');  // Roof
+        this.rect(ctx, 2, 5, 12, 1, '#7a4230');  // Eaves
+        this.rect(ctx, 3, 6, 10, 9, '#b8a184');  // Plaster
+        this.rect(ctx, 3, 6, 1, 9, '#6b5c48');   // Corner posts
+        this.rect(ctx, 12, 6, 1, 9, '#6b5c48');
+        this.rect(ctx, 4, 7, 3, 3, '#3d2e22');   // Window
+        this.rect(ctx, 5, 8, 1, 1, '#d9a94e');
+        this.rect(ctx, 9, 10, 3, 5, '#5a3a26');  // Door
+        break;
+      }
+
+      // ===================== TRADE & WEALTH =====================
+      case 'coin':
+      case '🪙':
+      case '💰': {
+        // A struck coin, seen face on.
+        this.rect(ctx, 5, 2, 6, 1, '#8a6a2f');   // Rim
+        this.rect(ctx, 3, 3, 10, 1, '#8a6a2f');
+        this.rect(ctx, 2, 4, 12, 8, '#8a6a2f');
+        this.rect(ctx, 3, 12, 10, 1, '#8a6a2f');
+        this.rect(ctx, 5, 13, 6, 1, '#8a6a2f');
+        this.rect(ctx, 4, 4, 8, 8, '#c9a153');   // Face
+        this.rect(ctx, 3, 5, 10, 6, '#c9a153');
+        this.rect(ctx, 4, 5, 2, 2, '#e2bd6d');   // Struck highlight
+        this.rect(ctx, 7, 5, 2, 6, '#7a5a25');   // Sigil
+        this.rect(ctx, 5, 7, 6, 2, '#7a5a25');
+        break;
+      }
+      case 'crate':
+      case '📦': {
+        // A trade good: a banded shipping crate.
+        this.rect(ctx, 2, 3, 12, 11, '#8a6a45');
+        this.rect(ctx, 2, 3, 12, 1, '#a88558');  // Lit lid
+        this.rect(ctx, 2, 13, 12, 1, '#5e4630');
+        this.rect(ctx, 2, 3, 1, 11, '#a88558');
+        this.rect(ctx, 13, 3, 1, 11, '#5e4630');
+        this.rect(ctx, 2, 7, 12, 2, '#5e4630');  // Bands
+        this.rect(ctx, 7, 3, 2, 11, '#5e4630');
+        this.px(ctx, 4, 5, '#a88558');           // Grain of the timber
+        this.px(ctx, 11, 11, '#a88558');
+        break;
+      }
+      case 'route':
+      case '🛣': {
+        // A trade route: a road running to the horizon between two waypoints.
+        this.rect(ctx, 6, 2, 4, 12, '#6b5c48');  // Roadbed, narrowing with distance
+        this.rect(ctx, 5, 8, 6, 6, '#7a6a52');
+        this.rect(ctx, 4, 12, 8, 3, '#7a6a52');
+        this.rect(ctx, 7, 3, 2, 2, '#c9a153');   // Centre line, dashed
+        this.rect(ctx, 7, 7, 2, 2, '#c9a153');
+        this.rect(ctx, 7, 11, 2, 3, '#c9a153');
+        this.rect(ctx, 2, 3, 3, 3, '#8a7860');   // Waypoint markers
+        this.rect(ctx, 11, 3, 3, 3, '#8a7860');
+        this.px(ctx, 3, 4, '#c9a153');
+        this.px(ctx, 12, 4, '#c9a153');
+        break;
+      }
+      case 'handshake':
+      case '🤝': {
+        // Diplomacy: two arms clasped across the middle.
+        this.rect(ctx, 1, 6, 5, 2, '#7a6a52');   // Left sleeve
+        this.rect(ctx, 10, 6, 5, 2, '#5e5140');  // Right sleeve
+        this.rect(ctx, 1, 8, 4, 2, '#94836a');
+        this.rect(ctx, 11, 8, 4, 2, '#6b5c48');
+        this.rect(ctx, 5, 7, 6, 3, '#c99a6e');   // The clasp
+        this.rect(ctx, 4, 8, 8, 3, '#c99a6e');
+        this.rect(ctx, 5, 8, 6, 1, '#e0b98f');   // Lit knuckles
+        this.px(ctx, 7, 10, '#a87d55');
+        this.px(ctx, 9, 10, '#a87d55');
+        break;
+      }
+
+      // ===================== RECORDS & KNOWLEDGE =====================
+      case 'scroll':
+      case '📜': {
+        // A chronicle entry: parchment with rolled ends.
+        this.rect(ctx, 3, 1, 10, 2, '#8a6a45');  // Upper roll
+        this.rect(ctx, 3, 13, 10, 2, '#8a6a45'); // Lower roll
+        this.rect(ctx, 3, 3, 10, 10, '#ddd0b2'); // Parchment
+        this.rect(ctx, 3, 3, 10, 1, '#efe4c8');
+        this.rect(ctx, 3, 12, 10, 1, '#c2b494');
+        this.rect(ctx, 5, 5, 6, 1, '#5e4630');   // Writing
+        this.rect(ctx, 5, 7, 7, 1, '#5e4630');
+        this.rect(ctx, 5, 9, 5, 1, '#5e4630');
+        this.px(ctx, 2, 1, '#5e4630');
+        this.px(ctx, 13, 14, '#5e4630');
+        break;
+      }
+      case 'calendar':
+      case '📅': {
+        // A dated page: binding rings above a month grid.
+        this.px(ctx, 4, 0, '#8a7860');           // Rings
+        this.px(ctx, 11, 0, '#8a7860');
+        this.rect(ctx, 2, 1, 12, 3, '#8a4a35');  // Header band
+        this.rect(ctx, 4, 1, 1, 2, '#c2b494');
+        this.rect(ctx, 11, 1, 1, 2, '#c2b494');
+        this.rect(ctx, 2, 4, 12, 11, '#ddd0b2'); // Page
+        this.rect(ctx, 2, 14, 12, 1, '#c2b494');
+        this.rect(ctx, 4, 6, 2, 2, '#5e4630');   // Day cells
+        this.rect(ctx, 7, 6, 2, 2, '#5e4630');
+        this.rect(ctx, 10, 6, 2, 2, '#5e4630');
+        this.rect(ctx, 4, 10, 2, 2, '#5e4630');
+        this.rect(ctx, 7, 10, 2, 2, '#c9a153');  // Today
+        this.rect(ctx, 10, 10, 2, 2, '#5e4630');
+        break;
+      }
+      case 'flask':
+      case '🧪': {
+        // Research: a stoppered flask, half full.
+        this.rect(ctx, 6, 0, 4, 2, '#8a6a45');   // Stopper
+        this.rect(ctx, 6, 2, 4, 3, '#b8c4c8');   // Neck
+        this.rect(ctx, 4, 5, 8, 2, '#b8c4c8');   // Shoulder
+        this.rect(ctx, 3, 7, 10, 8, '#b8c4c8');  // Body
+        this.rect(ctx, 4, 9, 8, 5, '#6f8fa8');   // Solution
+        this.rect(ctx, 4, 9, 8, 1, '#8fb0c4');   // Meniscus
+        this.rect(ctx, 4, 7, 1, 7, '#dce6ea');   // Glass highlight
+        this.px(ctx, 6, 11, '#8fb0c4');          // Bubbles
+        this.px(ctx, 9, 12, '#8fb0c4');
+        break;
+      }
+
+      case 'search':
+      case '🔍': {
+        // A brass magnifier. Search fields appear on every list screen, so this
+        // one earns real artwork rather than borrowing the gem sprite.
+        this.rect(ctx, 4, 1, 6, 1, '#8a6a2f');   // Rim
+        this.rect(ctx, 2, 2, 1, 1, '#8a6a2f'); this.rect(ctx, 11, 2, 1, 1, '#8a6a2f');
+        this.rect(ctx, 1, 3, 1, 5, '#8a6a2f'); this.rect(ctx, 12, 3, 1, 5, '#8a6a2f');
+        this.rect(ctx, 2, 8, 1, 1, '#8a6a2f'); this.rect(ctx, 11, 8, 1, 1, '#8a6a2f');
+        this.rect(ctx, 4, 9, 6, 1, '#8a6a2f');
+        this.rect(ctx, 3, 3, 8, 6, '#6f8fa8');   // Glass
+        this.rect(ctx, 4, 2, 6, 1, '#6f8fa8');
+        this.rect(ctx, 4, 3, 2, 2, '#aac6d4');   // Reflection
+        this.rect(ctx, 10, 10, 2, 2, '#8a6a2f'); // Handle
+        this.rect(ctx, 11, 11, 3, 3, '#5e4630');
+        this.rect(ctx, 13, 13, 2, 2, '#5e4630');
+        break;
+      }
+
+      // ===================== TIME CONTROLS =====================
+      case 'pause': {
+        this.rect(ctx, 3, 2, 4, 12, '#a79c89');
+        this.rect(ctx, 9, 2, 4, 12, '#a79c89');
+        this.rect(ctx, 3, 2, 4, 1, '#c9c0ae');
+        this.rect(ctx, 9, 2, 4, 1, '#c9c0ae');
+        break;
+      }
+      case 'play':
+      case '▶': {
+        // A solid triangle, stepped so the hypotenuse stays clean at 16px.
+        for (let i = 0; i < 6; i++) {
+          this.rect(ctx, 4 + i * 2, 2 + i, 2, 12 - i * 2, '#a79c89');
+        }
+        this.rect(ctx, 4, 2, 2, 12, '#c9c0ae');
+        break;
+      }
+      case 'forward':
+      case '⏩': {
+        for (let i = 0; i < 4; i++) {
+          this.rect(ctx, 1 + i * 2, 3 + i, 2, 10 - i * 2, '#a79c89');
+        }
+        for (let i = 0; i < 4; i++) {
+          this.rect(ctx, 9 + i * 2, 3 + i, 2, 10 - i * 2, '#c9a153');
+        }
+        break;
+      }
+      case 'step':
+      case '⏭':
+      case '⏭️': {
+        for (let i = 0; i < 4; i++) {
+          this.rect(ctx, 2 + i * 2, 3 + i, 2, 10 - i * 2, '#a79c89');
+        }
+        this.rect(ctx, 11, 2, 3, 12, '#c9a153');
+        break;
+      }
+      case 'snow':
+      case '❄':
+      case '❄️': {
+        // A six-point flake, kept axis-aligned so it survives the pixel grid.
+        this.rect(ctx, 7, 1, 2, 14, '#aac6d4');
+        this.rect(ctx, 1, 7, 14, 2, '#aac6d4');
+        this.px(ctx, 4, 4, '#dce6ea'); this.px(ctx, 11, 4, '#dce6ea');
+        this.px(ctx, 4, 11, '#dce6ea'); this.px(ctx, 11, 11, '#dce6ea');
+        this.px(ctx, 5, 5, '#aac6d4'); this.px(ctx, 10, 5, '#aac6d4');
+        this.px(ctx, 5, 10, '#aac6d4'); this.px(ctx, 10, 10, '#aac6d4');
+        this.rect(ctx, 6, 6, 4, 4, '#dce6ea');
+        break;
+      }
+
+      // ===================== INTERFACE =====================
+      case 'menu':
+      case '☰': {
+        // Three rules, weighted so the stack reads as a list rather than a grate.
+        this.rect(ctx, 2, 3, 12, 2, '#a79c89');
+        this.rect(ctx, 2, 7, 12, 2, '#a79c89');
+        this.rect(ctx, 2, 11, 12, 2, '#a79c89');
+        this.rect(ctx, 2, 3, 12, 1, '#c9c0ae');
+        this.rect(ctx, 2, 7, 12, 1, '#c9c0ae');
+        this.rect(ctx, 2, 11, 12, 1, '#c9c0ae');
+        break;
+      }
+      case 'warning':
+      case '⚠':
+      case '⚠️': {
+        // A cast-metal warning triangle.
+        this.rect(ctx, 7, 1, 2, 1, '#d98324');
+        this.rect(ctx, 6, 2, 4, 2, '#d98324');
+        this.rect(ctx, 5, 4, 6, 2, '#d98324');
+        this.rect(ctx, 4, 6, 8, 2, '#d98324');
+        this.rect(ctx, 3, 8, 10, 2, '#d98324');
+        this.rect(ctx, 2, 10, 12, 2, '#d98324');
+        this.rect(ctx, 1, 12, 14, 2, '#b8651a');
+        this.rect(ctx, 7, 4, 2, 6, '#2b2318');  // Bang
+        this.rect(ctx, 7, 11, 2, 2, '#2b2318');
+        break;
+      }
+      case 'close':
+      case '✕': {
+        // A cross, drawn on the diagonal so it stays crisp at 16px.
+        for (let i = 0; i < 8; i++) {
+          this.rect(ctx, 4 + i, 4 + i, 1, 1, '#a79c89');
+          this.rect(ctx, 4 + i, 5 + i, 1, 1, '#a79c89');
+          this.rect(ctx, 11 - i, 4 + i, 1, 1, '#a79c89');
+          this.rect(ctx, 11 - i, 5 + i, 1, 1, '#a79c89');
+        }
+        break;
+      }
+
       default: {
-        // Default generic pixel star icon fallback
-        this.rect(ctx, 6, 2, 4, 12, '#fbbf24');
-        this.rect(ctx, 2, 6, 12, 4, '#fbbf24');
-        this.rect(ctx, 7, 3, 2, 10, '#fef08a');
+        /**
+         * The consistent fallback.
+         *
+         * Deliberately quiet: a bronze lozenge that reads as "no icon yet"
+         * rather than the old bright gold star, which drew more attention than
+         * the icons it stood in for and made a missing asset look intentional.
+         */
+        this.rect(ctx, 7, 3, 2, 10, '#8a6a2f');
+        this.rect(ctx, 6, 4, 4, 8, '#8a6a2f');
+        this.rect(ctx, 5, 6, 6, 4, '#8a6a2f');
+        this.rect(ctx, 4, 7, 8, 2, '#8a6a2f');
+        this.rect(ctx, 7, 5, 2, 6, '#c9a153');
+        this.rect(ctx, 6, 7, 4, 2, '#c9a153');
         break;
       }
     }
