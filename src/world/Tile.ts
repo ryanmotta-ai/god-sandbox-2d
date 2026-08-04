@@ -43,6 +43,12 @@ export interface TileData {
   railDamage: number;
   /** Realm that laid the track. Null on abandoned rails. */
   railOwnerId: string | null;
+  /**
+   * Name of the great bridge carried on this tile, on every tile of its span.
+   * Null everywhere else — an ordinary crossing is not a landmark and does not
+   * get a name.
+   */
+  bridgeName: string | null;
 }
 
 export class Tile implements TileData {
@@ -67,6 +73,7 @@ export class Tile implements TileData {
   public railLevel: number = 0;
   public railDamage: number = 0;
   public railOwnerId: string | null = null;
+  public bridgeName: string | null = null;
   /** Renderer cache: static terrain surface color, validated against the fields that produce it. */
   public renderSurface: string | null = null;
   public renderSurfaceType: TerrainType = TerrainType.DEEP_OCEAN;

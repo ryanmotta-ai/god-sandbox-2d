@@ -5,7 +5,7 @@ import { SpeciesType } from '../src/entities/Species';
 import { TerrainType } from '../src/world/Biomes';
 import { rng } from '../src/core/Random';
 import { gradePenalty, roadGrade, crossingSpan, RELIEF_SCALE } from '../src/world/RoadTerrain';
-import { surveyRoad, layRoad, tileRoadCost, isSpanTile } from '../src/civ/RoadEngineering';
+import { surveyRoad, layRoad, tileRoadCost, isSpanTile, GREAT_SPAN } from '../src/civ/RoadEngineering';
 
 rng.setSeed(20260804);
 
@@ -231,6 +231,92 @@ function maxGradeOf(path: { x: number; y: number }[], map: TileMap): number {
   const cut = tileRoadCost(steep, steep.grid[6][5], 2, steep.grid[5][5]);
   const level = tileRoadCost(steep, steep.grid[4][5], 2, steep.grid[3][5]);
   assert.ok(cut.stone > level.stone * 2, 'cut-and-fill on a steep bench is not a rounding error');
+}
+
+// ============================================================
+// 9. A crossing wide enough to be a public work reports itself as one
+// ============================================================
+{
+  const map = flatMap(30);
+  // Water the full height of the map, GREAT_SPAN tiles wide: no ford, no way
+  // round, and the only route is the one that has to be paid for outright.
+  for (let y = 0; y < 30; y++) {
+    for (let x = 12; x < 12 + GREAT_SPAN; x++) map.grid[x][y].type = TerrainType.SHALLOW_WATER;
+  }
+  const city = cityWith('Bridgeport', 3, 15, 5000, 5000);
+  const survey = surveyRoad(map, 3, 15, 26, 15, 2);
+  assert.ok(survey.spanTiles >= GREAT_SPAN, `the crossing must be a great one, got ${survey.spanTiles}`);
+
+  const works = layRoad(city, map, survey, 2);
+  assert.equal(works.stoppedBy, 'complete', 'a very rich city finishes it');
+  assert.equal(works.greatCrossings.length, 1, 'exactly one public work was raised');
+  assert.equal(works.greatCrossings[0].span, GREAT_SPAN, 'and its span is the width of the water');
+  assert.ok(works.spent.stone > 200, `a great bridge costs more than any building, got ${works.spent.stone}`);
+
+  // Walking over it again is not a second opening.
+  const again = layRoad(city, map, surveyRoad(map, 3, 15, 26, 15, 2), 2);
+  assert.equal(again.greatCrossings.length, 0, 'an existing bridge is not re-inaugurated');
+}
+
+// ============================================================
+// 10. An ordinary crossing stays ordinary
+// ============================================================
+{
+  const map = flatMap(30);
+  for (let y = 0; y < 30; y++) {
+    for (let x = 12; x < 12 + (GREAT_SPAN - 2); x++) map.grid[x][y].type = TerrainType.SHALLOW_WATER;
+  }
+  const city = cityWith('Smalltown', 3, 15, 5000, 5000);
+  const works = layRoad(city, map, surveyRoad(map, 3, 15, 26, 15, 2), 2);
+  assert.ok(works.spansBuilt > 0, 'the bridge still went up');
+  assert.equal(works.greatCrossings.length, 0, 'but a short crossing is not a public work');
+
+  // Nor is a long one at the dirt grade — a timber trestle is not a monument.
+  const trail = flatMap(30);
+  for (let y = 0; y < 30; y++) {
+    for (let x = 12; x < 12 + GREAT_SPAN; x++) trail.grid[x][y].type = TerrainType.SHALLOW_WATER;
+  }
+  const village = cityWith('Trailhead', 3, 15, 5000, 5000);
+  const trailWorks = layRoad(village, trail, surveyRoad(trail, 3, 15, 26, 15, 1), 1);
+  assert.ok(trailWorks.spansBuilt > 0, 'the trestle went up');
+  assert.equal(trailWorks.greatCrossings.length, 0, 'a timber trestle is never a public work');
+}
+
+// ============================================================
+// 11. A road with no reason to turn does not turn
+// ============================================================
+{
+  // Featureless ground: every route of the same length costs the same, so
+  // nothing but the tie-break decides the shape of the road. A* used to
+  // mutate nodes already inside its heap, which broke the heap invariant and
+  // let a plainly worse route win; the result was roads that staircased
+  // across open country for no reason at all.
+  const map = flatMap(40);
+  const survey = surveyRoad(map, 4, 20, 35, 20, 2);
+  assert.ok(survey.path.length > 0, 'a route across open ground must exist');
+  assert.equal(survey.path.length, 32, `a straight run is 32 tiles, got ${survey.path.length}`);
+  const rows = new Set(survey.path.map(p => Math.floor(p.y)));
+  assert.equal(rows.size, 1, `the road should stay on one row, used ${[...rows].join(',')}`);
+}
+
+// ============================================================
+// 12. A river of even width is not crossed at the edge of the world
+// ============================================================
+{
+  // Off-map used to read as dry land, so the span measured at the border came
+  // out short and every river looked narrow there. A surveyor that believes
+  // it will walk a road to the map edge to cross.
+  const map = flatMap(40);
+  for (let y = 0; y < 40; y++) for (let x = 18; x <= 22; x++) map.grid[x][y].type = TerrainType.SHALLOW_WATER;
+  const survey = surveyRoad(map, 4, 20, 35, 20, 2);
+  assert.ok(survey.path.length > 0, 'a route across the river must exist');
+  assert.equal(survey.spanTiles, 5, `it crosses the river square, got ${survey.spanTiles} tiles of span`);
+
+  const wet = survey.path.filter(p => map.getTile(Math.floor(p.x), Math.floor(p.y))!.type === TerrainType.SHALLOW_WATER);
+  for (const p of wet) {
+    const y = Math.floor(p.y);
+    assert.ok(y > 2 && y < 37, `the crossing must not run to the map edge, found one at y=${y}`);
+  }
 }
 
 console.log('roads.test: all assertions passed');

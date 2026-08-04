@@ -515,6 +515,14 @@ class AethoriaGame implements GameContext {
       chronicle.log(this.sim.currentYear, 'kingdom', `The world enters the ${era}.`);
     });
 
+    events.on('greatBridgeOpened', (d: any) => {
+      if (!this.inGame) return;
+      // A celebration, not an emergency: no shake, and the camera stays where
+      // the player put it. `playMagic` is the closest thing to a fanfare.
+      this.toast(`${d.city.name} opens ${d.name} — ${d.span} spans of open water`, 'divine');
+      sound.playMagic();
+    });
+
     events.on('techUnlocked', (d: any) => {
       if (!this.inGame) return;
       this.toast(`${d.culture} discovers ${String(d.perk).replace('_', ' ')}`, 'success');

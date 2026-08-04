@@ -21,8 +21,17 @@ export type BridgeModel =
   | 'arch' // a single masonry arch
   | 'viaduct' // piers and arch rings, repeated across a wide reach
   | 'imperial' // dressed ashlar with a balustrade and end pillars
+  | 'grand' // the great bridge: towers, statues and banners, built once an age
   | 'truss' // riveted iron lattice
   | 'suspension'; // towers, main cable and hangers
+
+/**
+ * A crossing this wide is a public work rather than infrastructure, and gets
+ * the architecture to match. Kept in step with GREAT_SPAN in RoadEngineering,
+ * which is what decides whether the same crossing also gets a name and an
+ * opening ceremony.
+ */
+const GREAT_SPAN = 5;
 
 /** Where a slice sits in the crossing. */
 export type BridgeSlice = 'single' | 'approach' | 'span';
@@ -47,10 +56,15 @@ const END_PX = 8;
 export function bridgeModelFor(level: number, era: string, span: number, harshClimate: boolean): BridgeModel {
   const industrial = era === 'industrial' || era === 'modern';
   if (level >= 3) {
-    if (!industrial) return 'imperial';
+    // Before industry, the monumental crossing is a masonry one; after it, the
+    // suspension bridge *is* the monument, so it needs no separate grand form.
+    if (!industrial) return span >= GREAT_SPAN ? 'grand' : 'imperial';
     return span >= 3 ? 'suspension' : 'truss';
   }
-  if (level === 2) return span >= 3 ? 'viaduct' : 'arch';
+  if (level === 2) {
+    if (span >= GREAT_SPAN) return 'grand';
+    return span >= 3 ? 'viaduct' : 'arch';
+  }
   if (span <= 1) return 'stones';
   return harshClimate ? 'covered' : 'timber';
 }
@@ -313,6 +327,69 @@ const drawImperial: Draw = (ctx, slice) => {
 };
 
 /**
+ * The great bridge. Everything a viaduct has, built heavier and then decorated:
+ * paired piers with deep cutwaters, a statue on a plinth over every pier, a
+ * pierced balustrade between them, and a gatehouse tower with a banner where
+ * the road comes ashore. This is the one a realm builds once and names.
+ */
+const drawGrand: Draw = (ctx, slice) => {
+  // Arch rings, springing wide off the water either side of the deck.
+  r(ctx, 4, 0, 24, 5, STONE.dark);
+  r(ctx, 6, 1, 20, 3, STONE.joint);
+  r(ctx, 9, 1, 14, 1, STONE.face);
+  r(ctx, 4, 27, 24, 5, STONE.dark);
+  r(ctx, 6, 28, 20, 3, STONE.joint);
+  r(ctx, 9, 30, 14, 1, STONE.face);
+
+  // Paired piers, with a cutwater driven into the current on both noses.
+  for (const px of [0, 26]) {
+    r(ctx, px, 0, 6, 32, STONE.dark);
+    r(ctx, px, 2, 5, 28, STONE.joint);
+    r(ctx, px + 1, 5, 3, 9, STONE.face);
+    r(ctx, px + 1, 18, 3, 9, STONE.face);
+    r(ctx, px + 1, 6, 1, 6, STONE.lit);
+  }
+
+  r(ctx, 0, 6, 32, 20, STONE.joint); // the deck, broader than any other model
+  r(ctx, 0, 8, 32, 16, STONE.lit);
+  for (let x = 0; x < 32; x += 8) r(ctx, x, 8, 1, 16, STONE.joint);
+  r(ctx, 0, 16, 32, 1, STONE.joint);
+  r(ctx, 3, 9, 5, 3, STONE.pale);
+  r(ctx, 19, 19, 6, 3, STONE.pale);
+
+  // A pierced balustrade down both sides, under a heavy coping rail.
+  for (const by of [4, 24]) {
+    for (let x = 1; x < 32; x += 3) r(ctx, x, by, 2, 4, STONE.face);
+    r(ctx, 0, by === 4 ? 3 : 27, 32, 2, STONE.pale);
+    r(ctx, 0, by === 4 ? 2 : 29, 32, 1, STONE.dark);
+  }
+
+  if (slice === 'span') {
+    // Statues on plinths, one over each pier, facing the water.
+    for (const sy of [1, 27]) {
+      r(ctx, 13, sy, 6, 4, STONE.dark);
+      r(ctx, 14, sy, 4, 3, STONE.face);
+      r(ctx, 15, sy === 1 ? sy : sy + 1, 2, 2, STONE.pale);
+    }
+    r(ctx, 14, 14, 4, 4, STONE.face); // roundel at the crown of the bay
+    r(ctx, 15, 15, 2, 2, STONE.pale);
+  } else {
+    // The gatehouse: a tower each side of the road, with a banner flying.
+    for (const ty of [0, 22]) {
+      r(ctx, 0, ty, 10, 10, STONE.dark);
+      r(ctx, 0, ty + 1, 9, 8, STONE.face);
+      r(ctx, 1, ty + 2, 3, 5, STONE.lit);
+      for (let x = 0; x < 9; x += 3) r(ctx, x, ty, 2, 2, STONE.pale); // merlons
+    }
+    r(ctx, 2, 10, 3, 3, '#8c2f2f'); // banner
+    r(ctx, 2, 20, 3, 3, '#8c2f2f');
+    r(ctx, 4, 10, 1, 3, '#5e1c1c');
+    r(ctx, 4, 20, 1, 3, '#5e1c1c');
+    r(ctx, 0, 12, 4, 9, STONE.joint); // the abutment the towers stand on
+  }
+};
+
+/**
  * A riveted iron truss. The lattice down both sides is what carries the load
  * and what the eye reads: a road on a plate girder looks like a road, a road
  * inside a truss looks like industry.
@@ -384,6 +461,7 @@ const DRAW: Record<BridgeModel, Draw> = {
   arch: drawArch,
   viaduct: drawViaduct,
   imperial: drawImperial,
+  grand: drawGrand,
   truss: drawTruss,
   suspension: drawSuspension
 };
@@ -396,6 +474,7 @@ export const BRIDGE_HALF_WIDTH: Record<BridgeModel, number> = {
   arch: 0.44,
   viaduct: 0.47,
   imperial: 0.47,
+  grand: 0.54,
   truss: 0.46,
   suspension: 0.42
 };

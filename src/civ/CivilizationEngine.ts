@@ -819,6 +819,10 @@ export class CivilizationEngine {
    * out loud, because it explains the map the player is looking at.
    */
   private reportRoadWorks(city: City, works: RoadWorks, world: CivWorld, route: string): void {
+    for (const crossing of works.greatCrossings) {
+      this.openGreatBridge(city, crossing.tiles, crossing.span, works, world, route);
+    }
+    if (works.greatCrossings.length > 0) return; // the opening is the story
     if (works.spansBuilt > 0) {
       const stone = Math.round(works.spent.stone);
       const wood = Math.round(works.spent.wood);
@@ -834,6 +838,73 @@ export class CivilizationEngine {
         `${city.name} surveyed ${route} as far as the water's edge and stopped there: the crossing costs more than the city can quarry.`
       );
     }
+  }
+
+  /**
+   * Names and opens a great bridge.
+   *
+   * A crossing of five tiles or more at a hard grade is the largest single
+   * thing a settlement will ever build — more stone than a granary, a market
+   * and a smithy together — and history does not record works on that scale
+   * as line items. It records them as occasions: the bridge takes the name of
+   * the city or the ruler that paid for it, the name is carved onto the map,
+   * and the realm gets the standing that comes of having done something no
+   * neighbour has managed.
+   */
+  private openGreatBridge(
+    city: City,
+    tiles: { x: number; y: number; bridgeName: string | null }[],
+    span: number,
+    works: RoadWorks,
+    world: CivWorld,
+    route: string
+  ): void {
+    const kingdom = city.kingdomId ? world.kingdoms.get(city.kingdomId) : null;
+    const name = rng.pick([
+      `the Great Bridge of ${city.name}`,
+      `the ${city.name} Span`,
+      `${city.founderName}'s Crossing`,
+      kingdom ? `the ${kingdom.name} Bridge` : `the Long Bridge of ${city.name}`
+    ]);
+    for (const tile of tiles) tile.bridgeName = name;
+
+    const mid = tiles[Math.floor(tiles.length / 2)];
+    const stone = Math.round(works.spent.stone);
+    const wood = Math.round(works.spent.wood);
+
+    // A work like this is worth standing on. The realm's authority is visibly
+    // competent, and the city that paid for it is visibly rich.
+    city.prosperity = Math.min(1, city.prosperity + 0.07);
+    if (kingdom) {
+      kingdom.legitimacy = Math.min(1, kingdom.legitimacy + 0.04);
+      kingdom.economy.stability = Math.min(1, kingdom.economy.stability + 0.09);
+    }
+
+    chronicle.log(
+      world.year,
+      'wonder',
+      `${city.name} opened ${name}, carrying ${route} across ${span} spans of open water. ` +
+        `It consumed ${stone} stone and ${wood} timber, and the whole city came out to walk it.`,
+      {
+        title: name,
+        importance: 'legendary',
+        scope: kingdom ? 'kingdom' : 'city',
+        refs: [
+          { kind: 'city', id: city.id, name: city.name },
+          ...(kingdom ? [{ kind: 'kingdom' as const, id: kingdom.id, name: kingdom.name }] : [])
+        ],
+        tags: ['wonder', 'bridge', 'infrastructure'],
+        causes: [`${city.name} could not reach the far bank without spanning ${span} tiles of water.`],
+        consequences: [
+          'The crossing carries every cart that used to go the long way round.',
+          `${city.name} is visibly richer for it, and ${kingdom?.name ?? 'the realm'} visibly more capable.`
+        ],
+        data: { span, stone, wood, x: mid.x, y: mid.y }
+      }
+    );
+    events.emit('greatBridgeOpened', {
+      name, city, kingdom, span, stone, wood, x: mid.x, y: mid.y, year: world.year
+    });
   }
 
   /**

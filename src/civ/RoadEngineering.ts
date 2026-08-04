@@ -41,6 +41,14 @@ const SPAN_MATERIALS: Record<number, RoadBill> = {
   3: { stone: 34, wood: 8 } // imperial viaduct
 };
 
+/**
+ * A crossing this wide stops being infrastructure and becomes a public work.
+ * At the stone grade it costs upward of two hundred stone — more than any
+ * building in the game — so a realm builds at most a handful of them ever, and
+ * the one it does build is worth a name and a ceremony.
+ */
+export const GREAT_SPAN = 5;
+
 /** Deeper water and longer reaches need bigger piers, not just more of them. */
 function spanDifficulty(span: number): number {
   return 1 + 0.25 * Math.max(0, span - 1);
@@ -159,6 +167,11 @@ export interface RoadWorks {
   tilesAtGrade: number;
   /** Spans actually completed. */
   spansBuilt: number;
+  /**
+   * Crossings finished this year that are large enough to be public works.
+   * The engine turns each of these into a named bridge and an inauguration.
+   */
+  greatCrossings: { tiles: Tile[]; span: number }[];
   /** Materials genuinely taken out of the stockpile. */
   spent: RoadBill;
   /** Why the works stopped where they did. */
@@ -204,6 +217,7 @@ export function layRoad(
     tilesLaid: 0,
     tilesAtGrade: 0,
     spansBuilt: 0,
+    greatCrossings: [],
     spent: { stone: 0, wood: 0 },
     stoppedBy: 'complete',
     haltedAt: null
@@ -244,13 +258,21 @@ export function layRoad(
       pay(city, cost);
       works.spent.stone += cost.stone;
       works.spent.wood += cost.wood;
+      let raised = 0;
       for (const deck of crossing) {
         if (deck.roadLevel < level) {
           deck.roadLevel = level;
           works.spansBuilt++;
+          raised++;
         }
         works.tilesLaid++;
         works.tilesAtGrade++;
+      }
+      // A long crossing at a hard grade is the largest thing a settlement ever
+      // builds. Only report it when this year's works actually raised it —
+      // walking over a bridge somebody else already built is not an opening.
+      if (raised > 0 && level >= 2 && crossing.length >= GREAT_SPAN) {
+        works.greatCrossings.push({ tiles: crossing, span: crossing.length });
       }
       previous = crossing[crossing.length - 1] ?? previous;
       i = j - 1;

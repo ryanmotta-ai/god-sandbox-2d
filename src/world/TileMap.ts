@@ -343,7 +343,8 @@ export class TileMap {
           rd: t.roadDamage,
           rail: t.railLevel,
           raild: t.railDamage,
-          railo: t.railOwnerId
+          railo: t.railOwnerId,
+          bn: t.bridgeName
         });
       }
     }
@@ -383,6 +384,8 @@ export class TileMap {
       tile.railLevel = item.rail ?? 0;
       tile.railDamage = item.raild ?? 0;
       tile.railOwnerId = item.railo ?? null;
+      // Old saves predate named crossings; their bridges are simply anonymous.
+      tile.bridgeName = item.bn ?? null;
       this.grid[item.x][item.y] = tile;
     }
     this.dirtyTiles.clear();

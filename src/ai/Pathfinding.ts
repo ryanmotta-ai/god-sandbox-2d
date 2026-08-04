@@ -85,6 +85,23 @@ const WATER_CROSSING_PER_SPAN = 8;
 const TRAVEL_GRADE_DIVISOR = 22;
 
 /**
+ * What a change of direction costs, as a fraction of the step it is part of.
+ *
+ * Without this, two routes of equal terrain cost are equally good, and A*
+ * picks between them on heap order — so a road across flat ground, or one
+ * looking for a crossing on a river of uniform width, comes out as a drunken
+ * staircase. A surveyor does not change direction without a reason, and a
+ * sharp bend genuinely costs more to build and slows what travels it, so the
+ * penalty scales with how hard the turn is: nothing for straight on, a little
+ * for a 45-degree bend, more for a right angle.
+ *
+ * It is deliberately small against terrain costs of 1 to 3, so it only ever
+ * decides ties. It must never talk a road into climbing a hill to stay
+ * straight.
+ */
+const TURN_PENALTY = 0.16;
+
+/**
  * Road-level movement speed multiplier shared by every mover on the map —
  * citizens, fauna and caravans all travel faster on better roads.
  */
@@ -325,6 +342,9 @@ export class SimplePathfinder {
       h: number;
       f: number;
       parent: ANode | null;
+      /** Unit step that arrived here, so a change of direction can be priced. */
+      dx: number;
+      dy: number;
     }
 
     const key = (x: number, y: number) => `${x},${y}`;
@@ -412,7 +432,17 @@ export class SimplePathfinder {
 
     const openHeap = new MinHeap<ANode>((a, b) => a.f - b.f);
     const closedSet = new Set<string>();
-    const nodeMap = new Map<string, ANode>();
+    /**
+     * Best cost known to reach each tile. This used to be a map of node
+     * objects that were mutated in place and re-inserted when a cheaper route
+     * turned up — but mutating an entry already inside the heap changes its
+     * key without re-heapifying, which breaks the heap invariant, and a heap
+     * that no longer returns its minimum is not A* any more. It surfaced as
+     * routes that wandered twenty tiles off a straight line across flat
+     * ground. Entries are now immutable once queued: a better route inserts a
+     * fresh one, and the stale entry is skipped when it pops.
+     */
+    const bestCost = new Map<string, number>();
 
     const startNode: ANode = {
       x: sx,
@@ -420,11 +450,13 @@ export class SimplePathfinder {
       g: 0,
       h: heuristic(sx, sy, tx, ty),
       f: heuristic(sx, sy, tx, ty),
-      parent: null
+      parent: null,
+      dx: 0,
+      dy: 0
     };
 
     openHeap.insert(startNode);
-    nodeMap.set(key(sx, sy), startNode);
+    bestCost.set(key(sx, sy), 0);
 
     const dirs = [
       [1, 0], [-1, 0], [0, 1], [0, -1],
@@ -436,6 +468,8 @@ export class SimplePathfinder {
       count++;
       const current = openHeap.extractMin()!;
       const currentKey = key(current.x, current.y);
+      // A stale entry: a cheaper route to this tile was queued after it.
+      if (current.g > (bestCost.get(currentKey) ?? Infinity)) continue;
 
       if (current.x === tx && current.y === ty) {
         const path: { x: number; y: number }[] = [];
@@ -459,29 +493,17 @@ export class SimplePathfinder {
 
         const baseDist = dx !== 0 && dy !== 0 ? 1.414 : 1.0;
         const moveCost = getMoveCost(nx, ny, current.x, current.y);
-        const gScore = current.g + baseDist * moveCost;
-        let neighborNode = nodeMap.get(nKey);
-
-        if (!neighborNode) {
-          neighborNode = {
-            x: nx,
-            y: ny,
-            g: gScore,
-            h: heuristic(nx, ny, tx, ty),
-            f: gScore + heuristic(nx, ny, tx, ty),
-            parent: current
-          };
-          nodeMap.set(nKey, neighborNode);
-          openHeap.insert(neighborNode);
-        } else if (gScore < neighborNode.g) {
-          neighborNode.g = gScore;
-          neighborNode.f = gScore + neighborNode.h;
-          neighborNode.parent = current;
-          // Note: updating f in the heap without re-heapifying is acceptable
-          // because the old entry with higher f will be extracted later and
-          // skipped via closedSet check. This is a known A* optimization.
-          openHeap.insert(neighborNode); // Insert updated node (lazy deletion)
-        }
+        // How far this step turns off the one that arrived: 0 straight on,
+        // rising to 1 at a right angle and beyond it for a reversal.
+        const turn = current.dx === 0 && current.dy === 0
+          ? 0
+          : 1 - (current.dx * dx + current.dy * dy) / (Math.hypot(current.dx, current.dy) * baseDist);
+        const gScore = current.g + baseDist * moveCost * (1 + TURN_PENALTY * turn);
+        const known = bestCost.get(nKey);
+        if (known !== undefined && gScore >= known) continue;
+        bestCost.set(nKey, gScore);
+        const h = heuristic(nx, ny, tx, ty);
+        openHeap.insert({ x: nx, y: ny, g: gScore, h, f: gScore + h, parent: current, dx, dy });
       }
     }
 

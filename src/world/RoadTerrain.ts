@@ -75,7 +75,12 @@ export const MAX_SPAN = 10;
 export function crossingSpan(tileMap: TileMap, x: number, y: number, dx: number, dy: number): number {
   const isWet = (tx: number, ty: number): boolean => {
     const t = tileMap.getTile(tx, ty);
-    return !!t && (t.type === TerrainType.SHALLOW_WATER || t.type === TerrainType.DEEP_OCEAN);
+    // Off the edge of the map counts as water still running. Treating it as
+    // dry land makes every river look narrow at the world border, and a
+    // surveyor that believes it will walk a road twenty tiles to the map edge
+    // to cross there — which is precisely what it used to do.
+    if (!t) return true;
+    return t.type === TerrainType.SHALLOW_WATER || t.type === TerrainType.DEEP_OCEAN;
   };
   if (dx === 0 && dy === 0) return 1;
   let span = 1;

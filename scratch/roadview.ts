@@ -278,5 +278,50 @@ function stockedCity(id: string, name: string, x: number, y: number): City {
   shot('catalogue close — truss, suspension', map, cities, kingdoms, { x: 26, y: 43 }, 4.2, 900, 620);
 }
 
+// ============================================================
+// Scene 4 — a great bridge: the crossing wide enough to be named
+// ============================================================
+{
+  const SIZE = 40;
+  const map = new TileMap(SIZE, SIZE, 'single_continent', 9);
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      t.type = TerrainType.GRASS;
+      t.height = 0.5;
+      t.roadLevel = 0;
+      t.roadDamage = 0;
+      t.buildingId = null;
+      t.cityId = null;
+      t.kingdomId = null;
+      t.resourceType = null;
+      t.resourceAmount = 0;
+      t.bridgeName = null;
+    }
+  }
+  // An estuary six tiles across: no ford anywhere, no way round.
+  for (let y = 0; y < SIZE; y++) for (let x = 17; x <= 22; x++) map.grid[x][y].type = TerrainType.SHALLOW_WATER;
+
+  const cities = new Map<string, City>();
+  const kingdoms = new Map<string, Kingdom>();
+  const seat = stockedCity('gb', 'Aurelia', 5, 20);
+  const realm = new Kingdom('gbk', 'Aurelian', SpeciesType.HUMAN, getNextKingdomColor(), seat.id, 0);
+  kingdoms.set(realm.id, realm);
+  seat.kingdomId = realm.id;
+  cities.set(seat.id, seat);
+  for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++) map.grid[x][y].kingdomId = realm.id;
+
+  const survey = surveyRoad(map, 5, 20, 35, 20, 2);
+  const works = layRoad(seat, map, survey, 2);
+  // The engine names the crossing on opening; do the same here so the label
+  // the renderer draws is on screen.
+  for (const crossing of works.greatCrossings) {
+    for (const t of crossing.tiles) t.bridgeName = `the Great Bridge of ${seat.name}`;
+  }
+  shot(`great bridge — ${works.greatCrossings.length} public work, ${Math.round(works.spent.stone)} stone`,
+    map, cities, kingdoms, { x: 20, y: 20 }, 2.6, 900, 620);
+  shot('great bridge — close', map, cities, kingdoms, { x: 20, y: 20 }, 4.6, 900, 620);
+}
+
 document.title = 'roads ready';
 (window as unknown as { roadsReady: boolean }).roadsReady = true;

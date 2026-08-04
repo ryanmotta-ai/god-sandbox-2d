@@ -2775,6 +2775,26 @@ export class PixelRenderer {
       }
       ctx.imageSmoothingEnabled = smoothing;
 
+      // A named bridge carries its name. Nothing else on the map outside a
+      // settlement is labelled, which is the point: a great bridge is the only
+      // piece of infrastructure a realm ever bothers to name.
+      if (fine && head.tile.bridgeName) {
+        const a = chain[0];
+        const b = chain[chain.length - 1];
+        const lx = (cxx(a.x) + cxx(b.x)) / 2;
+        const ly = (cyy(a.y) + cyy(b.y)) / 2 - half - tileSize * 0.34;
+        const size = Math.max(9, Math.min(15, tileSize * 0.34));
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.font = `600 ${size}px 'Outfit', sans-serif`;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillText(head.tile.bridgeName, lx + 1, ly + 1);
+        ctx.fillStyle = '#f2e2b8';
+        ctx.fillText(head.tile.bridgeName, lx, ly);
+        ctx.restore();
+      }
+
       // The main cable: the one part of a bridge that a repeating slice cannot
       // express, because its whole character is that it sags between towers.
       if (fine && needsCable(model) && chain.length >= 2) {
