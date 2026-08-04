@@ -101,9 +101,10 @@ export class MapPreview {
           }
         }
 
-        // Roads on top of everything: dirt trails brown, stone gray, imperial amber.
+        // Roads on top of everything, in the same surfaces the map uses:
+        // packed earth, dressed stone, imperial flagstone.
         if (tile.roadLevel > 0) {
-          this.ctx.fillStyle = tile.roadLevel === 3 ? '#fbbf24' : tile.roadLevel === 2 ? '#a8a29e' : '#8b5a2b';
+          this.ctx.fillStyle = tile.roadLevel === 3 ? '#b0a798' : tile.roadLevel === 2 ? '#8a847b' : '#6d5436';
           this.ctx.fillRect(offsetX + x * scale, offsetY + y * scale, cell, cell);
         }
       }

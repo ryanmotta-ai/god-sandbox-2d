@@ -6,6 +6,7 @@ import { TileMap } from '../world/TileMap';
 import { TERRAINS } from '../world/Biomes';
 import { ParticleManager } from '../renderer/Particles';
 import { SimplePathfinder, ROAD_SPEED_BONUS } from '../ai/Pathfinding';
+import { fundUpgrade, upgradeCost } from './RoadEngineering';
 
 export type CaravanType = 'donkey' | 'camel' | 'cart';
 
@@ -169,14 +170,14 @@ export class CaravanSystem {
         caravan.direction = -1; // Return trip
 
         // Docking at Destination Market — generate mercantile revenue & tariffs
-        this.settleCaravanTrade(caravan, fromKingdom, toKingdom, route, tileMap, particles);
+        this.settleCaravanTrade(caravan, fromKingdom, toKingdom, fromCity, route, tileMap, particles);
 
       } else if (caravan.progress <= 0.0) {
         caravan.progress = 0.0;
         caravan.direction = 1; // Outward trip again
 
         // Return trip completion — generate return-trade revenue (bidirectional commerce)
-        this.settleCaravanTrade(caravan, toKingdom, fromKingdom, route, tileMap, particles);
+        this.settleCaravanTrade(caravan, toKingdom, fromKingdom, toCity, route, tileMap, particles);
       }
 
       // Interpolate current world position along land waypoints path
@@ -219,6 +220,7 @@ export class CaravanSystem {
     caravan: OverlandCaravan,
     sellerKingdom: Kingdom | null | undefined,
     buyerKingdom: Kingdom | null | undefined,
+    sellerCity: City,
     route: TradeRoute,
     tileMap: TileMap,
     particles: ParticleManager
@@ -227,7 +229,7 @@ export class CaravanSystem {
     // year per route. Revenue now lands once a year in runTradeRoutes, keyed
     // to the goods that actually moved. Arrivals only wear the road and look
     // alive for the player.
-    this.paveRouteLeg(caravan, sellerKingdom, tileMap);
+    this.paveRouteLeg(caravan, sellerKingdom, sellerCity, tileMap);
 
     if (route.good) {
       particles.spawnDamageNumber(caravan.x, caravan.y, Math.round(caravan.cargoAmount));
@@ -238,15 +240,23 @@ export class CaravanSystem {
    * Increment traffic along the caravan's surveyed route and evolve the road
    * level under each tile, gated by the travelling kingdom's techs. Called
    * once per leg (arrival + return), not per tick.
+   *
+   * Wheels wear a dirt track into existence on their own — that much really is
+   * free. Nobody ever wore a stone road into a hillside, though, so every grade
+   * above a trail is quarried and paid for out of the settlement that benefits
+   * from it, one tile per leg. A busy route through a poor city therefore stays
+   * a mud track no matter how much traffic it carries.
    */
   private paveRouteLeg(
     caravan: OverlandCaravan,
     kingdom: Kingdom | null | undefined,
+    city: City,
     tileMap: TileMap
   ): void {
     if (!caravan.path || caravan.path.length === 0) return;
     const hasRoadsTech = !!(kingdom?.research.knows('roads') || kingdom?.research.knows('masonry'));
     const hasEngineering = !!kingdom?.research.knows('engineering');
+    let upgradesLeft = 1; // one gang, one tile of hard surfacing per leg
     for (const step of caravan.path) {
       const tile = tileMap.getTile(Math.floor(step.x), Math.floor(step.y));
       if (!tile) continue;
@@ -256,11 +266,17 @@ export class CaravanSystem {
       // proper repair pass that spends materials out of the city stockpile.
       if (tile.roadDamage > 0) continue;
       if (tile.roadLevel === 0 && tile.roadTraffic >= ROAD_UPGRADE_THRESHOLDS.dirt) {
-        tile.roadLevel = 1; // Dirt Trail
-      } else if (tile.roadLevel === 1 && tile.roadTraffic >= ROAD_UPGRADE_THRESHOLDS.stone && hasRoadsTech) {
-        tile.roadLevel = 2; // Stone Road
-      } else if (tile.roadLevel === 2 && tile.roadTraffic >= ROAD_UPGRADE_THRESHOLDS.imperial && hasEngineering) {
-        tile.roadLevel = 3; // Paved Imperial Highway
+        tile.roadLevel = 1; // Dirt Trail — worn by wheels alone
+      } else if (upgradesLeft > 0 && tile.roadLevel === 1 && tile.roadTraffic >= ROAD_UPGRADE_THRESHOLDS.stone && hasRoadsTech) {
+        if (fundUpgrade(city, upgradeCost(tileMap, tile, 2))) {
+          tile.roadLevel = 2; // Stone Road — quarried and laid
+          upgradesLeft--;
+        }
+      } else if (upgradesLeft > 0 && tile.roadLevel === 2 && tile.roadTraffic >= ROAD_UPGRADE_THRESHOLDS.imperial && hasEngineering) {
+        if (fundUpgrade(city, upgradeCost(tileMap, tile, 3))) {
+          tile.roadLevel = 3; // Paved Imperial Highway
+          upgradesLeft--;
+        }
       }
     }
   }

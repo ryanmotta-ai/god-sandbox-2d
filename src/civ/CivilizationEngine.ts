@@ -27,6 +27,7 @@ import {
   roadCapacityFactor, portCapacityFactor, portOperational,
   avgEffectiveRoadLevel, repairInfrastructure
 } from './Infrastructure';
+import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadEngineering';
 
 /**
  * The yearly heartbeat of civilization.
@@ -803,47 +804,82 @@ export class CivilizationEngine {
     return true;
   }
 
+  /** The grade a settlement's engineers know how to build. */
+  private roadGradeFor(city: City, world: CivWorld): number {
+    const kingdom = city.kingdomId ? world.kingdoms.get(city.kingdomId) : null;
+    if (kingdom?.research.knows('engineering')) return 3;
+    if (kingdom?.research.knows('roads') || kingdom?.research.knows('masonry')) return 2;
+    return 1;
+  }
+
   /**
-   * Paves a street from the city hall to a new building. Follows a surveyed
-   * A* route that may bridge shallow water — no more random zigzagging, no
-   * more streets dying at a riverbank. Stone paving requires the road/masonry
-   * techs, exactly like paveTradeRoad; a pre-tech settlement surveys a dirt
-   * trail (and a timber bridge over shallows) instead.
+   * Records what the roadworks actually achieved. A completed span is a public
+   * event — a stone arch costs more than a granary — and a road that stops at
+   * a riverbank because the treasury would not carry the piers is worth saying
+   * out loud, because it explains the map the player is looking at.
    */
-  private paveRoadBetween(fromCity: City, toX: number, toY: number, world: CivWorld): void {
-    const path = SimplePathfinder.findPath(fromCity.x, fromCity.y, toX, toY, world.tileMap, 'road', 800);
-    if (path.length === 0) return;
-    const kingdom = fromCity.kingdomId ? world.kingdoms.get(fromCity.kingdomId) : null;
-    const hasStone = !!(kingdom?.research.knows('roads') || kingdom?.research.knows('masonry'));
-    const level = hasStone ? 2 : 1;
-    for (const step of path) {
-      const tile = world.tileMap.getTile(Math.floor(step.x), Math.floor(step.y));
-      if (!tile) continue;
-      if (tile.roadLevel < level) tile.roadLevel = level;
-      tile.roadTraffic = Math.max(tile.roadTraffic, 35);
+  private reportRoadWorks(city: City, works: RoadWorks, world: CivWorld, route: string): void {
+    if (works.spansBuilt > 0) {
+      const stone = Math.round(works.spent.stone);
+      const wood = Math.round(works.spent.wood);
+      chronicle.log(
+        world.year,
+        'founding',
+        `${city.name} threw ${works.spansBuilt === 1 ? 'a bridge' : `${works.spansBuilt} bridges`} across the water on ${route}, at a cost of ${stone} stone and ${wood} timber.`
+      );
+    } else if (works.stoppedBy === 'span' && works.haltedAt) {
+      chronicle.log(
+        world.year,
+        'founding',
+        `${city.name} surveyed ${route} as far as the water's edge and stopped there: the crossing costs more than the city can quarry.`
+      );
     }
   }
 
   /**
-   * Paves the first route between two trading cities the moment a trade
-   * agreement opens, so roads appear on the map as real, visible connections
-   * instead of emerging only after decades of caravan wheels. Stone roads
-   * require the road-building tech; otherwise a dirt trail is surveyed.
-   * Returns the surveyed path so the route can remember what it crosses.
+   * Paves a street from the city hall to a new building along a surveyed route,
+   * and pays for it. The survey contours around relief and looks for a narrows
+   * to cross; the works then walk the pegs outward from the city, buying each
+   * tile out of the stockpile until the materials run out — at which point the
+   * paving degrades to a dirt track, or halts entirely at an unaffordable span.
+   */
+  private paveRoadBetween(fromCity: City, toX: number, toY: number, world: CivWorld): void {
+    const level = this.roadGradeFor(fromCity, world);
+    const survey = surveyRoad(world.tileMap, fromCity.x, fromCity.y, toX, toY, level, 1200);
+    if (survey.path.length === 0) return;
+    const works = layRoad(fromCity, world.tileMap, survey, level);
+    for (const step of survey.path) {
+      const tile = world.tileMap.getTile(Math.floor(step.x), Math.floor(step.y));
+      if (tile && tile.roadLevel > 0) tile.roadTraffic = Math.max(tile.roadTraffic, 35);
+    }
+    this.reportRoadWorks(fromCity, works, world, 'the street to its new quarter');
+  }
+
+  /**
+   * Builds the first road between two trading cities when a trade agreement
+   * opens. Both ends contribute: the works start from each city and meet in
+   * the middle, so a rich city can carry a road most of the way to a poor one.
+   * Returns the surveyed line so the route remembers what it crosses — the
+   * capacity of that route is read straight back off these tiles.
    */
   private paveTradeRoad(fromCity: City, toCity: City, world: CivWorld): { x: number; y: number }[] {
-    const path = SimplePathfinder.findPath(fromCity.x, fromCity.y, toCity.x, toCity.y, world.tileMap, 'road');
-    if (path.length === 0) return path;
-    const fromKingdom = fromCity.kingdomId ? world.kingdoms.get(fromCity.kingdomId) : null;
-    const hasStone = !!(fromKingdom?.research.knows('roads') || fromKingdom?.research.knows('masonry'));
-    const level = hasStone ? 2 : 1;
-    for (const step of path) {
+    const level = Math.max(this.roadGradeFor(fromCity, world), this.roadGradeFor(toCity, world));
+    const survey = surveyRoad(world.tileMap, fromCity.x, fromCity.y, toCity.x, toCity.y, level);
+    if (survey.path.length === 0) return [];
+
+    const fromWorks = layRoad(fromCity, world.tileMap, survey, level);
+    this.reportRoadWorks(fromCity, fromWorks, world, `the road to ${toCity.name}`);
+    // The far end builds back toward the near one, so an unfinished road is a
+    // gap in the middle rather than a stub hanging off one city.
+    const reverse: RoadSurvey = { ...survey, path: [...survey.path].reverse() };
+    const toWorks = layRoad(toCity, world.tileMap, reverse, level);
+    this.reportRoadWorks(toCity, toWorks, world, `the road to ${fromCity.name}`);
+
+    for (const step of survey.path) {
       const tile = world.tileMap.getTile(Math.floor(step.x), Math.floor(step.y));
-      if (!tile) continue;
-      if (tile.roadLevel < level) tile.roadLevel = level;
-      tile.roadTraffic = Math.max(tile.roadTraffic, 60);
+      if (tile && tile.roadLevel > 0) tile.roadTraffic = Math.max(tile.roadTraffic, 60);
     }
-    return path;
+    return survey.path;
   }
 
   /** Repairs buildings and roads damaged in war, spending real materials. */

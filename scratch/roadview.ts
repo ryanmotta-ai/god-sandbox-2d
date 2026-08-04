@@ -1,0 +1,215 @@
+/**
+ * Visual harness for the road renderer.
+ *
+ * Two scenes. The first is a real generated world with a real surveyed network
+ * across it, so the roads on screen are the ones the simulation would build.
+ * The second is a purpose-built bench — every grade, a river crossing, a bend,
+ * a hillside and a broken surface — because the interesting cases are exactly
+ * the ones a random seed will not hand you.
+ *
+ * Not part of the game; served by vite from scratch/roadview.html.
+ */
+import { TileMap } from '../src/world/TileMap';
+import { TERRAINS, TerrainType } from '../src/world/Biomes';
+import { City } from '../src/civ/City';
+import { Kingdom, getNextKingdomColor } from '../src/civ/Kingdom';
+import { SpeciesType } from '../src/entities/Species';
+import { Camera } from '../src/renderer/Camera';
+import { PixelRenderer } from '../src/renderer/Renderer';
+import { ParticleManager } from '../src/renderer/Particles';
+import { WorldEra } from '../src/world/WeatherEras';
+import { rng } from '../src/core/Random';
+import { surveyRoad, layRoad } from '../src/civ/RoadEngineering';
+
+const params = new URLSearchParams(location.search);
+const SEED = Number(params.get('seed') ?? 20260804);
+const particles = new ParticleManager();
+const host = document.getElementById('shots')!;
+
+function shot(
+  label: string, map: TileMap, cities: Map<string, City>, kingdoms: Map<string, Kingdom>,
+  at: { x: number; y: number }, zoom: number, w = 900, h = 560
+): void {
+  const wrap = document.createElement('div');
+  const title = document.createElement('div');
+  title.textContent = `${label}  ·  zoom ${zoom}`;
+  title.style.cssText = 'font:12px monospace;color:#cbd5e1;padding:8px 0 4px';
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  wrap.append(title, canvas);
+  host.append(wrap);
+
+  const camera = new Camera();
+  camera.setWorldBounds(map.width, map.height);
+  camera.centerOn(at.x, at.y, zoom);
+  camera.zoom = zoom;
+  camera.targetZoom = zoom;
+  new PixelRenderer(canvas).render(camera, map, [], cities, kingdoms, particles, 'none', WorldEra.GOLDEN_AGE, null, null, 1);
+}
+
+function stockedCity(id: string, name: string, x: number, y: number): City {
+  const city = new City(id, name, SpeciesType.HUMAN, x, y, 'Founder', 1);
+  city.population = 400;
+  city.stock.capacity = 1_000_000;
+  city.stock.add('stone', 80_000);
+  city.stock.add('wood', 80_000);
+  return city;
+}
+
+// ============================================================
+// Scene 1 — a generated world, with the network the surveyor builds on it
+// ============================================================
+{
+  rng.setSeed(SEED);
+  const SIZE = 96;
+  const map = new TileMap(SIZE, SIZE, 'single_continent', SEED);
+  const cities = new Map<string, City>();
+  const kingdoms = new Map<string, Kingdom>();
+  const sites: { x: number; y: number }[] = [];
+  for (let i = 0; i < 20000 && sites.length < 7; i++) {
+    const x = rng.rangeInt(6, SIZE - 7);
+    const y = rng.rangeInt(6, SIZE - 7);
+    const t = map.grid[x][y];
+    if (TERRAINS[t.type].isWater || !TERRAINS[t.type].isWalkable) continue;
+    if (sites.some(s => Math.hypot(s.x - x, s.y - y) < 16)) continue;
+    sites.push({ x, y });
+  }
+  sites.forEach((site, i) => {
+    const city = stockedCity(`c${i}`, `City${i}`, site.x, site.y);
+    const realm = `k${i % 2}`;
+    let kingdom = kingdoms.get(realm);
+    if (!kingdom) {
+      kingdom = new Kingdom(realm, `Realm${i % 2}`, SpeciesType.HUMAN, getNextKingdomColor(), city.id, 0);
+      kingdoms.set(realm, kingdom);
+    }
+    city.kingdomId = realm;
+    kingdom.cityIds.add(city.id);
+    cities.set(city.id, city);
+    for (let dx = -5; dx <= 5; dx++) {
+      for (let dy = -5; dy <= 5; dy++) {
+        const t = map.getTile(site.x + dx, site.y + dy);
+        if (!t || Math.hypot(dx, dy) > 5) continue;
+        t.kingdomId = realm;
+        if (Math.hypot(dx, dy) <= 3) t.cityId = city.id;
+      }
+    }
+  });
+
+  const list = [...cities.values()];
+  for (let i = 0; i < list.length; i++) {
+    for (const j of [(i + 1) % list.length, (i + 3) % list.length]) {
+      if (i === j) continue;
+      layRoad(list[i], map, surveyRoad(map, list[i].x, list[i].y, list[j].x, list[j].y, 2), 2);
+    }
+  }
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      if (t.roadLevel > 0 && (x * 13 + y * 7) % 23 === 0) t.roadDamage = 0.35;
+    }
+  }
+  shot('generated world — surveyed network', map, cities, kingdoms, { x: SIZE / 2, y: SIZE / 2 }, 0.8, 900, 620);
+  shot('generated world — mid range', map, cities, kingdoms, sites[1], 2.2);
+}
+
+// ============================================================
+// Scene 2 — the bench: every grade, a river, a bend, a hillside
+// ============================================================
+{
+  rng.setSeed(1);
+  const SIZE = 44;
+  const map = new TileMap(SIZE, SIZE, 'single_continent', 3);
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      t.type = TerrainType.GRASS;
+      // A hillside falling away to the north-west, so cut and fill has
+      // something to bite on.
+      t.height = 0.45 + x * 0.004 + (y > 24 ? (y - 24) * 0.018 : 0);
+      t.roadLevel = 0;
+      t.roadDamage = 0;
+      t.buildingId = null;
+      t.cityId = null;
+      t.kingdomId = null;
+      t.resourceType = null;
+      t.resourceAmount = 0;
+    }
+  }
+  // Bands of other ground, so the surfaces show their terrain tint.
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 30; y < 36; y++) map.grid[x][y].type = TerrainType.SAND;
+    for (let y = 36; y < SIZE; y++) map.grid[x][y].type = TerrainType.SWAMP;
+  }
+  // A river the full height of the map, three tiles wide, pinched to a single
+  // tile at y = 24 — the only ford, and the only cheap way across.
+  for (let y = 0; y < SIZE; y++) {
+    for (const x of y === 24 ? [21] : [20, 21, 22]) map.grid[x][y].type = TerrainType.SHALLOW_WATER;
+  }
+
+  const cities = new Map<string, City>();
+  const kingdoms = new Map<string, Kingdom>();
+  const west = stockedCity('w', 'Westbank', 4, 12);
+  const east = stockedCity('e', 'Eastbank', 39, 12);
+  const kw = new Kingdom('kw', 'West', SpeciesType.HUMAN, getNextKingdomColor(), west.id, 0);
+  const ke = new Kingdom('ke', 'East', SpeciesType.HUMAN, getNextKingdomColor(), east.id, 0);
+  kingdoms.set(kw.id, kw);
+  kingdoms.set(ke.id, ke);
+  west.kingdomId = kw.id;
+  east.kingdomId = ke.id;
+  cities.set(west.id, west);
+  cities.set(east.id, east);
+  // East is industrial, so its imperial roads are asphalt with a centre line
+  // while West's are still dressed flagstone — both surfaces on one screen.
+  for (const id of ['roads', 'masonry', 'engineering', 'industrialization']) ke.research.complete(id);
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) map.grid[x][y].kingdomId = x < 21 ? kw.id : ke.id;
+  }
+  for (const c of [west, east]) {
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dy = -3; dy <= 3; dy++) {
+        const t = map.getTile(Math.floor(c.x) + dx, Math.floor(c.y) + dy);
+        if (t && Math.hypot(dx, dy) <= 3) t.cityId = c.id;
+      }
+    }
+  }
+
+  // Three grades running the width of the map. The surveyor decides where each
+  // one crosses; with the ford at y = 24 it will divert there rather than pay
+  // for three tiles of pier.
+  for (const [y, grade] of [[8, 1], [14, 2], [20, 3]] as const) {
+    layRoad(west, map, surveyRoad(map, 4, y, 39, y, grade), grade);
+  }
+  // Wide crossings, laid by hand so the long spans are on screen too: nothing
+  // in the survey would ever choose these once a ford exists.
+  for (const [y, grade] of [[32, 2], [38, 3]] as const) {
+    for (let x = 6; x <= 37; x++) {
+      const t = map.grid[x][y];
+      if (t.roadLevel < grade) t.roadLevel = grade;
+    }
+  }
+  // A road that has to bend and climb across the hillside, a north-south route
+  // that makes junctions with the others, and a spur that dies in open country.
+  layRoad(west, map, surveyRoad(map, 6, 26, 17, 41, 2), 2);
+  layRoad(west, map, surveyRoad(map, 12, 14, 12, 34, 2), 2);
+  layRoad(east, map, surveyRoad(map, 30, 20, 34, 28, 1), 1);
+  // A stretch that has been fought over.
+  for (let x = 24; x < 32; x++) {
+    const t = map.grid[x][14];
+    if (t.roadLevel > 0) t.roadDamage = 0.55;
+  }
+
+  let decks = 0;
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      if (t.roadLevel > 0 && TERRAINS[t.type].isWater) decks++;
+    }
+  }
+  shot(`bench — three grades, ${decks} bridge decks, a frontier and a hillside`, map, cities, kingdoms, { x: 22, y: 22 }, 1.6, 900, 760);
+  shot('bench — the ford and the wide spans, close', map, cities, kingdoms, { x: 21, y: 28 }, 4.0, 900, 620);
+  shot('bench — surfaces and wear, close', map, cities, kingdoms, { x: 29, y: 15 }, 4.5, 900, 560);
+}
+
+document.title = 'roads ready';
+(window as unknown as { roadsReady: boolean }).roadsReady = true;

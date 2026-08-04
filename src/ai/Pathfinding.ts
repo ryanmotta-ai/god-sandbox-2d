@@ -1,6 +1,7 @@
 import { rng } from '../core/Random';
 import { TileMap } from '../world/TileMap';
 import { TERRAINS, TerrainType } from '../world/Biomes';
+import { crossingSpan, gradePenalty, groundworkFactor, roadGrade } from '../world/RoadTerrain';
 
 /**
  * Binary Min-Heap priority queue for A* pathfinding.
@@ -65,6 +66,23 @@ const ROAD_COST_MULTIPLIER: Record<number, number> = {
   2: 0.6,
   3: 0.4
 };
+
+/**
+ * What one tile of water costs a road survey before the span is measured.
+ * Set against a typical land tile of ~1–3, a single-tile ford is worth a
+ * detour of about ten tiles and a five-tile crossing is worth nearly sixty —
+ * so a surveyed road walks the bank looking for the narrows, and only gives up
+ * and bridges when the detour would cost more than the piers.
+ */
+const WATER_CROSSING_BASE = 11;
+const WATER_CROSSING_PER_SPAN = 8;
+
+/**
+ * How hard a traveller avoids climbing. Gentler than the surveyor's curve — a
+ * caravan will take a slope a road never would — but enough that the trails
+ * worn by wheels follow valley floors instead of going over every shoulder.
+ */
+const TRAVEL_GRADE_DIVISOR = 22;
 
 /**
  * Road-level movement speed multiplier shared by every mover on the map —
@@ -363,22 +381,33 @@ export class SimplePathfinder {
       if (!found) return []; // No passable start nearby
     }
 
-    /** Get the movement cost for stepping onto a tile */
-    const getMoveCost = (x: number, y: number): number => {
+    /**
+     * Cost of stepping onto a tile *from a specific neighbour*. The step, not
+     * the tile, is what carries the gradient — which is the whole reason roads
+     * contour around hills instead of climbing them.
+     */
+    const getMoveCost = (x: number, y: number, fromX: number, fromY: number): number => {
       const tile = tileMap.getTile(x, y);
       if (!tile) return 1.0;
       if (mode === 'sea') return 1.0; // Uniform water cost
-      if (mode === 'road') {
-        // Bridges are expensive but feasible; roads cut every cost.
-        if (tile.type === TerrainType.SHALLOW_WATER) return 3.0;
-        const terrainCost = TERRAINS[tile.type].moveCost;
-        const roadMultiplier = ROAD_COST_MULTIPLIER[tile.roadLevelEffective] ?? 1.0;
-        return terrainCost * roadMultiplier;
-      }
-      // Land mode: use terrain moveCost with road bonus
-      const terrainCost = TERRAINS[tile.type].moveCost;
+      const from = tileMap.getTile(fromX, fromY);
+      const run = x !== fromX && y !== fromY ? 1.414 : 1;
       const roadMultiplier = ROAD_COST_MULTIPLIER[tile.roadLevelEffective] ?? 1.0;
-      return terrainCost * roadMultiplier;
+
+      if (mode === 'road') {
+        if (tile.type === TerrainType.SHALLOW_WATER) {
+          // Priced by the width of the crossing this tile sits in, so the
+          // survey is drawn toward fords and narrows rather than the nearest
+          // point of the bank.
+          const span = crossingSpan(tileMap, x, y, x - fromX, y - fromY);
+          return WATER_CROSSING_BASE + WATER_CROSSING_PER_SPAN * span;
+        }
+        const relief = from ? gradePenalty(roadGrade(from, tile, run)) : 1;
+        return TERRAINS[tile.type].moveCost * roadMultiplier * relief * groundworkFactor(tile.type);
+      }
+      // Land mode: terrain, roads, and a traveller's reluctance to climb.
+      const climb = from ? 1 + roadGrade(from, tile, run) / TRAVEL_GRADE_DIVISOR : 1;
+      return TERRAINS[tile.type].moveCost * roadMultiplier * climb;
     };
 
     const openHeap = new MinHeap<ANode>((a, b) => a.f - b.f);
@@ -429,7 +458,7 @@ export class SimplePathfinder {
         if (!isPassable(nx, ny)) continue; // Strict passability — no destination bypass
 
         const baseDist = dx !== 0 && dy !== 0 ? 1.414 : 1.0;
-        const moveCost = getMoveCost(nx, ny);
+        const moveCost = getMoveCost(nx, ny, current.x, current.y);
         const gScore = current.g + baseDist * moveCost;
         let neighborNode = nodeMap.get(nKey);
 

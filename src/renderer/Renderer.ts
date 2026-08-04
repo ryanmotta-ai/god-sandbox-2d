@@ -1,6 +1,7 @@
 import { Camera } from './Camera';
 import { TileMap } from '../world/TileMap';
 import { TerrainType } from '../world/Biomes';
+import { roadSurfaceFamily } from '../world/RoadTerrain';
 import type { Tile } from '../world/Tile';
 import { Entity } from '../entities/Entity';
 import { SpeciesType, SPECIES_DEFINITIONS } from '../entities/Species';
@@ -1375,147 +1376,8 @@ export class PixelRenderer {
           this.drawTerrainTile(tileMap, tile, x, y, sx, sy, tileSize, overlayMode);
         }
 
-        // ===== ROAD OVERLAY (LOD: far zoom keeps the cheap tile lattice) =====
-        if (tile.roadLevelEffective > 0 && tileSize < 4) {
-          const roadW = Math.max(2, Math.min(tileSize * 0.35, tileSize - 2));
-          const halfT = tileSize / 2;
-          const halfR = roadW / 2;
-
-          // Check 8 neighbors
-          const nN = tileMap.getTile(x, y - 1);
-          const nS = tileMap.getTile(x, y + 1);
-          const nE = tileMap.getTile(x + 1, y);
-          const nW = tileMap.getTile(x - 1, y);
-          const nNE = tileMap.getTile(x + 1, y - 1);
-          const nNW = tileMap.getTile(x - 1, y - 1);
-          const nSE = tileMap.getTile(x + 1, y + 1);
-          const nSW = tileMap.getTile(x - 1, y + 1);
-
-          const hasN = !!(nN && nN.roadLevelEffective > 0);
-          const hasS = !!(nS && nS.roadLevelEffective > 0);
-          const hasE = !!(nE && nE.roadLevelEffective > 0);
-          const hasW = !!(nW && nW.roadLevelEffective > 0);
-          const hasNE = !!(nNE && nNE.roadLevelEffective > 0);
-          const hasNW = !!(nNW && nNW.roadLevelEffective > 0);
-          const hasSE = !!(nSE && nSE.roadLevelEffective > 0);
-          const hasSW = !!(nSW && nSW.roadLevelEffective > 0);
-
-          const roadCity = tile.cityId && cities.has(tile.cityId) ? cities.get(tile.cityId)! : null;
-          const roadKingdom = tile.kingdomId && kingdoms.has(tile.kingdomId) ? kingdoms.get(tile.kingdomId)! : null;
-          const roadSpecies = roadCity?.species ?? roadKingdom?.species;
-          const roadEra = roadKingdom ? roadKingdom.research.currentEra() : 'stone';
-
-          let mainColor = tile.roadLevelEffective === 1 ? '#8b5a2b' : tile.roadLevelEffective === 2 ? '#6b7280' : '#374151';
-          let borderColor = tile.roadLevelEffective === 1 ? '#4a2d18' : tile.roadLevelEffective === 2 ? '#374151' : '#9ca3af';
-
-          // Paved roads read as dressed stone; imperial ways get a lighter kerb.
-          if (tile.roadLevelEffective >= 2) {
-            mainColor = tile.roadLevelEffective === 2 ? '#6b7280' : '#4b5563';
-            borderColor = tile.roadLevelEffective === 2 ? '#374151' : '#cbd5e1';
-          }
-
-          // Organic edge offset for dirt trails
-          const edgeOff = tile.roadLevelEffective === 1 ? Math.sin(x * 3.7 + y * 2.1) * 1 : 0;
-
-          // Render Bridge Deck when road crosses water!
-          if (this.isWater(tile.type)) {
-            const bridgeColor = tile.roadLevelEffective === 1 ? '#78350f' : tile.roadLevelEffective === 2 ? '#475569' : '#1e293b';
-            const railColor = tile.roadLevelEffective === 1 ? '#451a03' : tile.roadLevelEffective === 2 ? '#334155' : '#fbbf24';
-
-            // Bridge base platform
-            this.ctx.fillStyle = railColor;
-            this.ctx.fillRect(sx, sy, tileSize, tileSize);
-            this.ctx.fillStyle = bridgeColor;
-            this.ctx.fillRect(sx + 1, sy + 1, tileSize - 2, tileSize - 2);
-
-            // Plank lines for wooden bridge or stone seams
-            this.ctx.fillStyle = railColor;
-            const step = Math.max(3, Math.floor(tileSize * 0.25));
-            for (let p = 2; p < tileSize - 2; p += step) {
-              this.ctx.fillRect(sx + 1, sy + p, tileSize - 2, 1);
-            }
-          }
-
-          // Center node
-          this.ctx.fillStyle = borderColor;
-          this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy + halfT - halfR - 1, roadW + 2, roadW + 2);
-          this.ctx.fillStyle = mainColor;
-          this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy + halfT - halfR, roadW, roadW);
-
-          // Cardinal arms
-          if (hasN) {
-            this.ctx.fillStyle = borderColor;
-            this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy, roadW + 2, halfT);
-            this.ctx.fillStyle = mainColor;
-            this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy, roadW, halfT);
-          }
-          if (hasS) {
-            this.ctx.fillStyle = borderColor;
-            this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy + halfT, roadW + 2, halfT);
-            this.ctx.fillStyle = mainColor;
-            this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy + halfT, roadW, halfT);
-          }
-          if (hasW) {
-            this.ctx.fillStyle = borderColor;
-            this.ctx.fillRect(sx, sy + halfT - halfR - 1, halfT + edgeOff, roadW + 2);
-            this.ctx.fillStyle = mainColor;
-            this.ctx.fillRect(sx, sy + halfT - halfR, halfT + edgeOff, roadW);
-          }
-          if (hasE) {
-            this.ctx.fillStyle = borderColor;
-            this.ctx.fillRect(sx + halfT + edgeOff, sy + halfT - halfR - 1, halfT - edgeOff, roadW + 2);
-            this.ctx.fillStyle = mainColor;
-            this.ctx.fillRect(sx + halfT + edgeOff, sy + halfT - halfR, halfT - edgeOff, roadW);
-          }
-
-          // Diagonal corners: fill the corner quadrant when a diagonal neighbor has a road
-          const cSize = Math.max(2, roadW * 0.6);
-          if (hasNE) {
-            this.ctx.fillStyle = borderColor;
-            this.ctx.fillRect(sx + halfT + halfR - 1 + edgeOff, sy + halfT - halfR - cSize, cSize + 1, cSize + 1);
-            this.ctx.fillStyle = mainColor;
-            this.ctx.fillRect(sx + halfT + halfR + edgeOff, sy + halfT - halfR - cSize + 1, cSize, cSize);
-          }
-          if (hasNW) {
-            this.ctx.fillStyle = borderColor;
-            this.ctx.fillRect(sx + halfT - halfR - cSize + edgeOff, sy + halfT - halfR - cSize, cSize + 1, cSize + 1);
-            this.ctx.fillStyle = mainColor;
-            this.ctx.fillRect(sx + halfT - halfR - cSize + edgeOff, sy + halfT - halfR - cSize + 1, cSize, cSize);
-          }
-          if (hasSE) {
-            this.ctx.fillStyle = borderColor;
-            this.ctx.fillRect(sx + halfT + halfR - 1 + edgeOff, sy + halfT + halfR - 1, cSize + 1, cSize + 1);
-            this.ctx.fillStyle = mainColor;
-            this.ctx.fillRect(sx + halfT + halfR + edgeOff, sy + halfT + halfR, cSize, cSize);
-          }
-          if (hasSW) {
-            this.ctx.fillStyle = borderColor;
-            this.ctx.fillRect(sx + halfT - halfR - cSize + edgeOff, sy + halfT + halfR - 1, cSize + 1, cSize + 1);
-            this.ctx.fillStyle = mainColor;
-            this.ctx.fillRect(sx + halfT - halfR - cSize + edgeOff, sy + halfT + halfR, cSize, cSize);
-          }
-
-          // V4 road furniture: paved roads gain stones, advanced roads gain lane/street accents.
-          if (tileSize >= 8 && tile.roadLevelEffective === 2) {
-            this.ctx.fillStyle = 'rgba(226,232,240,0.22)';
-            this.ctx.fillRect(sx + halfT - 1, sy + halfT - 1, 2, 1);
-            if ((x + y) % 2 === 0) this.ctx.fillRect(sx + halfT - halfR + 1, sy + halfT + 2, 1, 1);
-          } else if (tileSize >= 8 && tile.roadLevelEffective >= 3) {
-            const modernRoad = roadEra === 'industrial' || roadEra === 'modern';
-            this.ctx.fillStyle = modernRoad ? 'rgba(250,204,21,0.62)' : 'rgba(226,232,240,0.36)';
-            if ((hasN || hasS) && !(hasE || hasW)) {
-              this.ctx.fillRect(sx + halfT, sy + tileSize * 0.16, Math.max(1, tileSize * 0.05), tileSize * 0.18);
-              this.ctx.fillRect(sx + halfT, sy + tileSize * 0.63, Math.max(1, tileSize * 0.05), tileSize * 0.18);
-            } else if ((hasE || hasW) && !(hasN || hasS)) {
-              this.ctx.fillRect(sx + tileSize * 0.16, sy + halfT, tileSize * 0.18, Math.max(1, tileSize * 0.05));
-              this.ctx.fillRect(sx + tileSize * 0.63, sy + halfT, tileSize * 0.18, Math.max(1, tileSize * 0.05));
-            }
-            if (roadCity && (roadCity.tier === 'city' || roadCity.tier === 'metropolis') && (x + y) % 4 === 0) {
-              this.ctx.fillStyle = '#fde68a'; // Lamp post along a grand street
-              this.ctx.fillRect(sx + 1, sy + 1, Math.max(1, tileSize * 0.06), Math.max(1, tileSize * 0.10));
-            }
-          }
-        }
+        // Roads are drawn afterwards as a connected network (drawRoadsPass),
+        // never as a per-tile lattice — a lattice cannot express a curve.
 
         // ===== KINGDOM TERRITORY PAINT (WorldBox style) =====
         if (tile.kingdomId && kingdoms.has(tile.kingdomId)) {
@@ -2318,15 +2180,30 @@ export class PixelRenderer {
     }
   }
 
+
   /**
-   * Connected road network drawn as smooth polylines (package A+C+E, refined round 2):
-   * - A: continuous center-to-center segments with round caps/joins; dead ends get
-   *       Cities:Skylines-style turnaround plazas (paved) or reinforced caps (dirt)
-   * - C: level-aware transitions with a dark pavement joint at the grade step; imperial
-   *       straight runs gain dashed center lines, edge lines and lamp posts
-   * - E: civic accessories — plazas with fountain/well at city entrances, roundabouts
-   *       with planted hub and zebra arms, border gates with twin towers, and full
-   *       bridges (deck, railings, plank seams, abutments, piers, under-deck shadow)
+   * The road network, drawn as a network.
+   *
+   * The old pass emitted one axis-aligned bar per tile toward its +x/+y
+   * neighbour. That has two consequences the eye reads immediately: a road
+   * surveyed diagonally becomes a row of disconnected blobs, because diagonal
+   * neighbours were never joined at all, and no road can ever curve, because a
+   * lattice of bars has no curves in it.
+   *
+   * This pass builds the real graph — eight directions, with a diagonal
+   * dropped whenever the two tiles are already joined the long way round, so a
+   * bend is a bend and never a filled triangle — and each tile draws its own
+   * crossing as a quadratic through its centre. Straight runs come out
+   * straight; every change of direction comes out as an arc, which is what a
+   * road does on the ground because carts cannot turn on a corner.
+   *
+   * Everything above that is the ground showing through. A road takes its
+   * colour from what it was cut into, is crowned in the middle and shadowed on
+   * its downhill shoulder, carries wheel ruts while it is dirt and paving
+   * courses once it is stone, and breaks up into potholes where it has been
+   * fought over. Water is not a road tile with a plank texture: it is a
+   * structure, with piers standing in the current and a deck carried over
+   * them, drawn along the true bearing of the crossing.
    */
   private drawRoadsPass(
     tileMap: TileMap,
@@ -2335,481 +2212,615 @@ export class PixelRenderer {
     cities: Map<string, City>,
     kingdoms: Map<string, Kingdom>
   ): void {
+    if (tileSize < 1) return;
     const ctx = this.ctx;
-    const levelColor = (l: number): string => (l >= 3 ? '#fbbf24' : l === 2 ? '#a8a29e' : '#8b5a2b');
-    const levelBorder = (l: number): string => (l >= 3 ? '#b45309' : l === 2 ? '#6b7280' : '#4a2d18');
-    const roadWidth = (l: number): number =>
-      Math.max(2, Math.min(tileSize * (l >= 3 ? 0.42 : l === 2 ? 0.34 : 0.26), tileSize - 2));
-    const dashLine = (x1: number, y1: number, x2: number, y2: number, color: string, width: number, dash?: [number, number]): void => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      if (dash) ctx.setLineDash(dash);
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-      if (dash) ctx.setLineDash([]);
-    };
-    const lampAt = (lx: number, ly: number): void => {
-      const post = Math.max(1, tileSize * 0.04);
-      ctx.fillStyle = '#374151';
-      ctx.fillRect(lx - post / 2, ly - tileSize * 0.16, post, tileSize * 0.16);
-      ctx.fillStyle = 'rgba(251, 191, 36, 0.95)';
-      ctx.beginPath();
-      ctx.arc(lx, ly, Math.max(1.5, tileSize * 0.05), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(251, 191, 36, 0.18)';
-      ctx.beginPath();
-      ctx.arc(lx, ly, Math.max(3, tileSize * 0.12), 0, Math.PI * 2);
-      ctx.fill();
+
+    // 0: a line on a world map. 1: a built road. 2: close enough to read the
+    // shape of the ground under it.
+    const detail = tileSize >= 12 ? 2 : tileSize >= 5 ? 1 : 0;
+    // Close enough to resolve an individual paving stone. Below this the
+    // micro-texture stops being texture and starts being noise — which is
+    // precisely how a paved road ends up looking like railway track — and it
+    // is also where the per-tile detail loop stops being worth its frame cost,
+    // since a whole map of roads can be on screen at mid zoom.
+    const fine = tileSize >= 22;
+
+    /**
+     * Road surfaces, keyed by grade and by the ground the road was cut into.
+     * The bed of a road is whatever was to hand: dune sand stays pale, marsh
+     * causeways stay dark and wet, frost-heaved gravel goes grey. `s` is the
+     * running surface, `k` the kerb and cut edge.
+     */
+    const SURFACES: Record<string, { s: string; k: string }> = {
+      '1|temperate': { s: '#6d5436', k: '#3d2e1b' },
+      '1|arid': { s: '#9a8156', k: '#6a5636' },
+      '1|cold': { s: '#79706a', k: '#484239' },
+      '1|wet': { s: '#4e4330', k: '#2a2417' },
+      '2|temperate': { s: '#8a847b', k: '#4b463f' },
+      '2|arid': { s: '#a89b83', k: '#665d4b' },
+      '2|cold': { s: '#969b9f', k: '#54595d' },
+      '2|wet': { s: '#6c6860', k: '#3a3732' },
+      '3|temperate': { s: '#b0a798', k: '#5f594e' },
+      '3|arid': { s: '#c0b193', k: '#6d6350' },
+      '3|cold': { s: '#b3b8bb', k: '#5d6265' },
+      '3|wet': { s: '#8e8a80', k: '#474439' },
+      asphalt: { s: '#4a4a4e', k: '#26262a' }
     };
 
-    const roadTiles: { x: number; y: number; l: number }[] = [];
-    for (let x = minX; x <= maxX; x++) {
-      for (let y = minY; y <= maxY; y++) {
-        const t = tileMap.grid[x][y];
-        if (t.roadLevelEffective > 0) roadTiles.push({ x, y, l: t.roadLevelEffective });
-      }
-    }
-    if (roadTiles.length === 0) return;
+    /** Style keys by grade and terrain family, so no key is built per tile. */
+    const SURFACE_KEYS: Record<number, Record<string, string>> = {
+      1: { temperate: '1|temperate', arid: '1|arid', cold: '1|cold', wet: '1|wet' },
+      2: { temperate: '2|temperate', arid: '2|arid', cold: '2|cold', wet: '2|wet' },
+      3: { temperate: '3|temperate', arid: '3|arid', cold: '3|cold', wet: '3|wet' }
+    };
+
+    const widthFor = (level: number): number =>
+      Math.max(1, Math.min(tileSize * (level >= 3 ? 0.38 : level === 2 ? 0.30 : 0.22), tileSize - 1.5));
 
     const cxx = (x: number): number => x * tileSize + baseSX + tileSize / 2;
     const cyy = (y: number): number => y * tileSize + baseSY + tileSize / 2;
 
-    // Undirected segments emitted toward +x/+y only, so each line is stroked once.
-    // lMin/lMax drive the level transition; hx/hy is the higher-level endpoint center.
-    const segs: { x1: number; y1: number; x2: number; y2: number; lMin: number; lMax: number; hx: number; hy: number }[] = [];
-    for (const r of roadTiles) {
-      const e = tileMap.getTile(r.x + 1, r.y);
-      if (e && e.roadLevelEffective > 0) {
-        const hi = e.roadLevelEffective > r.l;
-        segs.push({
-          x1: cxx(r.x), y1: cyy(r.y), x2: cxx(r.x + 1), y2: cyy(r.y),
-          lMin: Math.min(r.l, e.roadLevelEffective), lMax: Math.max(r.l, e.roadLevelEffective),
-          hx: cxx(hi ? r.x + 1 : r.x), hy: cyy(r.y)
-        });
-      }
-      const s = tileMap.getTile(r.x, r.y + 1);
-      if (s && s.roadLevelEffective > 0) {
-        const hi = s.roadLevelEffective > r.l;
-        segs.push({
-          x1: cxx(r.x), y1: cyy(r.y), x2: cxx(r.x), y2: cyy(r.y + 1),
-          lMin: Math.min(r.l, s.roadLevelEffective), lMax: Math.max(r.l, s.roadLevelEffective),
-          hx: cxx(r.x), hy: cyy(hi ? r.y + 1 : r.y)
-        });
-      }
+    // Clockwise from east. Diagonals sit at odd indices, between the two
+    // cardinals they are the shortcut for.
+    const DIRS: readonly [number, number][] = [
+      [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]
+    ];
+
+    interface RoadNode {
+      x: number; y: number;
+      tile: Tile;
+      level: number;
+      key: string;
+      width: number;
+      /** Connected directions, as indices into DIRS. */
+      links: number[];
+      /** Unit vector along the road through this tile. */
+      ax: number; ay: number;
+      /** True only for a through-run: two links, exactly opposite. */
+      straight: boolean;
+      water: boolean;
     }
 
-    // E — stone plaza apron under the road at city entrances, with a cobble paving
-    //     ring and a central fountain (paved roads) or well (dirt roads)
-    if (tileSize >= 6) {
-      for (const r of roadTiles) {
-        const t = tileMap.grid[r.x][r.y];
-        if (!t.cityId || !cities.has(t.cityId)) continue;
-        const pxx = cxx(r.x);
-        const pyy = cyy(r.y);
-        ctx.fillStyle = 'rgba(87, 83, 78, 0.6)';
-        ctx.beginPath();
-        ctx.arc(pxx, pyy, tileSize * 0.62, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(52, 48, 44, 0.85)';
-        ctx.lineWidth = Math.max(1, tileSize * 0.05);
-        ctx.stroke();
-        ctx.strokeStyle = 'rgba(120, 113, 108, 0.35)';
-        ctx.lineWidth = Math.max(1, tileSize * 0.035);
-        ctx.setLineDash([Math.max(2, tileSize * 0.06), Math.max(2, tileSize * 0.05)]);
-        ctx.beginPath();
-        ctx.arc(pxx, pyy, tileSize * 0.5, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        if (r.l >= 2) {
-          // fountain: stone ring + water basin + jet
-          ctx.fillStyle = levelBorder(r.l);
-          ctx.beginPath();
-          ctx.arc(pxx, pyy, tileSize * 0.2, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = 'rgba(56, 189, 248, 0.55)';
-          ctx.beginPath();
-          ctx.arc(pxx, pyy, tileSize * 0.15, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = 'rgba(186, 230, 253, 0.9)';
-          ctx.beginPath();
-          ctx.arc(pxx, pyy, tileSize * 0.05, 0, Math.PI * 2);
-          ctx.fill();
+    // One tile of margin so a road leaving the viewport still joins up to the
+    // half its neighbour draws.
+    const x0 = Math.max(0, minX - 1);
+    const x1 = Math.min(tileMap.width - 1, maxX + 1);
+    const y0 = Math.max(0, minY - 1);
+    const y1 = Math.min(tileMap.height - 1, maxY + 1);
+
+    // The graph build asks about each tile's neighbours from up to eight
+    // directions, and each of those asks again to prune the diagonals — two
+    // dozen lookups per road tile, every frame, on a map that can hold
+    // thousands of them. Read the window once into a flat grid instead.
+    const gw = x1 - x0 + 3;
+    const gh = y1 - y0 + 3;
+    const levels = new Uint8Array(gw * gh);
+    for (let x = Math.max(0, x0 - 1); x <= Math.min(tileMap.width - 1, x1 + 1); x++) {
+      const column = tileMap.grid[x];
+      const base = (x - x0 + 1) * gh - y0 + 1;
+      for (let y = Math.max(0, y0 - 1); y <= Math.min(tileMap.height - 1, y1 + 1); y++) {
+        levels[base + y] = column[y].roadLevelEffective;
+      }
+    }
+    /** Road grade at a tile, for coordinates inside the cached window. */
+    const gradeAt = (x: number, y: number): number =>
+      (x < x0 - 1 || x > x1 + 1 || y < y0 - 1 || y > y1 + 1) ? 0 : levels[(x - x0 + 1) * gh + (y - y0 + 1)];
+
+    const nodes: RoadNode[] = [];
+    const paths = new Map<string, Path2D>();
+    const pathFor = (key: string): Path2D => {
+      let p = paths.get(key);
+      if (!p) { p = new Path2D(); paths.set(key, p); }
+      return p;
+    };
+
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const level = gradeAt(x, y);
+        if (level <= 0) continue;
+        const tile = tileMap.grid[x][y];
+
+        const links: number[] = [];
+        for (let d = 0; d < 8; d++) {
+          const [dx, dy] = DIRS[d];
+          if (gradeAt(x + dx, y + dy) <= 0) continue;
+          if (dx !== 0 && dy !== 0) {
+            // The corner is already turned the long way round: drawing the
+            // shortcut as well would fill the bend in as a triangle.
+            if (gradeAt(x + dx, y) > 0 || gradeAt(x, y + dy) > 0) continue;
+          }
+          links.push(d);
+        }
+
+        const kingdom = tile.kingdomId ? kingdoms.get(tile.kingdomId) : undefined;
+        const era = kingdom ? kingdom.research.currentEra() : 'stone';
+        const modern = era === 'industrial' || era === 'modern';
+        const water = this.isWater(tile.type);
+        const family = roadSurfaceFamily(water ? TerrainType.SOIL : tile.type);
+        const key = level >= 3 && modern ? 'asphalt' : SURFACE_KEYS[level][family];
+
+        // The bearing of the road through the tile: the line between its two
+        // ends where it has two, otherwise whichever end it has.
+        const head = DIRS[links[0] ?? 0];
+        const tail = DIRS[links[links.length - 1] ?? 0];
+        const ax = links.length >= 2 ? head[0] - tail[0] : head[0];
+        const ay = links.length >= 2 ? head[1] - tail[1] : head[1];
+        const alen = Math.hypot(ax, ay) || 1;
+
+        const node: RoadNode = {
+          x, y, tile, level, key,
+          width: widthFor(level),
+          links,
+          ax: ax / alen, ay: ay / alen,
+          straight: links.length === 2 && head[0] === -tail[0] && head[1] === -tail[1],
+          water
+        };
+        nodes.push(node);
+
+        // Water is carried on a structure, not surfaced — it is drawn later,
+        // along its own bearing, and must not be part of the road body.
+        if (water) continue;
+
+        const px = cxx(x);
+        const py = cyy(y);
+        const half = tileSize / 2;
+        const path = pathFor(key);
+        if (links.length === 0) {
+          path.moveTo(px, py);
+          path.lineTo(px + 0.01, py);
+        } else if (links.length === 2) {
+          const a = DIRS[links[0]];
+          const b = DIRS[links[1]];
+          path.moveTo(px + a[0] * half, py + a[1] * half);
+          path.quadraticCurveTo(px, py, px + b[0] * half, py + b[1] * half);
         } else {
-          // well: dark shaft + rope ring
-          ctx.fillStyle = '#292524';
-          ctx.beginPath();
-          ctx.arc(pxx, pyy, tileSize * 0.12, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = '#78716c';
-          ctx.lineWidth = Math.max(1, tileSize * 0.03);
-          ctx.beginPath();
-          ctx.arc(pxx, pyy, tileSize * 0.09, 0, Math.PI * 2);
-          ctx.stroke();
+          // A terminus or a junction: spokes from the centre. Round caps and
+          // joins fuse them into one knuckle without a separate pad.
+          for (const d of links) {
+            const [dx, dy] = DIRS[d];
+            path.moveTo(px, py);
+            path.lineTo(px + dx * half, py + dy * half);
+          }
         }
       }
     }
 
-    const outline = tileSize >= 7;
+    if (nodes.length === 0) return;
+
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // A — body strokes. Dirt roads get a soft feathered edge (worn dirt), then a
-    //     darker outline when zoomed in, then the surface fill.
-    for (const g of segs) {
-      ctx.beginPath();
-      ctx.moveTo(g.x1, g.y1);
-      ctx.lineTo(g.x2, g.y2);
-      if (g.lMin === 1 && tileSize >= 7) {
-        ctx.strokeStyle = 'rgba(139, 90, 43, 0.2)';
-        ctx.lineWidth = roadWidth(1) + tileSize * 0.12;
-        ctx.stroke();
+    // Lowest grade first, so where a track meets a highway the highway carries
+    // through the junction and the track ends against it — the way a minor
+    // road joins a major one, rather than laying its kerb across it.
+    const levelOf = (key: string): number => (key === 'asphalt' ? 3 : Number(key[0]));
+    const layers = [...paths.entries()].sort((a, b) => levelOf(a[0]) - levelOf(b[0]));
+
+    // The verge: a road on open ground is a raised bed, and what reads as the
+    // bed is the ground losing its light either side of it.
+    if (detail >= 1) {
+      ctx.strokeStyle = 'rgba(24, 20, 16, 0.18)';
+      for (const [key, path] of layers) {
+        ctx.lineWidth = widthFor(levelOf(key)) + tileSize * 0.16;
+        ctx.stroke(path);
       }
-      if (outline) {
-        ctx.strokeStyle = levelBorder(g.lMin);
-        ctx.lineWidth = roadWidth(g.lMin) + Math.max(2, tileSize * 0.07);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = levelColor(g.lMin);
-      ctx.lineWidth = roadWidth(g.lMin);
-      ctx.stroke();
     }
 
-    // A — junction pads at L-bends and 3-way crossings: a single joined pad
-    //     unifies the knuckle where two round-capped segments meet
-    if (tileSize >= 6) {
-      for (const r of roadTiles) {
-        const t = tileMap.grid[r.x][r.y];
-        if (this.isWater(t.type)) continue;
-        const dUp = !!(tileMap.getTile(r.x, r.y - 1)?.roadLevelEffective);
-        const dDown = !!(tileMap.getTile(r.x, r.y + 1)?.roadLevelEffective);
-        const dLeft = !!(tileMap.getTile(r.x - 1, r.y)?.roadLevelEffective);
-        const dRight = !!(tileMap.getTile(r.x + 1, r.y)?.roadLevelEffective);
-        const deg = (dUp ? 1 : 0) + (dDown ? 1 : 0) + (dLeft ? 1 : 0) + (dRight ? 1 : 0);
-        if (deg === 4 || deg < 2) continue;
-        if ((dUp && dDown && !dLeft && !dRight) || (!dUp && !dDown && dLeft && dRight)) continue;
-        const pxx = cxx(r.x);
-        const pyy = cyy(r.y);
-        const padR = roadWidth(r.l) / 2 + Math.max(1, tileSize * 0.04);
-        if (outline) {
-          ctx.fillStyle = levelBorder(r.l);
-          ctx.beginPath();
-          ctx.arc(pxx, pyy, padR + 1, 0, Math.PI * 2);
-          ctx.fill();
+    // Kerb and cut edge, then the running surface — each grade laid complete
+    // before the next, so a junction reads as one road crossing another.
+    for (const [key, path] of layers) {
+      if (detail >= 1) {
+        ctx.strokeStyle = SURFACES[key].k;
+        ctx.lineWidth = widthFor(levelOf(key)) + Math.max(1.5, tileSize * 0.10);
+        ctx.stroke(path);
+      }
+      ctx.strokeStyle = SURFACES[key].s;
+      ctx.lineWidth = detail >= 1 ? widthFor(levelOf(key)) : Math.max(1, widthFor(levelOf(key)) * 0.9);
+      ctx.stroke(path);
+    }
+
+    if (detail === 0) {
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      return;
+    }
+
+    // ---- Bridges: structures, drawn along the true bearing of the crossing.
+    for (const node of nodes) {
+      if (!node.water || node.links.length === 0) continue;
+      this.drawBridgeSpan(node.level, cxx(node.x), cyy(node.y), node.ax, node.ay, node.width, tileSize, fine);
+    }
+
+    if (detail < 2) {
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      return;
+    }
+
+    // ---- Close-range surface: everything below here is what the road is made
+    //      of and what the ground has done to it.
+    //
+    // Every mark is accumulated into a Path2D shared by everything of its
+    // kind and drawn once at the end. A road tile carries a dozen small marks,
+    // and a screen can hold hundreds of road tiles; issuing each as its own
+    // stroke costs more than all the road geometry put together.
+    interface Mark { path: Path2D; colour: string; width: number; dash?: [number, number]; fill: boolean }
+    const marks = new Map<string, Mark>();
+    const strokeMark = (id: string, colour: string, width: number, dash?: [number, number]): Path2D => {
+      let m = marks.get(id);
+      if (!m) { m = { path: new Path2D(), colour, width, dash, fill: false }; marks.set(id, m); }
+      return m.path;
+    };
+    const fillMark = (id: string, colour: string): Path2D => {
+      let m = marks.get(id);
+      if (!m) { m = { path: new Path2D(), colour, width: 0, fill: true }; marks.set(id, m); }
+      return m.path;
+    };
+    /** Relief and wear are continuous; three steps is all the eye resolves. */
+    const step = (v: number): number => (v < 0.45 ? 0 : v < 0.75 ? 1 : 2);
+    const STEP_AT = [0.3, 0.6, 0.95];
+
+    const townSquares = new Set<string>();
+    for (const city of cities.values()) townSquares.add(`${Math.floor(city.x)},${Math.floor(city.y)}`);
+
+    for (const node of nodes) {
+      if (node.water) continue;
+      const { x, y, tile, level, width: w } = node;
+      const px = cxx(x);
+      const py = cyy(y);
+      const ax = node.ax;
+      const ay = node.ay;
+      const nx = -ay;
+      const ny = ax;
+      const surface = SURFACES[node.key];
+
+      // Everything below runs *along* the road, so it is only drawn where the
+      // road actually runs straight through the tile. On a bend the chord is
+      // not the road, and at a dead end the line would carry on into open
+      // ground — which is exactly how markings sprout whiskers off the end of
+      // a cul-de-sac. Junctions and bends stay plain, as they do in life.
+      if (!node.straight) {
+        if (tile.cityId && townSquares.has(`${x},${y}`)) this.drawTownSquare(px, py, level, tileSize, surface.k);
+        continue;
+      }
+      // Half-length of the road within the tile: to the edge on a cardinal
+      // run, to the corner on a diagonal one.
+      const reach = tileSize * 0.5 / Math.max(Math.abs(ax), Math.abs(ay));
+      const along = (path: Path2D, offset: number): void => {
+        path.moveTo(px + nx * offset - ax * reach, py + ny * offset - ay * reach);
+        path.lineTo(px + nx * offset + ax * reach, py + ny * offset + ay * reach);
+      };
+
+      // Cut and fill. A road across a slope is a bench: the uphill side is a
+      // cut face catching the light, the downhill side an embankment throwing
+      // a shadow. This is the single detail that makes a road read as sitting
+      // *in* the terrain rather than painted on top of it.
+      const hE = tileMap.getTile(x + 1, y)?.height ?? tile.height;
+      const hW = tileMap.getTile(x - 1, y)?.height ?? tile.height;
+      const hS = tileMap.getTile(x, y + 1)?.height ?? tile.height;
+      const hN = tileMap.getTile(x, y - 1)?.height ?? tile.height;
+      const across = (hE - hW) * 0.5 * nx + (hS - hN) * 0.5 * ny; // +ve: uphill on the +n side
+      // Scaled against the median tile-to-tile step of the height field, so
+      // ordinary rolling country shows a bench and only flat ground shows none.
+      const relief = Math.min(1, Math.abs(across) / 0.012);
+      if (relief > 0.18) {
+        const b = step(relief);
+        const uphill = across >= 0 ? 1 : -1;
+        const edge = w / 2 + Math.max(0.6, tileSize * 0.04);
+        along(strokeMark(`cutL${level}${b}`, `rgba(255, 248, 235, ${0.10 + 0.18 * STEP_AT[b]})`, Math.max(1, tileSize * 0.05)), edge * uphill);
+        along(strokeMark(`cutD${level}${b}`, `rgba(12, 10, 8, ${0.16 + 0.26 * STEP_AT[b]})`, Math.max(1, tileSize * 0.07)), -edge * uphill);
+      }
+
+      // Camber: made ground is crowned so it sheds water.
+      if (level >= 2) {
+        along(strokeMark(`camber${level}`, 'rgba(255, 252, 245, 0.10)', Math.max(1, w * 0.28)), 0);
+      }
+
+      if (level === 1 && fine) {
+        // Wheel ruts, worn where the axles put them.
+        const rut = strokeMark('rut', 'rgba(30, 22, 14, 0.35)', Math.max(1, tileSize * 0.035));
+        along(rut, w * 0.28);
+        along(rut, -w * 0.28);
+      } else if (level === 2 && fine) {
+        // Setts. Scattered stones catching the light, not courses at a fixed
+        // pitch: anything laid to a regular pitch across the road reads as
+        // sleepers from three tiles away, and a road is not a railway.
+        this.setHashBase(x, y);
+        const sett = Math.max(1, tileSize * 0.075);
+        const light = fillMark('settLight', 'rgba(255, 251, 242, 0.11)');
+        const dark = fillMark('settDark', 'rgba(28, 25, 21, 0.14)');
+        for (let i = 0; i < 5; i++) {
+          const t = (this.h(i * 2) - 0.5) * reach * 1.85;
+          const o = (this.h(i * 2 + 1) - 0.5) * w * 0.78;
+          (i % 2 === 0 ? light : dark)
+            .rect(px + ax * t + nx * o - sett / 2, py + ay * t + ny * o - sett / 2, sett, sett);
         }
-        ctx.fillStyle = levelColor(r.l);
-        ctx.beginPath();
-        ctx.arc(pxx, pyy, padR, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // A — isolated single-tile roads get a round cap blob with outline
-    for (const r of roadTiles) {
-      const linked = !!(
-        tileMap.getTile(r.x, r.y - 1)?.roadLevelEffective ||
-        tileMap.getTile(r.x, r.y + 1)?.roadLevelEffective ||
-        tileMap.getTile(r.x - 1, r.y)?.roadLevelEffective ||
-        tileMap.getTile(r.x + 1, r.y)?.roadLevelEffective
-      );
-      if (linked) continue;
-      ctx.beginPath();
-      ctx.arc(cxx(r.x), cyy(r.y), roadWidth(r.l) / 2 + 1, 0, Math.PI * 2);
-      if (outline) {
-        ctx.fillStyle = levelBorder(r.l);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(cxx(r.x), cyy(r.y), roadWidth(r.l) / 2 - 0.5, 0, Math.PI * 2);
-      }
-      ctx.fillStyle = levelColor(r.l);
-      ctx.fill();
-    }
-
-    // C — level transitions: higher grade steps up from its own center to the midpoint,
-    //     with a dark pavement joint where the two grades meet
-    for (const g of segs) {
-      if (g.lMax <= g.lMin) continue;
-      ctx.beginPath();
-      ctx.moveTo(g.hx, g.hy);
-      ctx.lineTo((g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2);
-      ctx.strokeStyle = levelColor(g.lMax);
-      ctx.lineWidth = roadWidth(g.lMax);
-      ctx.stroke();
-      // joint seam across the road at the grade step
-      if (tileSize >= 7) {
-        const jx = (g.x1 + g.x2) / 2;
-        const jy = (g.y1 + g.y2) / 2;
-        const dx = g.x2 - g.x1;
-        const dy = g.y2 - g.y1;
-        const len = Math.hypot(dx, dy) || 1;
-        const nx = -dy / len;
-        const ny = dx / len;
-        const sw = roadWidth(g.lMax) / 2 + 1;
-        ctx.strokeStyle = 'rgba(41, 37, 36, 0.7)';
-        ctx.lineWidth = Math.max(1.5, tileSize * 0.04);
-        ctx.beginPath();
-        ctx.moveTo(jx + nx * sw, jy + ny * sw);
-        ctx.lineTo(jx - nx * sw, jy - ny * sw);
-        ctx.stroke();
-      }
-    }
-
-    // A — dead-end terminals: paved roads get a rounded turnaround plaza, dirt roads
-    //     a reinforced round cap (Cities:Skylines-style)
-    if (tileSize >= 7) {
-      for (const r of roadTiles) {
-        const dirs: [number, number][] = [];
-        for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
-          if ((tileMap.getTile(r.x + dx, r.y + dy)?.roadLevelEffective || 0) > 0) dirs.push([dx, dy]);
-        }
-        if (dirs.length !== 1) continue;
-        const [ddx, ddy] = dirs[0];
-        const pxx = cxx(r.x);
-        const pyy = cyy(r.y);
-        const rw = roadWidth(r.l);
-        const rt = r.l >= 3 ? tileSize * 0.6 : r.l === 2 ? tileSize * 0.48 : tileSize * 0.3;
-        const inset = Math.max(1.5, tileSize * 0.04);
-        // turnaround sits beyond the dead end, away from the incoming road (-ddx, -ddy)
-        if (ddy === -1) {
-          ctx.fillStyle = levelBorder(r.l); ctx.beginPath(); ctx.arc(pxx, pyy, rt, 0, Math.PI); ctx.fill();
-          ctx.fillStyle = levelColor(r.l); ctx.beginPath(); ctx.arc(pxx, pyy, rt - inset, 0, Math.PI); ctx.fill();
-          ctx.fillRect(pxx - rw / 2, pyy, rw, rt);
-        } else if (ddy === 1) {
-          ctx.fillStyle = levelBorder(r.l); ctx.beginPath(); ctx.arc(pxx, pyy, rt, Math.PI, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = levelColor(r.l); ctx.beginPath(); ctx.arc(pxx, pyy, rt - inset, Math.PI, Math.PI * 2); ctx.fill();
-          ctx.fillRect(pxx - rw / 2, pyy - rt, rw, rt);
-        } else if (ddx === -1) {
-          ctx.fillStyle = levelBorder(r.l); ctx.beginPath(); ctx.arc(pxx, pyy, rt, -Math.PI / 2, Math.PI / 2); ctx.fill();
-          ctx.fillStyle = levelColor(r.l); ctx.beginPath(); ctx.arc(pxx, pyy, rt - inset, -Math.PI / 2, Math.PI / 2); ctx.fill();
-          ctx.fillRect(pxx, pyy - rw / 2, rt, rw);
-        } else {
-          ctx.fillStyle = levelBorder(r.l); ctx.beginPath(); ctx.arc(pxx, pyy, rt, Math.PI / 2, (Math.PI * 3) / 2); ctx.fill();
-          ctx.fillStyle = levelColor(r.l); ctx.beginPath(); ctx.arc(pxx, pyy, rt - inset, Math.PI / 2, (Math.PI * 3) / 2); ctx.fill();
-          ctx.fillRect(pxx - rt, pyy - rw / 2, rt, rw);
-        }
-      }
-    }
-
-    // C+ — imperial (level 3) straight runs get lane markings and lamp posts
-    if (tileSize >= 8) {
-      for (const r of roadTiles) {
-        if (r.l < 3) continue;
-        const t = tileMap.grid[r.x][r.y];
-        if (this.isWater(t.type)) continue;
-        const up = tileMap.getTile(r.x, r.y - 1)?.roadLevelEffective || 0;
-        const down = tileMap.getTile(r.x, r.y + 1)?.roadLevelEffective || 0;
-        const left = tileMap.getTile(r.x - 1, r.y)?.roadLevelEffective || 0;
-        const right = tileMap.getTile(r.x + 1, r.y)?.roadLevelEffective || 0;
-        const straightN = up >= 3 && down >= 3 && left === 0 && right === 0;
-        const straightE = left >= 3 && right >= 3 && up === 0 && down === 0;
-        if (!straightN && !straightE) continue;
-        const pxx = r.x * tileSize + baseSX;
-        const pyy = r.y * tileSize + baseSY;
-        const w = roadWidth(3);
-        if (straightN) {
-          dashLine(pxx + tileSize / 2, pyy, pxx + tileSize / 2, pyy + tileSize,
-            'rgba(120, 53, 15, 0.85)', Math.max(1.5, tileSize * 0.045),
-            [Math.max(3, tileSize * 0.14), Math.max(3, tileSize * 0.12)]);
-          for (const off of [w * 0.32, -w * 0.32]) {
-            dashLine(pxx + tileSize / 2 + off, pyy, pxx + tileSize / 2 + off, pyy + tileSize,
-              'rgba(254, 243, 199, 0.35)', Math.max(1, tileSize * 0.03));
+        along(strokeMark('settJoint', 'rgba(30, 28, 24, 0.10)', Math.max(1, tileSize * 0.02)), 0);
+      } else if (level >= 3) {
+        if (node.key === 'asphalt') {
+          along(strokeMark('lane', 'rgba(232, 200, 90, 0.55)', Math.max(1, tileSize * 0.035),
+            [Math.max(2, tileSize * 0.16), Math.max(2, tileSize * 0.14)]), 0);
+          const edge = strokeMark('laneEdge', 'rgba(238, 236, 230, 0.30)', Math.max(1, tileSize * 0.025));
+          along(edge, w * 0.40);
+          along(edge, -w * 0.40);
+        } else if (fine) {
+          // A dressed imperial way: kerbstones down both edges, and slabs
+          // broad enough that only a few show per tile.
+          const kerb = strokeMark('imperialKerb', 'rgba(245, 240, 230, 0.22)', Math.max(1, tileSize * 0.03));
+          along(kerb, w * 0.42);
+          along(kerb, -w * 0.42);
+          this.setHashBase(x, y);
+          const slab = Math.max(1, tileSize * 0.12);
+          const light = fillMark('slabLight', 'rgba(255, 251, 242, 0.10)');
+          const dark = fillMark('slabDark', 'rgba(38, 34, 28, 0.10)');
+          for (let i = 0; i < 4; i++) {
+            const t = (this.h(i * 2 + 16) - 0.5) * reach * 1.7;
+            const o = (this.h(i * 2 + 17) - 0.5) * w * 0.6;
+            (i % 2 === 0 ? light : dark)
+              .rect(px + ax * t + nx * o - slab / 2, py + ay * t + ny * o - slab / 2, slab, slab);
           }
-          if ((r.x + r.y) % 2 === 0) lampAt(pxx + tileSize / 2 + w * 0.55, pyy + tileSize * 0.5);
-          else lampAt(pxx + tileSize / 2 - w * 0.55, pyy + tileSize * 0.5);
-        } else {
-          dashLine(pxx, pyy + tileSize / 2, pxx + tileSize, pyy + tileSize / 2,
-            'rgba(120, 53, 15, 0.85)', Math.max(1.5, tileSize * 0.045),
-            [Math.max(3, tileSize * 0.14), Math.max(3, tileSize * 0.12)]);
-          for (const off of [w * 0.32, -w * 0.32]) {
-            dashLine(pxx, pyy + tileSize / 2 + off, pxx + tileSize, pyy + tileSize / 2 + off,
-              'rgba(254, 243, 199, 0.35)', Math.max(1, tileSize * 0.03));
-          }
-          if ((r.x + r.y) % 2 === 0) lampAt(pxx + tileSize * 0.5, pyy + tileSize / 2 + w * 0.55);
-          else lampAt(pxx + tileSize * 0.5, pyy + tileSize / 2 - w * 0.55);
         }
       }
+
+      // Wear. War-damaged surfaces break up before they drop a whole grade.
+      if (fine && tile.roadDamage > 0.15) {
+        this.setHashBase(x, y);
+        const b = step(tile.roadDamage);
+        const holes = Math.min(5, 1 + Math.floor(tile.roadDamage * 5));
+        const pit = fillMark(`pothole${b}`, `rgba(26, 20, 14, ${0.30 + 0.35 * STEP_AT[b]})`);
+        const angle = Math.atan2(ay, ax);
+        for (let i = 0; i < holes; i++) {
+          const t = (this.h(i * 2) - 0.5) * reach * 1.6;
+          const o = (this.h(i * 2 + 1) - 0.5) * w * 0.8;
+          pit.ellipse(
+            px + ax * t + nx * o, py + ay * t + ny * o,
+            Math.max(0.8, tileSize * 0.05), Math.max(0.6, tileSize * 0.035),
+            angle, 0, Math.PI * 2
+          );
+        }
+      }
+
+      // A grade change is a joint in the pavement, not a fade.
+      for (const d of node.links) {
+        const [dx, dy] = DIRS[d];
+        if (gradeAt(x + dx, y + dy) === level) continue;
+        const ex = px + dx * tileSize * 0.5;
+        const ey = py + dy * tileSize * 0.5;
+        const jn = Math.hypot(dx, dy);
+        const joint = strokeMark('gradeJoint', 'rgba(20, 17, 14, 0.55)', Math.max(1, tileSize * 0.04));
+        joint.moveTo(ex + (-dy / jn) * w * 0.55, ey + (dx / jn) * w * 0.55);
+        joint.lineTo(ex - (-dy / jn) * w * 0.55, ey - (dx / jn) * w * 0.55);
+      }
+
+      // Milestones: a paved road out in open country is measured, and the
+      // stones are the only thing on it for miles.
+      if (fine && level >= 2 && !tile.cityId && (x * 7 + y * 3) % 11 === 0) {
+        const mo = w / 2 + tileSize * 0.16;
+        fillMark(`milestone${level}`, surface.k)
+          .rect(px + nx * mo - tileSize * 0.05, py + ny * mo - tileSize * 0.06, tileSize * 0.1, tileSize * 0.12);
+        fillMark('milestoneFace', 'rgba(236, 231, 219, 0.75)')
+          .rect(px + nx * mo - tileSize * 0.035, py + ny * mo - tileSize * 0.05, tileSize * 0.07, tileSize * 0.04);
+      }
+
+      // Street lighting: only on a modern paved road, and only where there is
+      // a settlement to pay the lamplighter.
+      if (fine && node.key === 'asphalt' && tile.cityId && (x + y) % 3 === 0) {
+        const side = (x + y) % 6 === 0 ? 1 : -1; // staggered, as they are laid out
+        const off = side * (w / 2 + tileSize * 0.14);
+        this.drawStreetLamp(px + nx * off, py + ny * off, tileSize);
+      }
+
+      // A town square where the road reaches the heart of the settlement —
+      // once per city, not once per paved tile inside it.
+      if (tile.cityId && townSquares.has(`${x},${y}`)) this.drawTownSquare(px, py, level, tileSize, surface.k);
     }
 
-    // E — bridges: deck, railings, plank seams, abutments, piers, under-deck shadow
-    for (const r of roadTiles) {
-      const t = tileMap.grid[r.x][r.y];
-      if (!this.isWater(t.type)) continue;
-      const pxx = r.x * tileSize + baseSX;
-      const pyy = r.y * tileSize + baseSY;
-      const w = roadWidth(r.l);
-      const up = tileMap.getTile(r.x, r.y - 1)?.roadLevelEffective || 0;
-      const down = tileMap.getTile(r.x, r.y + 1)?.roadLevelEffective || 0;
-      const left = tileMap.getTile(r.x - 1, r.y)?.roadLevelEffective || 0;
-      const right = tileMap.getTile(r.x + 1, r.y)?.roadLevelEffective || 0;
-      const vertical = up > 0 || down > 0;
-      const horizontal = left > 0 || right > 0;
-      const isV = vertical || (!horizontal && (r.x + r.y) % 2 === 0);
-      const deckW = w + 4;
-
-      // under-deck shadow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-      if (isV) ctx.fillRect(pxx + 2 - deckW / 2, pyy + 2, deckW, tileSize);
-      else ctx.fillRect(pxx + 2, pyy + 2 - deckW / 2, tileSize, deckW);
-
-      // deck outline + fill
-      ctx.fillStyle = levelBorder(r.l);
-      if (isV) ctx.fillRect(pxx - deckW / 2 - 1, pyy, deckW + 2, tileSize);
-      else ctx.fillRect(pxx, pyy - deckW / 2 - 1, tileSize, deckW + 2);
-      ctx.fillStyle = r.l === 1 ? '#78350f' : r.l === 2 ? '#64748b' : '#92400e';
-      if (isV) ctx.fillRect(pxx - deckW / 2, pyy + 1, deckW, tileSize - 2);
-      else ctx.fillRect(pxx + 1, pyy - deckW / 2, tileSize - 2, deckW);
-
-      // plank seams / pavement joints + railing posts along both sides
-      ctx.fillStyle = levelBorder(r.l);
-      const step = Math.max(3, Math.floor(tileSize * 0.3));
-      const rail = Math.max(1, tileSize * 0.05);
-      if (isV) {
-        for (let p = step; p < tileSize; p += step) ctx.fillRect(pxx - deckW / 2, pyy + p - 1, deckW, 1);
-        ctx.fillRect(pxx - deckW / 2 - 1, pyy, rail, tileSize);
-        ctx.fillRect(pxx + deckW / 2, pyy, rail, tileSize);
-      } else {
-        for (let p = step; p < tileSize; p += step) ctx.fillRect(pxx + p - 1, pyy - deckW / 2, 1, deckW);
-        ctx.fillRect(pxx, pyy - deckW / 2 - 1, tileSize, rail);
-        ctx.fillRect(pxx, pyy + deckW / 2, tileSize, rail);
+    for (const mark of marks.values()) {
+      if (mark.fill) {
+        ctx.fillStyle = mark.colour;
+        ctx.fill(mark.path);
+        continue;
       }
-
-      // abutments at landfall
-      if (isV) {
-        if (up > 0 && !this.isWater(tileMap.grid[r.x][r.y - 1].type)) {
-          ctx.fillRect(pxx - deckW / 2 - 2, pyy - 1, deckW + 4, 3);
-        }
-        if (down > 0 && !this.isWater(tileMap.grid[r.x][r.y + 1].type)) {
-          ctx.fillRect(pxx - deckW / 2 - 2, pyy + tileSize - 2, deckW + 4, 3);
-        }
-      } else {
-        if (left > 0 && !this.isWater(tileMap.grid[r.x - 1][r.y].type)) {
-          ctx.fillRect(pxx - 1, pyy - deckW / 2 - 2, 3, deckW + 4);
-        }
-        if (right > 0 && !this.isWater(tileMap.grid[r.x + 1][r.y].type)) {
-          ctx.fillRect(pxx + tileSize - 2, pyy - deckW / 2 - 2, 3, deckW + 4);
-        }
-      }
-
-      // piers under long spans: one at every joint between consecutive water tiles
-      ctx.fillStyle = 'rgba(30, 27, 24, 0.85)';
-      if (isV) {
-        if (down > 0 && this.isWater(tileMap.grid[r.x][r.y + 1].type)) {
-          ctx.fillRect(pxx - deckW / 2 - 2, pyy + tileSize - 2, deckW + 4, 3);
-        }
-        if (up > 0 && this.isWater(tileMap.grid[r.x][r.y - 1].type)) {
-          ctx.fillRect(pxx - deckW / 2 - 2, pyy - 1, deckW + 4, 3);
-        }
-      } else {
-        if (right > 0 && this.isWater(tileMap.grid[r.x + 1][r.y].type)) {
-          ctx.fillRect(pxx + tileSize - 2, pyy - deckW / 2 - 2, 3, deckW + 4);
-        }
-        if (left > 0 && this.isWater(tileMap.grid[r.x - 1][r.y].type)) {
-          ctx.fillRect(pxx - 1, pyy - deckW / 2 - 2, 3, deckW + 4);
-        }
-      }
+      ctx.strokeStyle = mark.colour;
+      ctx.lineWidth = mark.width;
+      if (mark.dash) ctx.setLineDash(mark.dash);
+      ctx.stroke(mark.path);
+      if (mark.dash) ctx.setLineDash([]);
     }
 
-    // E — roundabouts at imperial (level 3) 4-way crossings: kerb ring, amber ring,
-    //     planted hub and zebra stripes on the arms
-    if (tileSize >= 8) {
-      for (const r of roadTiles) {
-        if (r.l < 3) continue;
-        const t = tileMap.grid[r.x][r.y];
-        if (this.isWater(t.type)) continue;
-        const up = tileMap.getTile(r.x, r.y - 1)?.roadLevelEffective || 0;
-        const down = tileMap.getTile(r.x, r.y + 1)?.roadLevelEffective || 0;
-        const left = tileMap.getTile(r.x - 1, r.y)?.roadLevelEffective || 0;
-        const right = tileMap.getTile(r.x + 1, r.y)?.roadLevelEffective || 0;
-        if (!(up > 0 && down > 0 && left > 0 && right > 0)) continue;
-        const pxx = cxx(r.x);
-        const pyy = cyy(r.y);
-        ctx.fillStyle = levelBorder(3);
-        ctx.beginPath();
-        ctx.arc(pxx, pyy, tileSize * 0.3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = levelColor(3);
-        ctx.beginPath();
-        ctx.arc(pxx, pyy, tileSize * 0.23, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = 'rgba(22, 101, 52, 0.85)';
-        ctx.beginPath();
-        ctx.arc(pxx, pyy, tileSize * 0.12, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#1f2937';
-        ctx.beginPath();
-        ctx.arc(pxx, pyy, tileSize * 0.045, 0, Math.PI * 2);
-        ctx.fill();
-        // zebra stripes on each arm
-        ctx.fillStyle = 'rgba(41, 37, 36, 0.8)';
-        const zw = Math.max(1.5, tileSize * 0.035);
-        const zl = tileSize * 0.08;
-        for (const [zx, zy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
-          const sx = zx === 0 ? pxx - zw / 2 : zx > 0 ? pxx + tileSize * 0.27 : pxx - tileSize * 0.27 - zw;
-          const sy = zy === 0 ? pyy - zw / 2 : zy > 0 ? pyy + tileSize * 0.27 : pyy - tileSize * 0.27 - zw;
-          ctx.fillRect(sx, sy, zx === 0 ? zw : zl, zy === 0 ? zw : zl);
-        }
-      }
-
-      // E — border gates at kingdom frontiers: twin towers with splayed bases and a
-      //     lintel crowned with a light capstone
-      for (const r of roadTiles) {
-        const t = tileMap.grid[r.x][r.y];
-        if (this.isWater(t.type)) continue;
-        const pxx = r.x * tileSize + baseSX;
-        const pyy = r.y * tileSize + baseSY;
-        const w = roadWidth(r.l);
-        const upT = tileMap.getTile(r.x, r.y - 1);
-        const downT = tileMap.getTile(r.x, r.y + 1);
-        const leftT = tileMap.getTile(r.x - 1, r.y);
-        const rightT = tileMap.getTile(r.x + 1, r.y);
-        const g = Math.max(2, tileSize * 0.06);
-        const gh = w + 7;
-        const gb = Math.max(2, tileSize * 0.05);
-        if (
-          rightT && leftT && rightT.roadLevelEffective > 0 && leftT.roadLevelEffective > 0 &&
-          rightT.kingdomId && leftT.kingdomId && rightT.kingdomId !== leftT.kingdomId &&
-          kingdoms.has(rightT.kingdomId) && kingdoms.has(leftT.kingdomId)
-        ) {
-          // horizontal road: gate spans vertically (towers flanking + lintel across)
-          ctx.fillStyle = '#1f2937';
-          ctx.fillRect(pxx + tileSize / 2 - w / 2 - g - 1, pyy + tileSize / 2 - gh / 2 - 1, g + 2, gh + 2);
-          ctx.fillRect(pxx + tileSize / 2 + w / 2 - 1, pyy + tileSize / 2 - gh / 2 - 1, g + 2, gh + 2);
-          ctx.fillStyle = '#292524';
-          ctx.fillRect(pxx + tileSize / 2 - w / 2 - g / 2, pyy + tileSize / 2 - gh / 2 + gb, g, gh - gb * 2);
-          ctx.fillRect(pxx + tileSize / 2 + w / 2 - g / 2, pyy + tileSize / 2 - gh / 2 + gb, g, gh - gb * 2);
-          ctx.fillStyle = '#1f2937';
-          ctx.fillRect(pxx + tileSize / 2 - w / 2 - g, pyy + tileSize / 2 - gh / 2, w + g * 2, g);
-          ctx.fillStyle = '#57534e';
-          ctx.fillRect(pxx + tileSize / 2 - w / 2 - g - 1, pyy + tileSize / 2 - gh / 2 - 1, w + g * 2 + 2, Math.max(1.5, tileSize * 0.03));
-          ctx.fillStyle = 'rgba(28, 25, 23, 0.9)';
-          ctx.fillRect(pxx + tileSize / 2 - w / 2 + 1, pyy + tileSize / 2 - g / 2, w / 2 - 1.5, g);
-          ctx.fillRect(pxx + tileSize / 2 + 1, pyy + tileSize / 2 - g / 2, w / 2 - 1.5, g);
-        }
-        if (
-          upT && downT && upT.roadLevelEffective > 0 && downT.roadLevelEffective > 0 &&
-          upT.kingdomId && downT.kingdomId && upT.kingdomId !== downT.kingdomId &&
-          kingdoms.has(upT.kingdomId) && kingdoms.has(downT.kingdomId)
-        ) {
-          // vertical road: gate spans horizontally
-          ctx.fillStyle = '#1f2937';
-          ctx.fillRect(pxx + tileSize / 2 - gh / 2 - 1, pyy + tileSize / 2 - w / 2 - g - 1, gh + 2, g + 2);
-          ctx.fillRect(pxx + tileSize / 2 - gh / 2 - 1, pyy + tileSize / 2 + w / 2 - 1, gh + 2, g + 2);
-          ctx.fillStyle = '#292524';
-          ctx.fillRect(pxx + tileSize / 2 - gh / 2 + gb, pyy + tileSize / 2 - w / 2 - g / 2, gh - gb * 2, g);
-          ctx.fillRect(pxx + tileSize / 2 - gh / 2 + gb, pyy + tileSize / 2 + w / 2 - g / 2, gh - gb * 2, g);
-          ctx.fillStyle = '#1f2937';
-          ctx.fillRect(pxx + tileSize / 2 - gh / 2, pyy + tileSize / 2 - w / 2 - g, g, w + g * 2);
-          ctx.fillStyle = '#57534e';
-          ctx.fillRect(pxx + tileSize / 2 - gh / 2 - 1, pyy + tileSize / 2 - w / 2 - g - 1, Math.max(1.5, tileSize * 0.03), w + g * 2 + 2);
-          ctx.fillStyle = 'rgba(28, 25, 23, 0.9)';
-          ctx.fillRect(pxx + tileSize / 2 - g / 2, pyy + tileSize / 2 - w / 2 + 1, g, w / 2 - 1.5);
-          ctx.fillRect(pxx + tileSize / 2 - g / 2, pyy + tileSize / 2 + 1, g, w / 2 - 1.5);
-        }
+    // Frontier posts, where a road of substance crosses between two realms.
+    for (const node of nodes) {
+      if (node.water || node.level < 2) continue;
+      for (const d of node.links) {
+        if (d > 3) continue; // each pair considered once
+        const [dx, dy] = DIRS[d];
+        const near = node.tile;
+        const far = tileMap.getTile(node.x + dx, node.y + dy);
+        if (!far || !near.kingdomId || !far.kingdomId || near.kingdomId === far.kingdomId) continue;
+        if (!kingdoms.has(near.kingdomId) || !kingdoms.has(far.kingdomId)) continue;
+        const jn = Math.hypot(dx, dy);
+        this.drawBorderPost(
+          cxx(node.x) + dx * tileSize * 0.5, cyy(node.y) + dy * tileSize * 0.5,
+          -dy / jn, dx / jn, node.width, tileSize
+        );
       }
     }
 
     ctx.lineCap = 'butt';
     ctx.lineJoin = 'miter';
+  }
+
+  /**
+   * A bridge, drawn as a structure standing in the water rather than as road
+   * paint on a water tile. Timber goes up on trestles, stone on piers with the
+   * arch showing between them, and both throw a deck shadow onto the current —
+   * which is what tells the eye the road is above the water and not in it.
+   */
+  private drawBridgeSpan(
+    level: number,
+    px: number, py: number,
+    ax: number, ay: number,
+    roadW: number,
+    tileSize: number,
+    fine: boolean
+  ): void {
+    const ctx = this.ctx;
+    const timber = level <= 1;
+    const deckHalf = roadW / 2 + Math.max(1, tileSize * 0.09);
+    // Slightly over a tile long, so consecutive spans of a long crossing read
+    // as one structure instead of a row of separate decks.
+    const half = tileSize * 0.54;
+
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(Math.atan2(ay, ax));
+
+    // The shadow the deck throws on the water.
+    ctx.fillStyle = 'rgba(6, 14, 24, 0.38)';
+    ctx.fillRect(-half, -deckHalf + tileSize * 0.12, half * 2, deckHalf * 2);
+
+    // Substructure: trestle bents for timber, masonry piers for stone. They
+    // stand proud of the deck on both sides — a pier you cannot see under the
+    // road it carries may as well not be there.
+    ctx.fillStyle = timber ? '#3f2a16' : '#4c4740';
+    const bents = timber ? [-half * 0.62, 0, half * 0.62] : [-half * 0.55, half * 0.55];
+    const bentW = Math.max(1, tileSize * (timber ? 0.06 : 0.11));
+    const bentReach = deckHalf + tileSize * 0.11;
+    for (const b of bents) {
+      ctx.fillRect(b - bentW / 2, -bentReach, bentW, bentReach * 2);
+    }
+    if (!timber) {
+      // Cutwaters: the wedge on the upstream nose of each pier.
+      ctx.fillStyle = '#57514a';
+      for (const b of bents) {
+        ctx.beginPath();
+        ctx.moveTo(b - bentW * 0.9, -bentReach);
+        ctx.lineTo(b + bentW * 0.9, -bentReach);
+        ctx.lineTo(b, -bentReach - tileSize * 0.07);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    if (!timber && fine) {
+      // The arch between the piers, catching light off the water.
+      ctx.strokeStyle = 'rgba(196, 188, 172, 0.35)';
+      ctx.lineWidth = Math.max(1, tileSize * 0.05);
+      ctx.beginPath();
+      ctx.arc(0, deckHalf * 0.2, half * 0.5, Math.PI, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // The deck.
+    ctx.fillStyle = timber ? '#6b4a2a' : level === 2 ? '#8b857a' : '#9c948a';
+    ctx.fillRect(-half, -deckHalf, half * 2, deckHalf * 2);
+
+    if (fine) {
+      // Planking across the deck, or paving joints along it.
+      ctx.fillStyle = timber ? 'rgba(46, 30, 15, 0.55)' : 'rgba(52, 48, 42, 0.4)';
+      const gap = Math.max(2, tileSize * (timber ? 0.16 : 0.28));
+      for (let t = -half + gap; t < half; t += gap) {
+        ctx.fillRect(t, -deckHalf, Math.max(1, tileSize * 0.03), deckHalf * 2);
+      }
+    }
+
+    // Railings, and the posts that carry them.
+    const railW = Math.max(1, tileSize * 0.055);
+    ctx.fillStyle = timber ? '#3f2a16' : '#5b564d';
+    ctx.fillRect(-half, -deckHalf - railW, half * 2, railW);
+    ctx.fillRect(-half, deckHalf, half * 2, railW);
+    if (fine) {
+      const postGap = Math.max(3, tileSize * 0.3);
+      for (let t = -half + postGap * 0.5; t < half; t += postGap) {
+        ctx.fillRect(t, -deckHalf - railW * 1.8, railW, railW * 1.8);
+        ctx.fillRect(t, deckHalf, railW, railW * 1.8);
+      }
+    }
+    ctx.restore();
+  }
+
+  /** A lamp standard and the pool of light under it. */
+  private drawStreetLamp(lx: number, ly: number, tileSize: number): void {
+    const ctx = this.ctx;
+    const post = Math.max(1, tileSize * 0.035);
+    ctx.fillStyle = '#2f3338';
+    ctx.fillRect(lx - post / 2, ly - tileSize * 0.15, post, tileSize * 0.15);
+    ctx.fillStyle = 'rgba(255, 224, 150, 0.16)';
+    ctx.beginPath();
+    ctx.arc(lx, ly - tileSize * 0.15, Math.max(2.5, tileSize * 0.16), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255, 232, 170, 0.9)';
+    ctx.beginPath();
+    ctx.arc(lx, ly - tileSize * 0.15, Math.max(1, tileSize * 0.04), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  /**
+   * The square at the heart of a settlement: an apron of cobbles the roads run
+   * out of, with a fountain where the town could afford masonry and a well
+   * where it could not.
+   */
+  private drawTownSquare(px: number, py: number, level: number, tileSize: number, kerb: string): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = 'rgba(96, 91, 84, 0.55)';
+    ctx.beginPath();
+    ctx.arc(px, py, tileSize * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = kerb;
+    ctx.lineWidth = Math.max(1, tileSize * 0.045);
+    ctx.stroke();
+    // Cobbles set in rings, the way a square is actually paved.
+    ctx.strokeStyle = 'rgba(140, 132, 122, 0.3)';
+    ctx.lineWidth = Math.max(1, tileSize * 0.028);
+    for (const r of [0.36, 0.24]) {
+      ctx.beginPath();
+      ctx.arc(px, py, tileSize * r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (level >= 2) {
+      ctx.fillStyle = kerb;
+      ctx.beginPath();
+      ctx.arc(px, py, tileSize * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(96, 165, 200, 0.6)';
+      ctx.beginPath();
+      ctx.arc(px, py, tileSize * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = '#241f1a';
+      ctx.beginPath();
+      ctx.arc(px, py, tileSize * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#6f665c';
+      ctx.lineWidth = Math.max(1, tileSize * 0.03);
+      ctx.stroke();
+    }
+  }
+
+  /**
+   * A frontier post: two stones flanking the road where it leaves one realm
+   * for another, with the bar between them. Small, because a customs post is
+   * small — the old twin-tower gate buried the road it stood on.
+   */
+  private drawBorderPost(
+    px: number, py: number,
+    nx: number, ny: number,
+    roadW: number,
+    tileSize: number
+  ): void {
+    const ctx = this.ctx;
+    const reach = roadW / 2 + tileSize * 0.1;
+    const stone = Math.max(1.5, tileSize * 0.09);
+    ctx.strokeStyle = 'rgba(232, 226, 212, 0.75)';
+    ctx.lineWidth = Math.max(1, tileSize * 0.035);
+    ctx.beginPath();
+    ctx.moveTo(px + nx * reach, py + ny * reach);
+    ctx.lineTo(px - nx * reach, py - ny * reach);
+    ctx.stroke();
+    ctx.fillStyle = '#2b2823';
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.arc(px + nx * reach * side, py + ny * reach * side, stone / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
