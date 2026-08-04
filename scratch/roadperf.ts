@@ -47,6 +47,32 @@ city.kingdomId = kingdom.id;
 cities.set(city.id, city);
 kingdoms.set(kingdom.id, kingdom);
 
+// Eight realms carved across the whole landmass: the territory pass builds a
+// distance field and traces every frontier contour each frame, so the number
+// that matters is the cost with a crowded, fragmented political map.
+const seats: { x: number; y: number; k: Kingdom }[] = [];
+for (let i = 0; i < 8; i++) {
+  const seat = new City(`s${i}`, `Seat${i}`, SpeciesType.HUMAN, 20 + (i % 4) * 28, 24 + Math.floor(i / 4) * 60, 'Founder', 1);
+  const realm = new Kingdom(`sk${i}`, `Realm${i}`, SpeciesType.HUMAN, getNextKingdomColor(), seat.id, 0);
+  seat.kingdomId = realm.id;
+  kingdoms.set(realm.id, realm);
+  cities.set(seat.id, seat);
+  seats.push({ x: seat.x, y: seat.y, k: realm });
+}
+for (let x = 0; x < SIZE; x++) {
+  for (let y = 0; y < SIZE; y++) {
+    const t = map.grid[x][y];
+    if (TERRAINS[t.type].isWater) continue;
+    let best = seats[0];
+    let bestD = Infinity;
+    for (const s of seats) {
+      const d = Math.hypot(s.x - x, s.y - y) + Math.sin(x * 0.3 + y * 0.2) * 4;
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    t.kingdomId = best.k.id;
+  }
+}
+
 const canvas = document.createElement('canvas');
 canvas.width = 1600;
 canvas.height = 900;
@@ -55,11 +81,17 @@ const renderer = new PixelRenderer(canvas);
 const particles = new ParticleManager();
 
 /** Frame cost with the roads erased, so the pass can be measured on its own. */
-function timeAt(zoom: number, withRoads: boolean): number {
+function timeAt(zoom: number, withRoads: boolean, withRealms: boolean = true): number {
   const saved: number[] = [];
+  const savedK: (string | null)[] = [];
   if (!withRoads) {
     for (let x = 0; x < SIZE; x++) {
       for (let y = 0; y < SIZE; y++) { saved.push(map.grid[x][y].roadLevel); map.grid[x][y].roadLevel = 0; }
+    }
+  }
+  if (!withRealms) {
+    for (let x = 0; x < SIZE; x++) {
+      for (let y = 0; y < SIZE; y++) { savedK.push(map.grid[x][y].kingdomId); map.grid[x][y].kingdomId = null; }
     }
   }
   const camera = new Camera();
@@ -76,14 +108,23 @@ function timeAt(zoom: number, withRoads: boolean): number {
     let k = 0;
     for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++) map.grid[x][y].roadLevel = saved[k++];
   }
+  if (!withRealms) {
+    let k = 0;
+    for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++) map.grid[x][y].kingdomId = savedK[k++];
+  }
   return ms;
 }
 
 const lines: string[] = [`road tiles: ${roadTiles}`];
 for (const zoom of [0.5, 1, 2, 4]) {
-  const withRoads = timeAt(zoom, true);
-  const without = timeAt(zoom, false);
-  lines.push(`zoom ${zoom} (tileSize ${(16 * zoom).toFixed(0)}): total ${withRoads.toFixed(1)} ms, no roads ${without.toFixed(1)} ms, road pass ${(withRoads - without).toFixed(1)} ms`);
+  const all = timeAt(zoom, true);
+  const noRoads = timeAt(zoom, false);
+  const noRealms = timeAt(zoom, true, false);
+  lines.push(
+    `zoom ${zoom} (tileSize ${(16 * zoom).toFixed(0)}): total ${all.toFixed(1)} ms` +
+    `, road pass ${(all - noRoads).toFixed(1)} ms` +
+    `, territory pass ${(all - noRealms).toFixed(1)} ms`
+  );
 }
 
 document.getElementById('out')!.textContent = lines.join('\n');

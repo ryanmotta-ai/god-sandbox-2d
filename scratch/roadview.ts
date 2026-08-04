@@ -323,5 +323,130 @@ function stockedCity(id: string, name: string, x: number, y: number): City {
   shot('great bridge — close', map, cities, kingdoms, { x: 20, y: 20 }, 4.6, 900, 620);
 }
 
+// ============================================================
+// Scene 5 — territory: several realms meeting on varied ground, so the
+// frontier can be judged for contrast against grass, sand, snow and water
+// ============================================================
+{
+  rng.setSeed(77);
+  const SIZE = 72;
+  const map = new TileMap(SIZE, SIZE, 'single_continent', 77);
+  const cities = new Map<string, City>();
+  const kingdoms = new Map<string, Kingdom>();
+
+  // Four realms grown as Voronoi cells from four seats, so the frontiers
+  // between them are irregular the way real ones are.
+  const seats: { x: number; y: number }[] = [
+    { x: 22, y: 22 }, { x: 50, y: 20 }, { x: 24, y: 50 }, { x: 52, y: 52 }
+  ];
+  seats.forEach((seat, i) => {
+    const city = stockedCity(`t${i}`, `Seat${i}`, seat.x, seat.y);
+    const kingdom = new Kingdom(`tk${i}`, `Realm ${i + 1}`, SpeciesType.HUMAN, getNextKingdomColor(), city.id, 0);
+    kingdoms.set(kingdom.id, kingdom);
+    city.kingdomId = kingdom.id;
+    kingdom.cityIds.add(city.id);
+    cities.set(city.id, city);
+  });
+  const realmIds = [...kingdoms.keys()];
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      if (TERRAINS[t.type].isWater) continue;
+      let best = -1;
+      let bestD = Infinity;
+      for (let i = 0; i < seats.length; i++) {
+        // A little noise on the metric keeps the borders from being straight
+        // bisectors, which no frontier in history has ever been.
+        const wobble = Math.sin(x * 0.21 + i * 2.3) * 3 + Math.cos(y * 0.19 + i) * 3;
+        const d = Math.hypot(seats[i].x - x, seats[i].y - y) + wobble;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (bestD > 30) continue; // unclaimed marches beyond the reach of any seat
+      t.kingdomId = realmIds[best];
+      if (Math.hypot(seats[best].x - x, seats[best].y - y) <= 3) t.cityId = `t${best}`;
+    }
+  }
+  shot('territory — four realms, whole map', map, cities, kingdoms, { x: SIZE / 2, y: SIZE / 2 }, 1.0, 900, 700);
+  shot('territory — a frontier, mid range', map, cities, kingdoms, { x: 36, y: 36 }, 2.6, 900, 620);
+  shot('territory — a frontier, close', map, cities, kingdoms, { x: 36, y: 30 }, 5.0, 900, 560);
+}
+
+// ============================================================
+// Scene 6 — expansion: the same renderer sees the border move, which is the
+// only way to exercise the flare (a fresh renderer has nothing to compare to)
+// ============================================================
+{
+  rng.setSeed(5);
+  const SIZE = 30;
+  const map = new TileMap(SIZE, SIZE, 'single_continent', 5);
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      const t = map.grid[x][y];
+      t.type = TerrainType.GRASS;
+      t.height = 0.5;
+      t.roadLevel = 0;
+      t.kingdomId = null;
+      t.cityId = null;
+      t.resourceType = null;
+      t.resourceAmount = 0;
+    }
+  }
+  const cities = new Map<string, City>();
+  const kingdoms = new Map<string, Kingdom>();
+  const seat = stockedCity('ex', 'Marchford', 8, 15);
+  const realm = new Kingdom('exk', 'The March', SpeciesType.HUMAN, getNextKingdomColor(), seat.id, 0);
+  kingdoms.set(realm.id, realm);
+  seat.kingdomId = realm.id;
+  cities.set(seat.id, seat);
+  const claim = (radius: number): void => {
+    for (let x = 0; x < SIZE; x++) {
+      for (let y = 0; y < SIZE; y++) {
+        if (Math.hypot(x - 8, y - 15) <= radius) map.grid[x][y].kingdomId = realm.id;
+      }
+    }
+  };
+
+  const host = document.getElementById('shots')!;
+  const title = document.createElement('div');
+  title.textContent = 'expansion — before, the frame it is taken, and settling';
+  title.style.cssText = 'font:12px monospace;color:#cbd5e1;padding:8px 0 4px';
+  host.append(title);
+  const strip = document.createElement('div');
+  strip.style.cssText = 'display:flex;gap:8px';
+  host.append(strip);
+
+  // One renderer across all three frames, since the flare is a comparison
+  // against what the same renderer saw last time.
+  const canvases: HTMLCanvasElement[] = [];
+  const camera = new Camera();
+  camera.setWorldBounds(SIZE, SIZE);
+  camera.centerOn(12, 15, 3.0);
+  camera.zoom = 3.0;
+  camera.targetZoom = 3.0;
+  for (let i = 0; i < 3; i++) {
+    const c = document.createElement('canvas');
+    c.width = 292;
+    c.height = 400;
+    strip.append(c);
+    canvases.push(c);
+  }
+  // Every frame must go through one renderer to share its memory of ownership,
+  // so each frame is drawn on a shared surface and copied out.
+  const stage = document.createElement('canvas');
+  stage.width = 292;
+  stage.height = 400;
+  const shared = new PixelRenderer(stage);
+  const frame = (into: HTMLCanvasElement): void => {
+    shared.render(camera, map, [], cities, kingdoms, particles, 'none', WorldEra.GOLDEN_AGE, null, null, 1);
+    into.getContext('2d')!.drawImage(stage, 0, 0);
+  };
+  claim(5);
+  frame(canvases[0]);      // settled
+  claim(9);
+  frame(canvases[1]);      // the frame the land is taken
+  for (let i = 0; i < 25; i++) shared.render(camera, map, [], cities, kingdoms, particles, 'none', WorldEra.GOLDEN_AGE, null, null, 1);
+  frame(canvases[2]);      // fading back down
+}
+
 document.title = 'roads ready';
 (window as unknown as { roadsReady: boolean }).roadsReady = true;

@@ -1404,30 +1404,9 @@ export class PixelRenderer {
         // Roads are drawn afterwards as a connected network (drawRoadsPass),
         // never as a per-tile lattice — a lattice cannot express a curve.
 
-        // ===== KINGDOM TERRITORY PAINT (WorldBox style) =====
-        if (tile.kingdomId && kingdoms.has(tile.kingdomId)) {
-          const k = kingdoms.get(tile.kingdomId)!;
-          this.ctx.fillStyle = overlayMode === 'political' ? k.cachedRgba45 : k.cachedRgba18;
-          this.ctx.fillRect(sx, sy, tileSize + 0.5, tileSize + 0.5);
-
-          // Territory border
-          if (tileSize > 4) {
-            const borderWidth = Math.max(1, tileSize * 0.12);
-            this.ctx.fillStyle = k.cachedRgbaBorder;
-            if (x > 0 && tileMap.grid[x - 1][y].kingdomId !== tile.kingdomId) {
-              this.ctx.fillRect(sx, sy, borderWidth, tileSize);
-            }
-            if (x < tileMap.width - 1 && tileMap.grid[x + 1][y].kingdomId !== tile.kingdomId) {
-              this.ctx.fillRect(sx + tileSize - borderWidth, sy, borderWidth, tileSize);
-            }
-            if (y > 0 && tileMap.grid[x][y - 1].kingdomId !== tile.kingdomId) {
-              this.ctx.fillRect(sx, sy, tileSize, borderWidth);
-            }
-            if (y < tileMap.height - 1 && tileMap.grid[x][y + 1].kingdomId !== tile.kingdomId) {
-              this.ctx.fillRect(sx, sy + tileSize - borderWidth, tileSize, borderWidth);
-            }
-          }
-        }
+        // Territory is painted afterwards, as a pass over the whole window:
+        // how strongly a tile is tinted depends on how far it is from the
+        // frontier, which no single tile can know about itself.
 
         // ===== SPECIES URBAN GRID CULTURE OVERLAY =====
         if (tile.cityId && cities.has(tile.cityId) && tileSize > 5) {
@@ -1547,6 +1526,9 @@ export class PixelRenderer {
         }
       }
     }
+
+    // ========== 1a. KINGDOM TERRITORY ==========
+    this.drawTerritoryPass(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, kingdoms, overlayMode);
 
     // ========== 1b. ROAD NETWORK POLYLINES (A+C+E) ==========
     this.drawRoadsPass(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, cities, kingdoms);
@@ -2205,6 +2187,456 @@ export class PixelRenderer {
     }
   }
 
+
+
+  /**
+   * Kingdom territory.
+   *
+   * The old pass washed every owned tile with a flat 18% of the realm's colour
+   * and then drew a border as four inset rectangles per tile. That is the
+   * worst of both worlds: the wash is heavy enough to grey out the terrain
+   * across the whole interior and still too weak to read as ownership, and the
+   * border comes out as a staircase of blocks with holes at every diagonal
+   * corner.
+   *
+   * What actually carries the information is the frontier, so that is what
+   * gets the contrast. Tint strength now falls off with distance from the
+   * border: firm along the edge, fading to a whisper a few tiles in, which
+   * leaves the middle of a realm looking like the land it is rather than like
+   * coloured glass. The border itself is stroked along the real edges between
+   * tiles — one continuous line with round joins, dark underneath so it reads
+   * against snow and sand alike, the realm's colour on top.
+   *
+   * Land newly taken flares briefly in the new owner's colour. Expansion is
+   * the most interesting thing a realm does and it used to happen silently.
+   */
+  /** Owner of every tile as of the last frame, for spotting land changing hands. */
+  private claimOwner: Int32Array = new Int32Array(0);
+  /** When each tile last changed hands, on the renderer's own clock. */
+  private claimAt: Float32Array = new Float32Array(0);
+  /** Stable per-realm ids, since the per-window numbering is rebuilt each frame. */
+  private claimIds: Map<string, number> = new Map();
+  /** False until one full frame has been recorded, so a load does not flare. */
+  private claimSeen: boolean = false;
+  /** Frontier contours for the frame, indexed by the window's realm numbering. */
+  private frontierPaths: (Path2D | undefined)[] = [];
+  /** Shoreline contours for the frame, drawn faintly — a coast is not contested. */
+  private shorePaths: (Path2D | undefined)[] = [];
+
+  private drawTerritoryPass(
+    tileMap: TileMap,
+    minX: number, maxX: number, minY: number, maxY: number,
+    tileSize: number, baseSX: number, baseSY: number,
+    kingdoms: Map<string, Kingdom>,
+    overlayMode: OverlayMode
+  ): void {
+    if (tileSize < 1 || kingdoms.size === 0) return;
+    const ctx = this.ctx;
+    const political = overlayMode === 'political';
+
+    const x0 = Math.max(0, minX - 1);
+    const x1 = Math.min(tileMap.width - 1, maxX + 1);
+    const y0 = Math.max(0, minY - 1);
+    const y1 = Math.min(tileMap.height - 1, maxY + 1);
+    const gw = x1 - x0 + 1;
+    const gh = y1 - y0 + 1;
+    if (gw <= 0 || gh <= 0) return;
+
+    // Owner of every tile in the window as a small integer: 0 for unclaimed,
+    // and a per-realm index otherwise. Comparing integers rather than string
+    // ids matters here because the distance field touches every tile several
+    // times.
+    const owners = new Int32Array(gw * gh);
+    // Water is tracked separately: a lake inside a realm is not a frontier,
+    // and outlining every pond turned the map into a net of coloured rings.
+    const wet = new Uint8Array(gw * gh);
+    const realms: (Kingdom | null)[] = [null];
+    const index = new Map<string, number>();
+    for (let x = x0; x <= x1; x++) {
+      const column = tileMap.grid[x];
+      const base = (x - x0) * gh - y0;
+      for (let y = y0; y <= y1; y++) {
+        if (this.isWater(column[y].type)) wet[base + y] = 1;
+        const id = column[y].kingdomId;
+        if (!id) continue;
+        let n = index.get(id);
+        if (n === undefined) {
+          const kingdom = kingdoms.get(id);
+          if (!kingdom) continue;
+          n = realms.length;
+          realms.push(kingdom);
+          index.set(id, n);
+        }
+        owners[base + y] = n;
+      }
+    }
+    if (realms.length === 1) return; // nothing claimed in view
+
+    // Distance from the frontier, in tiles, saturating at DEPTH. Chebyshev,
+    // computed with the usual two sweeps: a tile beside a different owner is
+    // 0, and every step inward adds one.
+    const DEPTH = 4;
+    const depth = new Uint8Array(gw * gh);
+    for (let gx = 0; gx < gw; gx++) {
+      for (let gy = 0; gy < gh; gy++) {
+        const i = gx * gh + gy;
+        const own = owners[i];
+        if (own === 0) { depth[i] = 0; continue; }
+        let edge = false;
+        for (let dx = -1; dx <= 1 && !edge; dx++) {
+          for (let dy = -1; dy <= 1 && !edge; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = gx + dx;
+            const ny = gy + dy;
+            // The window edge is not a frontier — the realm carries on past it.
+            if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
+            if (owners[nx * gh + ny] !== own) edge = true;
+          }
+        }
+        depth[i] = edge ? 0 : DEPTH;
+      }
+    }
+    for (let gx = 0; gx < gw; gx++) {
+      for (let gy = 0; gy < gh; gy++) {
+        const i = gx * gh + gy;
+        if (depth[i] === 0) continue;
+        let best = DEPTH;
+        if (gx > 0) best = Math.min(best, depth[(gx - 1) * gh + gy] + 1);
+        if (gy > 0) best = Math.min(best, depth[i - 1] + 1);
+        if (gx > 0 && gy > 0) best = Math.min(best, depth[(gx - 1) * gh + gy - 1] + 1);
+        if (gx > 0 && gy < gh - 1) best = Math.min(best, depth[(gx - 1) * gh + gy + 1] + 1);
+        depth[i] = Math.min(DEPTH, best);
+      }
+    }
+    for (let gx = gw - 1; gx >= 0; gx--) {
+      for (let gy = gh - 1; gy >= 0; gy--) {
+        const i = gx * gh + gy;
+        if (depth[i] === 0) continue;
+        let best = depth[i];
+        if (gx < gw - 1) best = Math.min(best, depth[(gx + 1) * gh + gy] + 1);
+        if (gy < gh - 1) best = Math.min(best, depth[i + 1] + 1);
+        if (gx < gw - 1 && gy < gh - 1) best = Math.min(best, depth[(gx + 1) * gh + gy + 1] + 1);
+        if (gx < gw - 1 && gy > 0) best = Math.min(best, depth[(gx + 1) * gh + gy - 1] + 1);
+        depth[i] = Math.min(DEPTH, best);
+      }
+    }
+
+    // How much colour a tile takes, by how deep inside the realm it sits.
+    // The interior keeps just enough to say "someone owns this" without
+    // pretending to be a paint swatch.
+    const TINT = political
+      ? [0.62, 0.52, 0.44, 0.38, 0.34]
+      : [0.30, 0.22, 0.16, 0.13, 0.12];
+
+    // One fill path per realm per depth band, so the whole window is painted
+    // in a handful of fills instead of one per tile.
+    const bands: Path2D[][] = realms.map(() => []);
+    for (let gx = 0; gx < gw; gx++) {
+      for (let gy = 0; gy < gh; gy++) {
+        const i = gx * gh + gy;
+        const own = owners[i];
+        if (own === 0) continue;
+        const band = depth[i];
+        let path = bands[own][band];
+        if (!path) { path = new Path2D(); bands[own][band] = path; }
+        const sx = (gx + x0) * tileSize + baseSX;
+        const sy = (gy + y0) * tileSize + baseSY;
+        path.rect(sx, sy, tileSize + 0.5, tileSize + 0.5);
+      }
+    }
+    for (let own = 1; own < realms.length; own++) {
+      const kingdom = realms[own]!;
+      const { r, g, b } = kingdom.rgbColor;
+      // Deepest first, so the firmer edge bands land on top of the wash.
+      for (let band = DEPTH; band >= 0; band--) {
+        const path = bands[own][band];
+        if (!path) continue;
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${TINT[band]})`;
+        ctx.fill(path);
+      }
+    }
+
+    // The frontier itself.
+    //
+    // Stroking each tile edge on its own gives a staircase, because a
+    // staircase is exactly what a grid boundary is. The edges are chained into
+    // continuous contours first and then drawn through their own corners, so
+    // the line cuts each step instead of climbing it — the difference between
+    // a border that looks drawn and one that looks like pixels.
+    //
+    // Water never makes a frontier. A realm's coast is already obvious from
+    // the sea, and ringing every inland lake in the realm's colour was pure
+    // noise; the coast is carried by the tint band instead.
+    if (tileSize >= 3) {
+      const pt = (x: number, y: number): number => x * 4096 + y;
+      for (let own = 1; own < realms.length; own++) {
+        // Two kinds of edge, because they mean different things. Where a realm
+        // meets another realm or open land, that is a frontier — somebody
+        // could move it. Where it meets water, that is just the shape of the
+        // world, so it gets a hairline: enough to give the realm a silhouette
+        // at map zoom, not enough to ring every pond in colour.
+        const land: [number, number][] = [];
+        const shore: [number, number][] = [];
+        for (let gx = 0; gx < gw; gx++) {
+          for (let gy = 0; gy < gh; gy++) {
+            const i = gx * gh + gy;
+            if (owners[i] !== own) continue;
+            const side = (nx: number, ny: number): [number, number][] | null => {
+              if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) return null; // window edge, not a frontier
+              const j = nx * gh + ny;
+              if (owners[j] === own) return null;
+              return wet[j] === 1 ? shore : land;
+            };
+            let into = side(gx - 1, gy);
+            if (into) into.push([pt(gx, gy), pt(gx, gy + 1)]);
+            into = side(gx + 1, gy);
+            if (into) into.push([pt(gx + 1, gy), pt(gx + 1, gy + 1)]);
+            into = side(gx, gy - 1);
+            if (into) into.push([pt(gx, gy), pt(gx + 1, gy)]);
+            into = side(gx, gy + 1);
+            if (into) into.push([pt(gx, gy + 1), pt(gx + 1, gy + 1)]);
+          }
+        }
+        if (land.length > 0) this.frontierPaths[own] = this.traceContours(land, x0, y0, tileSize, baseSX, baseSY);
+        if (shore.length > 0) this.shorePaths[own] = this.traceContours(shore, x0, y0, tileSize, baseSX, baseSY);
+      }
+
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const width = Math.max(1.2, Math.min(2.8, tileSize * 0.1));
+
+      // Shorelines first and faintly, so a contested frontier always wins
+      // where the two happen to run together.
+      ctx.lineWidth = Math.max(1, width * 0.62);
+      for (let own = 1; own < realms.length; own++) {
+        const path = this.shorePaths[own];
+        if (!path) continue;
+        const { r, g, b } = realms[own]!.rgbColor;
+        ctx.strokeStyle = `rgba(${Math.min(255, r + 60)}, ${Math.min(255, g + 60)}, ${Math.min(255, b + 60)}, 0.5)`;
+        ctx.stroke(path);
+      }
+
+      // A dark line under the coloured one: a pale realm on snow and a dark
+      // realm on ocean both need something to sit against.
+      ctx.strokeStyle = 'rgba(10, 12, 16, 0.55)';
+      ctx.lineWidth = width + Math.max(1, tileSize * 0.055);
+      for (let own = 1; own < realms.length; own++) {
+        const path = this.frontierPaths[own];
+        if (path) ctx.stroke(path);
+      }
+      ctx.lineWidth = width;
+      for (let own = 1; own < realms.length; own++) {
+        const path = this.frontierPaths[own];
+        if (!path) continue;
+        const { r, g, b } = realms[own]!.rgbColor;
+        ctx.strokeStyle = `rgba(${Math.min(255, r + 50)}, ${Math.min(255, g + 50)}, ${Math.min(255, b + 50)}, 0.95)`;
+        ctx.stroke(path);
+      }
+      this.frontierPaths.length = 0;
+      this.shorePaths.length = 0;
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+    }
+
+    this.flareNewlyClaimed(tileMap, x0, x1, y0, y1, gh, owners, realms, tileSize, baseSX, baseSY);
+  }
+
+  /**
+   * Chains boundary edges into continuous contours and draws them through
+   * their own corners.
+   *
+   * Each edge arrives as a pair of lattice points — corners of the tile grid —
+   * so chaining is exact: two edges meet when they share a point, with no
+   * tolerance to tune. Chains that close on themselves are rings around a
+   * whole realm; chains that do not are runs that leave the window.
+   *
+   * Drawing then goes moveTo the first midpoint and curves through each
+   * corner to the next midpoint, which is the standard way to round a
+   * polyline. Every right angle in the staircase becomes an arc, and a long
+   * diagonal frontier comes out as a diagonal rather than as steps.
+   */
+  private traceContours(
+    segments: [number, number][],
+    x0: number, y0: number,
+    tileSize: number, baseSX: number, baseSY: number
+  ): Path2D {
+    const links = new Map<number, number[]>();
+    const push = (a: number, b: number): void => {
+      const list = links.get(a);
+      if (list) list.push(b);
+      else links.set(a, [b]);
+    };
+    for (const [a, b] of segments) { push(a, b); push(b, a); }
+
+    // Edge keys are numbers, not strings. `walk` asks "have I used this edge?"
+    // once per candidate per step, and building a string each time was the
+    // single most expensive thing in the territory pass. Lattice points fit in
+    // about 2^19, so a pair packs into a float64 exactly.
+    const used = new Set<number>();
+    const edgeKey = (a: number, b: number): number => (a < b ? a * 1048576 + b : b * 1048576 + a);
+    const path = new Path2D();
+    const sx = (p: number): number => Math.floor(p / 4096) * tileSize + x0 * tileSize + baseSX;
+    const sy = (p: number): number => (p % 4096) * tileSize + y0 * tileSize + baseSY;
+
+    const walk = (start: number): number[] => {
+      const chain = [start];
+      let current = start;
+      for (;;) {
+        const next = (links.get(current) ?? []).find(n => !used.has(edgeKey(current, n)));
+        if (next === undefined) break;
+        used.add(edgeKey(current, next));
+        chain.push(next);
+        current = next;
+        if (current === start) break; // closed ring
+      }
+      return chain;
+    };
+
+    const emit = (chain: number[]): void => {
+      if (chain.length < 2) return;
+      if (chain.length === 2) {
+        path.moveTo(sx(chain[0]), sy(chain[0]));
+        path.lineTo(sx(chain[1]), sy(chain[1]));
+        return;
+      }
+      const mx = (i: number): number => (sx(chain[i]) + sx(chain[i + 1])) / 2;
+      const my = (i: number): number => (sy(chain[i]) + sy(chain[i + 1])) / 2;
+      path.moveTo(mx(0), my(0));
+      for (let i = 1; i < chain.length - 1; i++) {
+        path.quadraticCurveTo(sx(chain[i]), sy(chain[i]), mx(i), my(i));
+      }
+      path.lineTo(sx(chain[chain.length - 1]), sy(chain[chain.length - 1]));
+    };
+
+    // Open runs first, started from their loose ends, so a run is never
+    // entered in the middle and split into two half-drawn pieces.
+    for (const [point, list] of links) {
+      if (list.length % 2 === 0) continue;
+      let chain = walk(point);
+      while (chain.length >= 2) { emit(chain); chain = walk(point); }
+    }
+    for (const point of links.keys()) {
+      let chain = walk(point);
+      while (chain.length >= 2) { emit(chain); chain = walk(point); }
+    }
+    return path;
+  }
+
+  /**
+   * Marks land that has just changed hands.
+   *
+   * Ownership is compared against what was on screen last frame, so this needs
+   * nothing from the simulation and nothing in the save file. A tile that
+   * changes flares in its new owner's colour and settles over about a second
+   * and a half — long enough to catch the eye at speed, short enough that a
+   * war does not leave the map strobing.
+   */
+  private flareNewlyClaimed(
+    tileMap: TileMap,
+    x0: number, x1: number, y0: number, y1: number,
+    gh: number,
+    owners: Int32Array,
+    realms: (Kingdom | null)[],
+    tileSize: number, baseSX: number, baseSY: number
+  ): void {
+    const cells = tileMap.width * tileMap.height;
+    if (this.claimOwner.length !== cells) {
+      this.claimOwner = new Int32Array(cells);
+      this.claimAt = new Float32Array(cells);
+      this.claimSeen = false;
+    }
+    // Stable ids across frames: the per-window index is rebuilt every frame
+    // and would otherwise renumber realms as the camera moves.
+    const stableId = (kingdom: Kingdom | null): number => {
+      if (!kingdom) return 0;
+      let id = this.claimIds.get(kingdom.id);
+      if (id === undefined) {
+        id = this.claimIds.size + 1;
+        this.claimIds.set(kingdom.id, id);
+      }
+      return id;
+    };
+    const stable = realms.map(stableId);
+
+    const ctx = this.ctx;
+    // animTimer advances 0.04 per frame, so this is about a second and a half
+    // at 60fps: long enough to catch the eye while the world runs fast, short
+    // enough that a war does not leave the map strobing.
+    const FLARE = 3.6;
+    const now = this.animTimer;
+    const glow: { x: number; y: number; cell: number; fade: number }[] = [];
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const cell = x * tileMap.height + y;
+        const own = stable[owners[(x - x0) * gh + (y - y0)]];
+        if (this.claimOwner[cell] !== own) {
+          this.claimOwner[cell] = own;
+          this.claimAt[cell] = now;
+          // The first frame after a load is not a conquest: record the world
+          // as it is and flare nothing, or the whole map lights up at once.
+          if (!this.claimSeen) this.claimAt[cell] = -FLARE * 2;
+        }
+        if (own === 0) continue;
+        // A negative age means the clock wrapped since the claim; that tile
+        // simply misses its flare rather than holding a stale one for an hour.
+        const age = now - this.claimAt[cell];
+        if (age < 0 || age > FLARE) continue;
+        const kingdom = realms[owners[(x - x0) * gh + (y - y0)]];
+        if (!kingdom) continue;
+        const fade = 1 - age / FLARE;
+        const sx = x * tileSize + baseSX;
+        const sy = y * tileSize + baseSY;
+        const { r, g, b } = kingdom.rgbColor;
+        // A wash of the new colour over the ground just taken.
+        ctx.fillStyle = `rgba(${Math.min(255, r + 70)}, ${Math.min(255, g + 70)}, ${Math.min(255, b + 70)}, ${0.32 * fade * fade})`;
+        ctx.fillRect(sx, sy, tileSize + 0.5, tileSize + 0.5);
+        if (tileSize >= 5) glow.push({ x, y, cell, fade });
+      }
+    }
+
+    // The bright edge belongs to the annexation, not to each of its tiles:
+    // outlining every tile separately made a gain look like a handful of
+    // boxes rather than like one piece of ground changing hands. Only sides
+    // that face land which is *not* part of the same gain are drawn.
+    if (glow.length > 0) {
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const fresh = (x: number, y: number, own: number, bucket: number): boolean => {
+        if (x < x0 || x > x1 || y < y0 || y > y1) return false;
+        const cell = x * tileMap.height + y;
+        if (this.claimOwner[cell] !== own) return false;
+        const age = now - this.claimAt[cell];
+        if (age < 0 || age > FLARE) return false;
+        return Math.round((1 - age / FLARE) * 10) === bucket;
+      };
+      // Grouped by how far along the fade each tile is, so two gains taken a
+      // moment apart stay two outlines rather than merging into one blob, and
+      // traced as contours for the same reason the frontier is: a bright
+      // staircase is still a staircase.
+      const byFade = new Map<number, [number, number][]>();
+      const pt = (x: number, y: number): number => x * 4096 + y;
+      for (const g of glow) {
+        const own = this.claimOwner[g.cell];
+        const bucket = Math.round(g.fade * 10);
+        let segments = byFade.get(bucket);
+        if (!segments) { segments = []; byFade.set(bucket, segments); }
+        if (!fresh(g.x - 1, g.y, own, bucket)) segments.push([pt(g.x, g.y), pt(g.x, g.y + 1)]);
+        if (!fresh(g.x + 1, g.y, own, bucket)) segments.push([pt(g.x + 1, g.y), pt(g.x + 1, g.y + 1)]);
+        if (!fresh(g.x, g.y - 1, own, bucket)) segments.push([pt(g.x, g.y), pt(g.x + 1, g.y)]);
+        if (!fresh(g.x, g.y + 1, own, bucket)) segments.push([pt(g.x, g.y + 1), pt(g.x + 1, g.y + 1)]);
+      }
+      for (const [bucket, segments] of byFade) {
+        if (segments.length === 0) continue;
+        const fade = bucket / 10;
+        ctx.strokeStyle = `rgba(255, 250, 235, ${0.8 * fade})`;
+        ctx.lineWidth = Math.max(1, tileSize * 0.09 * (0.4 + 0.6 * fade));
+        ctx.stroke(this.traceContours(segments, 0, 0, tileSize, baseSX, baseSY));
+      }
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+    }
+    this.claimSeen = true;
+  }
 
   /**
    * The road network, drawn as a network.
