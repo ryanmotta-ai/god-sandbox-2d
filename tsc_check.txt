@@ -1,0 +1,5 @@
+npm notice run worldcraft-2d-aethoria@1.0.0 npx
+npm notice run tsc --noEmit
+src/renderer/Renderer.ts(12,83): error TS2307: Cannot find module './SpriteGenerator' or its corresponding type declarations.
+src/ui/hud/Inspector.ts(14,33): error TS2307: Cannot find module '../../renderer/SpriteGenerator' or its corresponding type declarations.
+src/ui/screens/BestiaryScreen.ts(7,33): error TS2307: Cannot find module '../../renderer/SpriteGenerator' or its corresponding type declarations.

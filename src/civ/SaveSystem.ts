@@ -1,0 +1,258 @@
+import { TileMap } from '../world/TileMap';
+import { SimulationEngine } from '../ai/EntityAI';
+import { chronicle } from '../civ/Chronicle';
+import { EraManager, WorldEra } from '../world/WeatherEras';
+import { Entity } from '../entities/Entity';
+import { City } from '../civ/City';
+import { Kingdom } from '../civ/Kingdom';
+
+/** Slot 0 is reserved for autosave; 1..4 are manual. */
+export const AUTOSAVE_SLOT = 0;
+export const SLOT_COUNT = 5;
+
+const SLOT_KEY = (slot: number) => `aethoria_slot_${slot}`;
+const META_KEY = (slot: number) => `aethoria_slot_${slot}_meta`;
+const LEGACY_KEY = 'aethoria_savegame';
+
+export interface SlotMeta {
+  name: string;
+  thumbnail?: string;
+}
+
+export interface SlotInfo {
+  slot: number;
+  exists: boolean;
+  name: string;
+  year: number;
+  era: string;
+  size: number;
+  population: number;
+  kingdoms: number;
+  timestamp: number;
+  thumbnail?: string;
+}
+
+export class SaveSystem {
+  // ============================ SLOTS ============================
+
+  public static listSlots(): SlotInfo[] {
+    const slots: SlotInfo[] = [];
+    for (let slot = 0; slot < SLOT_COUNT; slot++) {
+      slots.push(this.readSlotInfo(slot));
+    }
+    return slots;
+  }
+
+  public static readSlotInfo(slot: number): SlotInfo {
+    const empty: SlotInfo = {
+      slot,
+      exists: false,
+      name: 'Empty',
+      year: 0,
+      era: '—',
+      size: 0,
+      population: 0,
+      kingdoms: 0,
+      timestamp: 0
+    };
+
+    try {
+      const raw = localStorage.getItem(SLOT_KEY(slot));
+      if (!raw) return empty;
+      const data = JSON.parse(raw);
+      const meta: SlotMeta = JSON.parse(localStorage.getItem(META_KEY(slot)) || '{}');
+
+      return {
+        slot,
+        exists: true,
+        name: meta.name || `World ${slot}`,
+        year: data.year ?? 0,
+        era: data.era ?? '—',
+        size: data.world?.width ?? 0,
+        population: data.entities?.length ?? 0,
+        kingdoms: data.kingdoms?.length ?? 0,
+        timestamp: data.timestamp ?? 0,
+        thumbnail: meta.thumbnail
+      };
+    } catch {
+      return empty;
+    }
+  }
+
+  public static readSlot(slot: number): any | null {
+    try {
+      const raw = localStorage.getItem(SLOT_KEY(slot));
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  public static writeSlot(slot: number, data: any, meta: SlotMeta): boolean {
+    try {
+      localStorage.setItem(SLOT_KEY(slot), JSON.stringify(data));
+      localStorage.setItem(META_KEY(slot), JSON.stringify(meta));
+      return true;
+    } catch (err) {
+      // Most likely QuotaExceededError from a large world plus a thumbnail.
+      // Retry without the thumbnail before giving up.
+      console.error('Failed to write save slot:', err);
+      try {
+        localStorage.setItem(SLOT_KEY(slot), JSON.stringify(data));
+        localStorage.setItem(META_KEY(slot), JSON.stringify({ name: meta.name }));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  public static deleteSlot(slot: number): void {
+    localStorage.removeItem(SLOT_KEY(slot));
+    localStorage.removeItem(META_KEY(slot));
+  }
+
+  // ============================ LEGACY QUICK SAVE ============================
+
+  public static saveToLocalStorage(tileMap: TileMap, sim: SimulationEngine, eraMgr: EraManager): void {
+    const saveData = this.exportSaveData(tileMap, sim, eraMgr);
+    localStorage.setItem(LEGACY_KEY, JSON.stringify(saveData));
+  }
+
+  public static loadFromLocalStorage(tileMap: TileMap, sim: SimulationEngine, eraMgr: EraManager): boolean {
+    const json = localStorage.getItem(LEGACY_KEY);
+    if (!json) return false;
+    try {
+      const data = JSON.parse(json);
+      this.importSaveData(data, tileMap, sim, eraMgr);
+      return true;
+    } catch (e) {
+      console.error('Failed to load save:', e);
+      return false;
+    }
+  }
+
+  // ============================ SERIALIZATION ============================
+
+  public static exportSaveData(tileMap: TileMap, sim: SimulationEngine, eraMgr: EraManager): any {
+    return {
+      version: 3,
+      timestamp: Date.now(),
+      world: tileMap.serialize(),
+      year: sim.currentYear,
+      era: eraMgr.getCurrentEra(),
+      totalBirths: sim.totalBirths,
+      totalDeaths: sim.totalDeaths,
+      history: chronicle.serialize(),
+      diplomacy: sim.diplomacy.serialize(),
+      entities: sim.entities.map(e => ({
+        id: e.id,
+        name: e.name,
+        species: e.species,
+        age: e.age,
+        gender: e.gender,
+        x: e.x,
+        y: e.y,
+        hp: e.hp,
+        level: e.level,
+        xp: e.xp,
+        kills: e.kills,
+        traits: Array.from(e.traits),
+        profession: e.profession,
+        personality: e.personality,
+        cityId: e.cityId,
+        kingdomId: e.kingdomId,
+        isFavorite: e.isFavorite,
+        // Family and bloodline. Without these a reloaded world forgets every
+        // marriage, every child and every dynasty it ever produced.
+        fatherId: e.fatherId,
+        motherId: e.motherId,
+        partnerId: e.partnerId,
+        childrenIds: e.childrenIds,
+        dynasty: e.dynasty,
+        generation: e.generation,
+        fertilityCooldown: e.fertilityCooldown,
+        // Great-person standing
+        isGreatPerson: e.isGreatPerson,
+        greatPersonType: e.greatPersonType,
+        title: e.title,
+        equipment: e.equipment
+      })),
+      cities: Array.from(sim.cities.values()).map(c => c.serialize()),
+      kingdoms: Array.from(sim.kingdoms.values()).map(k => k.serialize()),
+      market: sim.market.serialize(),
+      trade: sim.trade.serialize()
+    };
+  }
+
+  public static importSaveData(data: any, tileMap: TileMap, sim: SimulationEngine, eraMgr: EraManager): void {
+    tileMap.deserialize(data.world);
+    sim.currentYear = data.year ?? 1;
+    sim.totalBirths = data.totalBirths ?? 0;
+    sim.totalDeaths = data.totalDeaths ?? 0;
+    eraMgr.setEra((data.era as WorldEra) ?? WorldEra.GOLDEN_AGE);
+
+    // Restore the chronicle so structured history, references and story threads
+    // survive a reload. Chronicle.deserialize() also accepts legacy v1/v2 entries.
+    chronicle.deserialize(data.history);
+
+    // Restore Entities
+    sim.entities = [];
+    sim.spatialHash.clear();
+
+    for (const ed of data.entities ?? []) {
+      const e = new Entity(ed.id, ed.species, ed.x, ed.y, ed.name);
+      e.age = ed.age;
+      e.gender = ed.gender;
+      e.level = ed.level;
+      e.xp = ed.xp;
+      e.kills = ed.kills;
+      e.profession = ed.profession;
+      e.personality = ed.personality;
+      e.cityId = ed.cityId;
+      e.kingdomId = ed.kingdomId;
+      e.isFavorite = ed.isFavorite;
+
+      // Family and bloodline (absent from v1 saves, which simply have no families).
+      e.fatherId = ed.fatherId ?? null;
+      e.motherId = ed.motherId ?? null;
+      e.partnerId = ed.partnerId ?? null;
+      e.childrenIds = ed.childrenIds ?? [];
+      e.dynasty = ed.dynasty ?? '';
+      e.generation = ed.generation ?? 1;
+      e.fertilityCooldown = ed.fertilityCooldown ?? 0;
+
+      e.isGreatPerson = ed.isGreatPerson ?? false;
+      e.greatPersonType = ed.greatPersonType ?? null;
+      e.title = ed.title ?? e.name;
+      if (ed.equipment) e.equipment = ed.equipment;
+
+      e.traits = new Set(ed.traits);
+      e.recalculateStats();
+      // Assign HP after recalculateStats so it isn't clamped against a stale max.
+      e.hp = Math.min(ed.hp, e.maxHp);
+
+      sim.entities.push(e);
+      sim.spatialHash.insert(e);
+    }
+
+    // Restore Cities
+    sim.cities.clear();
+    for (const cd of data.cities ?? []) {
+      const city = City.deserialize(cd);
+      sim.cities.set(city.id, city);
+    }
+
+    // Restore Kingdoms
+    sim.kingdoms.clear();
+    for (const kd of data.kingdoms ?? []) {
+      const kingdom = Kingdom.deserialize(kd);
+      sim.kingdoms.set(kingdom.id, kingdom);
+    }
+
+    // Restore world systems
+    if (data.diplomacy) sim.diplomacy.deserialize(data.diplomacy);
+    if (data.market) sim.market.deserialize(data.market);
+    if (data.trade) sim.trade.deserialize(data.trade);
+  }
+}

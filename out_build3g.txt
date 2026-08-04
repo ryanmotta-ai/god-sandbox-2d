@@ -1,0 +1,39 @@
+Year: 70
+
+Kingdom Clan of Thornwood (lumini): techs=tribalism, stone_tools, mining, fire_mastery, masonry, agriculture, chiefdom, animal_husbandry
+
+Kingdom Clan of Stonekeep (sylvanii): techs=tribalism, stone_tools, mining, fire_mastery, agriculture, chiefdom, animal_husbandry
+
+Kingdom Clan of Deepforge (stonekin): techs=tribalism, stone_tools, mining
+
+Kingdom Clan of Dawnspire (emberkin): techs=tribalism, stone_tools, mining, fire_mastery
+
+City Solanton: pop=27 tier=village prosperity=0.83
+  Buildings: town_centerx1, housex4, lumber_campx5, quarryx4, colosseumx1, farmx1
+  housingCapacity=36 slots=16 used=16
+  food=488 wood=409 stone=56
+
+City Siluston: pop=22 tier=village prosperity=0.85
+  Buildings: town_centerx1, housex7, lumber_campx3, quarryx3, farmx2
+  housingCapacity=33 slots=16 used=16
+  food=793 wood=518 stone=110
+
+City Durnenton: pop=6 tier=camp prosperity=0.85
+  Buildings: town_centerx1, housex4
+  housingCapacity=21 slots=5 used=5
+  food=446 wood=450 stone=0
+
+City Vulthton: pop=3 tier=camp prosperity=0.84
+  Buildings: town_centerx1, housex4
+  housingCapacity=21 slots=5 used=5
+  food=443 wood=404 stone=0
+
+City SilusGate: pop=5 tier=camp prosperity=0.84
+  Buildings: town_centerx1, lumber_campx3, quarryx1
+  housingCapacity=5 slots=5 used=5
+  food=199 wood=439 stone=78
+
+City SilusHollow: pop=5 tier=camp prosperity=0.79
+  Buildings: town_centerx1, pasturex1, quarryx2, housex1
+  housingCapacity=9 slots=5 used=5
+  food=184 wood=203 stone=69

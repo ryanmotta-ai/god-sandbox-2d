@@ -1,0 +1,17 @@
+year 10: entities=55 civilised=29 cities=2 kingdoms=2 routes=0
+year 20: entities=81 civilised=45 cities=2 kingdoms=2 routes=0
+  [K] Clan of Nightbloom(lumini) gov=tribe cities=1 pop=21 treas=133 rel[sylvanii:11] agreements=1 barracks=false techs=4 :: tribalism,stone_tools,mining,fire_mastery
+  [K] Clan of Windhowl(sylvanii) gov=tribe cities=1 pop=24 treas=147 rel[lumini:11] agreements=1 barracks=false techs=3 :: tribalism,stone_tools,mining
+year 30: entities=105 civilised=69 cities=3 kingdoms=2 routes=0
+year 40: entities=129 civilised=93 cities=6 kingdoms=2 routes=1
+  [K] Clan of Nightbloom(lumini) gov=chiefdom cities=4 pop=42 treas=7993 rel[sylvanii:21] agreements=1 barracks=false techs=9 :: tribalism,stone_tools,mining,fire_mastery,masonry,agriculture,chiefdom,animal_husbandry,pottery
+  [K] Clan of Windhowl(sylvanii) gov=chiefdom cities=2 pop=51 treas=795 rel[lumini:21] agreements=1 barracks=false techs=8 :: tribalism,stone_tools,mining,fire_mastery,agriculture,chiefdom,animal_husbandry,masonry
+year 50: entities=165 civilised=129 cities=9 kingdoms=2 routes=5
+year 60: entities=177 civilised=141 cities=13 kingdoms=2 routes=6
+  [K] Kingdom of Nightbloom(lumini) gov=feudal_kingdom cities=7 pop=68 treas=122223 rel[sylvanii:22] agreements=1 barracks=false techs=11 :: tribalism,stone_tools,mining,fire_mastery,masonry,agriculture,chiefdom,animal_husbandry,pottery,writing,feudalism
+  [K] Kingdom of Windhowl(sylvanii) gov=feudal_kingdom cities=6 pop=73 treas=66421 rel[lumini:22] agreements=1 barracks=false techs=11 :: tribalism,stone_tools,mining,fire_mastery,agriculture,chiefdom,animal_husbandry,masonry,feudalism,pottery,writing
+year 70: entities=192 civilised=156 cities=14 kingdoms=2 routes=6
+year 80: entities=199 civilised=163 cities=17 kingdoms=2 routes=6
+  [K] Kingdom of Nightbloom(lumini) gov=feudal_kingdom cities=10 pop=84 treas=153217 rel[sylvanii:24] agreements=1 barracks=false techs=14 :: tribalism,stone_tools,mining,fire_mastery,masonry,agriculture,chiefdom,animal_husbandry,pottery,writing,feudalism,philosophy,bronze_working,mathematics
+  [K] Kingdom of Windhowl(sylvanii) gov=monarchy cities=7 pop=79 treas=118610 rel[lumini:24] agreements=1 barracks=false techs=12 :: tribalism,stone_tools,mining,fire_mastery,agriculture,chiefdom,animal_husbandry,masonry,feudalism,pottery,writing,monarchy
+year 90: entities=196 civilised=159 cities=17 kingdoms=2 routes=4

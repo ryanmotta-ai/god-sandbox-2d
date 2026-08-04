@@ -1,0 +1,33 @@
+[tech] Clan of Solheim cities=undefined stoneHeld=29.4 starved=true
+  stone_tools cost=30 score=34.8
+  BEST=stone_tools
+[tech] Clan of Thornwood cities=undefined stoneHeld=29.4 starved=true
+  stone_tools cost=30 score=34.8
+  BEST=stone_tools
+[tech] Clan of Nightbloom cities=undefined stoneHeld=29.5 starved=true
+  stone_tools cost=30 score=34.8
+  BEST=stone_tools
+[tech] Clan of Crystalfall cities=undefined stoneHeld=29.5 starved=true
+  stone_tools cost=30 score=34.8
+  BEST=stone_tools
+[tech] Clan of Solheim cities=undefined stoneHeld=18.5 starved=true
+  fire_mastery cost=40 score=25.0
+  agriculture cost=60 score=16.7
+  mining cost=156 score=36.4
+  BEST=mining
+[tech] Clan of Thornwood cities=undefined stoneHeld=21.9 starved=true
+  fire_mastery cost=40 score=25.0
+  agriculture cost=60 score=16.7
+  mining cost=156 score=36.4
+  BEST=mining
+[tech] Clan of Nightbloom cities=undefined stoneHeld=14.5 starved=true
+  fire_mastery cost=40 score=25.0
+  agriculture cost=60 score=16.7
+  mining cost=156 score=46.4
+  BEST=mining
+[tech] Clan of Crystalfall cities=undefined stoneHeld=4.6 starved=true
+  fire_mastery cost=40 score=25.0
+  agriculture cost=60 score=16.7
+  mining cost=156 score=36.4
+  BEST=mining
+Year: 21

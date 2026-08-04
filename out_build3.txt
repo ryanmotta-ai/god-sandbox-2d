@@ -1,0 +1,39 @@
+Year: 70
+
+Kingdom Clan of Dragonclaw (lumini): techs=tribalism, stone_tools, fire_mastery, agriculture, chiefdom, animal_husbandry, pottery
+
+Kingdom Clan of Goldcrest (sylvanii): techs=tribalism, stone_tools, fire_mastery, agriculture, chiefdom, animal_husbandry
+
+Kingdom Clan of Solheim (stonekin): techs=tribalism, stone_tools, fire_mastery
+
+Kingdom Clan of Shadowfen (emberkin): techs=tribalism, stone_tools, fire_mastery, agriculture
+
+City Luxuston: pop=17 tier=hamlet prosperity=0.82
+  Buildings: town_centerx1, housex4, lumber_campx2, farmx3
+  housingCapacity=31 slots=10 used=10
+  food=942 wood=0 stone=0
+
+City Eldiaton: pop=18 tier=hamlet prosperity=0.83
+  Buildings: town_centerx1, housex3, farmx9, lumber_campx2, pasturex1
+  housingCapacity=27 slots=10 used=16
+  food=1090 wood=192 stone=0
+
+City Goriaton: pop=4 tier=camp prosperity=0.82
+  Buildings: town_centerx1, housex2
+  housingCapacity=23 slots=5 used=3
+  food=447 wood=0 stone=0
+
+City Kaeliston: pop=6 tier=camp prosperity=0.82
+  Buildings: town_centerx1, housex3, lumber_campx6
+  housingCapacity=27 slots=5 used=10
+  food=700 wood=143 stone=0
+
+City EldiaHollow: pop=4 tier=camp prosperity=0.72
+  Buildings: town_centerx1, housex1, lumber_campx1, farmx1
+  housingCapacity=9 slots=5 used=4
+  food=339 wood=450 stone=21
+
+City EldiaHaven: pop=4 tier=camp prosperity=0.67
+  Buildings: town_centerx1, pasturex2
+  housingCapacity=5 slots=5 used=3
+  food=183 wood=160 stone=27

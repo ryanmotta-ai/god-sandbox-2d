@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aethoria: Divine 2D Sandbox</title>
+  <meta name="description" content="A feature-complete, autonomous 2D god sandbox where civilizations rise, conquer, and face divine interference." />
+  <meta name="theme-color" content="#07090e" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Silkscreen&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- The entire interface is constructed by the TypeScript UI layer.
+       This shell only provides the render surface and the four mount points. -->
+  <div id="app">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- In-game HUD: status bar, view switcher, power dock, minimap, inspector -->
+    <div id="hud-root" class="hud hidden"></div>
+
+    <!-- Full-screen and overlay screens pushed by the ScreenManager -->
+    <div id="screen-root" class="screen-root hidden"></div>
+
+    <!-- Notification toasts -->
+    <div id="toast-root" class="toast-root"></div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

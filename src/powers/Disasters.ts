@@ -1,0 +1,94 @@
+import { TileMap } from '../world/TileMap';
+import { TerrainType } from '../world/Biomes';
+import { Entity } from '../entities/Entity';
+import { TraitId } from '../entities/Traits';
+import { SpatialHash } from '../core/SpatialHash';
+import { sound } from '../core/SoundSynth';
+import { ParticleManager } from '../renderer/Particles';
+
+import { Camera } from '../renderer/Camera';
+
+export class DisasterSystem {
+  public static triggerLightning(x: number, y: number, tileMap: TileMap, spatialHash: SpatialHash<Entity>, particles: ParticleManager, camera?: Camera): void {
+    sound.playThunder();
+    particles.spawnExplosion(x, y, '#fef08a', 25);
+    if (camera) camera.triggerShake(10, 0.25);
+
+    tileMap.applyBrush(x, y, 1.5, tile => {
+      tile.isOnFire = true;
+      if (tile.buildingId) {
+        tile.buildingId = null; // Destroy building on direct hit
+      }
+    });
+
+    const hitEntities = spatialHash.queryRadius(x, y, 3);
+    for (const e of hitEntities) {
+      e.hp -= 80;
+      particles.spawnDamageNumber(e.x, e.y, 80);
+    }
+  }
+
+  public static triggerMeteorite(x: number, y: number, tileMap: TileMap, spatialHash: SpatialHash<Entity>, particles: ParticleManager, camera?: Camera): void {
+    sound.playExplosion();
+    particles.spawnExplosion(x, y, '#ef4444', 60);
+    if (camera) camera.triggerShake(22, 0.6);
+
+    // Crater impact
+    tileMap.applyBrush(x, y, 4, tile => {
+      const dx = tile.x - x;
+      const dy = tile.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < 1.5) {
+        tile.type = TerrainType.LAVA;
+        tile.height = Math.max(0, tile.height - 0.4);
+      } else if (dist < 3) {
+        tile.type = TerrainType.SOIL;
+        tile.isOnFire = true;
+      }
+      tile.buildingId = null;
+      tile.resourceType = null;
+    });
+
+    // Shockwave damage
+    const hitEntities = spatialHash.queryRadius(x, y, 6);
+    for (const e of hitEntities) {
+      const dx = e.x - x;
+      const dy = e.y - y;
+      const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      const damage = Math.round(200 / dist);
+      e.hp -= damage;
+      particles.spawnDamageNumber(e.x, e.y, damage);
+    }
+  }
+
+  public static triggerEarthquake(x: number, y: number, tileMap: TileMap, particles: ParticleManager, camera?: Camera): void {
+    sound.playHit();
+    particles.spawnExplosion(x, y, '#78350f', 30);
+    if (camera) camera.triggerShake(14, 0.4);
+
+    tileMap.applyBrush(x, y, 5, tile => {
+      if (tile.type === TerrainType.MOUNTAIN) {
+        tile.type = TerrainType.SOIL;
+      } else if (!tile.type.includes('ocean')) {
+        tile.height = Math.max(0, tile.height - 0.25);
+      }
+      if (tile.buildingId) {
+        tile.buildingId = null;
+      }
+    });
+  }
+
+  public static triggerPlague(x: number, y: number, spatialHash: SpatialHash<Entity>): number {
+    sound.playMagic();
+    const targets = spatialHash.queryRadius(x, y, 4);
+    let infected = 0;
+    for (const e of targets) {
+      if (!e.traits.has(TraitId.CURSED)) {
+        e.addTrait(TraitId.CURSED);
+        infected++;
+      }
+    }
+    return infected;
+  }
+}

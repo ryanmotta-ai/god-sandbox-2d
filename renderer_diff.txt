@@ -1,0 +1,1281 @@
+Comparando os arquivos SRC\RENDERER\Renderer.ts.bak e SRC\RENDERER\RENDERER.TS
+***** SRC\RENDERER\Renderer.ts.bak
+   17:  import { OverlandCaravan } from '../civ/CaravanSystem';
+   18:  import {
+***** SRC\RENDERER\RENDERER.TS
+   17:  import { OverlandCaravan } from '../civ/CaravanSystem';
+   18:  import { GOODS, type GoodTier } from '../civ/Goods';
+   19:  
+   20:  /** Deposit tiers so plentiful that drawing every one clutters the whole map. */
+   21:  const COMMON_NODE_TIERS = new Set<GoodTier>(['common']);
+   22:  import {
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+   21:    clamp,
+   22:    hash2,
+   23:    mixColor,
+***** SRC\RENDERER\RENDERER.TS
+   25:    clamp,
+   26:    mixColor,
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+   24:    parseColor,
+   25:    terrainSurfaceColor,
+   26:    withAlpha
+***** SRC\RENDERER\RENDERER.TS
+   27:    parseColor,
+   28:    terrainAccentColor,
+   29:    terrainSurfaceColor,
+   30:    valueNoise2D,
+   31:    withAlpha
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+   47:  
+   48:  export class PixelRenderer {
+***** SRC\RENDERER\RENDERER.TS
+   52:  
+   53:  /**
+   54:   * Fast position-based hash for the renderer. hash2() computes
+   55:   * frac(sin(x*127.1 + y*311.7 + salt*74.7) * 43758.5453123). Using the identity
+   56:   * sin(A + B) = sin(A)*cos(B) + cos(A)*sin(B), per-tile we compute sin(A)/cos(A)
+   57:   * once and look up cos(salt*74.7)/sin(salt*74.7) from these tables. The result
+   58:   * is numerically ~1e-6 of Math.sin at worst â€” invisible in per-pixel noise.
+   59:   */
+   60:  const MAX_SALT = 1024;
+   61:  const COS_SALT_TABLE = new Float64Array(MAX_SALT);
+   62:  const SIN_SALT_TABLE = new Float64Array(MAX_SALT);
+   63:  for (let s = 0; s < MAX_SALT; s++) {
+   64:    const b = s * 74.7;
+   65:    COS_SALT_TABLE[s] = Math.cos(b);
+   66:    SIN_SALT_TABLE[s] = Math.sin(b);
+   67:  }
+   68:  const HASH_SCALE = 43758.5453123;
+   69:  
+   70:  export class PixelRenderer {
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+   53:    private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
+   54:  
+***** SRC\RENDERER\RENDERER.TS
+   75:    private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
+   76:    /** Last ambient FX emission per building; avoids particle spam at high FPS. */
+   77:    private buildingFxTime: Map<string, number> = new Map();
+   78:    /** sin/cos of (x*127.1 + y*311.7) for the tile currently being drawn. */
+   79:    private hSin: number = 0;
+   80:    private hCos: number = 0;
+   81:    /** Offscreen canvas baking the static terrain layer (base+texture+relief+edges+details per tile, 16px). Animated surfaces (w
+   82:  ater/lava) are left transparent and drawn per-frame. */
+   83:    private terrainCanvas: HTMLCanvasElement | null = null;
+   84:    private terrainCtx: CanvasRenderingContext2D | null = null;
+   85:    private terrainW: number = 0;
+   86:    private terrainH: number = 0;
+   87:    private readonly bakeTileSize: number = 16;
+   88:  
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+   99:    private getEntityAnimation(e: Entity, moving: boolean): EntitySpriteAnimation {
+  100:      if ((e.aiState === 'attack' || e.aiState === 'hunt') && e.attackCooldown > 0) return 'attack';
+  101:      if (e.aiState === 'flee') return 'flee';
+***** SRC\RENDERER\RENDERER.TS
+  133:    private getEntityAnimation(e: Entity, moving: boolean): EntitySpriteAnimation {
+  134:      if ((e.aiState === 'attack' || e.aiState === 'hunt') && e.attackCooldown > 0) {
+  135:        return e.equipment.weapon?.category === 'ranged' ? 'shoot' : 'attack';
+  136:      }
+  137:      if (e.aiState === 'flee') return 'flee';
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  102:      if (e.aiState === 'heal') return 'heal';
+  103:      if (moving) return 'walk';
+***** SRC\RENDERER\RENDERER.TS
+  138:      if (e.aiState === 'heal') return 'heal';
+  139:  
+  140:      // Slow simulation states now have their own readable animation instead of
+  141:      // being rendered as generic walking/idle characters.
+  142:      if (e.aiState === 'gather_wood' || e.aiState === 'gather_food' || e.aiState === 'gather_ore' || (e.aiState === 'forage' && 
+  143:  SPECIES_DEFINITIONS[e.species].isHumanoid)) return 'gather';
+  144:      if (e.aiState === 'build' || e.aiState === 'craft') return 'build';
+  145:      // A citizen physically hauling a load reads as carrying, not as walking.
+  146:      if (e.aiState === 'deliver' || e.aiState === 'return_city' || e.carrying) return 'carry';
+  147:      if (e.aiState === 'eat') return 'socialize';
+  148:      if (e.aiState === 'socialize') return 'socialize';
+  149:      if (e.aiState === 'idle' && e.energy < 18) return 'rest';
+  150:      if (moving) return 'walk';
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  107:    private getAnimationFrame(e: Entity, animation: EntitySpriteAnimation, idHash: number): number {
+  108:      const rate = animation === 'attack' ? 11
+  109:        : animation === 'flee' ? 13
+  110:        : animation === 'walk' ? 8
+  111:        : animation === 'heal' ? 4
+  112:        : 2;
+***** SRC\RENDERER\RENDERER.TS
+  154:    private getAnimationFrame(e: Entity, animation: EntitySpriteAnimation, idHash: number): number {
+  155:      const rate = animation === 'attack' || animation === 'shoot' ? 11
+  156:        : animation === 'flee' ? 13
+  157:        : animation === 'walk' || animation === 'carry' ? 8
+  158:        : animation === 'gather' || animation === 'build' ? 6
+  159:        : animation === 'heal' || animation === 'socialize' ? 4
+  160:        : animation === 'rest' ? 1.5
+  161:        : 2;
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  141:  
+  142:    private drawEntityActionEffects(
+  143:      e: Entity,
+  144:      centerX: number,
+  145:      centerY: number,
+  146:      tileSize: number,
+  147:      direction: SpriteDirection,
+  148:      animation: EntitySpriteAnimation,
+  149:      frame: number
+  150:    ): void {
+  151:      const fxColor = this.getSpeciesFxColor(e);
+  152:  
+  153:      if (animation === 'attack') {
+  154:        const dir = this.getDirectionVector(direction);
+  155:        const sideX = -dir.y;
+  156:        const sideY = dir.x;
+  157:        const reach = tileSize * (0.48 + frame * 0.04);
+  158:        const fxX = centerX + dir.x * reach;
+  159:        const fxY = centerY + dir.y * reach - tileSize * 0.08;
+  160:        const slash = Math.max(1, tileSize * 0.11);
+  161:  
+  162:        this.ctx.fillStyle = withAlpha(fxColor, frame === 0 ? 0.88 : 0.58);
+  163:        this.ctx.fillRect(fxX - slash / 2, fxY - slash / 2, slash, slash);
+  164:        this.ctx.fillRect(fxX + sideX * slash, fxY + sideY * slash, slash, slash);
+  165:        this.ctx.fillRect(fxX - sideX * slash, fxY - sideY * slash, slash, slash);
+  166:  
+  167:        if (e.species === SpeciesType.EMBERKIN || e.species === SpeciesType.DRAGON) {
+  168:          this.ctx.fillStyle = 'rgba(250, 204, 21, 0.5)';
+  169:          this.ctx.fillRect(fxX + dir.x * slash, fxY + dir.y * slash, slash, slash * 1.4);
+  170:        } else if (e.species === SpeciesType.SYLVANII) {
+  171:          this.ctx.fillStyle = 'rgba(217, 249, 157, 0.7)';
+  172:          this.ctx.fillRect(fxX - dir.x * tileSize * 0.25, fxY - dir.y * tileSize * 0.25, slash * 2.4, Math.max(1, slash * 0.55))
+  173:  ;
+  174:        } else if (e.species === SpeciesType.STONEKIN || e.species === SpeciesType.BEAR) {
+  175:          this.ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+  176:          this.ctx.fillRect(fxX - sideX * slash * 2, fxY - sideY * slash * 2, slash * 3, slash);
+  177:        }
+  178:        return;
+  179:      }
+  180:  
+  181:      if (animation === 'heal') {
+  182:        const pulse = 0.24 + Math.sin(this.animTimer * 5) * 0.1;
+  183:        this.ctx.strokeStyle = withAlpha(fxColor, pulse);
+  184:        this.ctx.lineWidth = Math.max(1, tileSize * 0.06);
+  185:        this.ctx.beginPath();
+  186:        this.ctx.arc(centerX, centerY, tileSize * (0.48 + frame * 0.05), 0, Math.PI * 2);
+  187:        this.ctx.stroke();
+  188:        return;
+  189:      }
+  190:  
+  191:      if (animation === 'flee' && tileSize > 7) {
+  192:        const dir = this.getDirectionVector(direction);
+  193:        this.ctx.fillStyle = 'rgba(214, 188, 135, 0.28)';
+  194:        this.ctx.fillRect(centerX - dir.x * tileSize * 0.38, centerY - dir.y * tileSize * 0.38, Math.max(1, tileSize * 0.14), Mat
+  195:  h.max(1, tileSize * 0.08));
+  196:        this.ctx.fillRect(centerX - dir.x * tileSize * 0.55, centerY - dir.y * tileSize * 0.22, Math.max(1, tileSize * 0.1), Math
+  197:  .max(1, tileSize * 0.06));
+  198:      }
+  199:    }
+***** SRC\RENDERER\RENDERER.TS
+  190:  
+  191:  
+  192:  
+  193:    private buildingCategory(type: string): 'civic' | 'residential' | 'market' | 'industrial' | 'military' | 'faith' | 'utility' 
+  194:  | 'rural' {
+  195:      if (['town_center', 'palace', 'academy', 'great_library', 'bank', 'stock_exchange', 'monument', 'colosseum'].includes(type)
+  196:  ) return 'civic';
+  197:      if (['house', 'manor', 'apartment'].includes(type)) return 'residential';
+  198:      if (['market', 'harbor', 'port', 'caravanserai'].includes(type)) return 'market';
+  199:      if (['factory', 'refinery', 'oil_well', 'workshop', 'smithy', 'mine', 'quarry', 'lumberyard'].includes(type)) return 'indus
+  200:  trial';
+  201:      if (['barracks', 'keep', 'wall'].includes(type)) return 'military';
+  202:      if (['temple', 'hospital'].includes(type)) return 'faith';
+  203:      if (['granary', 'warehouse', 'aqueduct', 'grand_aqueduct', 'well', 'bridge'].includes(type)) return 'utility';
+  204:      return 'rural';
+  205:    }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  200:  
+  201:    private drawPixelCrown(x: number, y: number, size: number): void {
+  202:      const s = Math.max(1, size / 8);
+  203:      this.ctx.fillStyle = '#92400e';
+  204:      this.ctx.fillRect(x + s, y + s * 5, s * 6, s * 2);
+  205:      this.ctx.fillStyle = '#fbbf24';
+  206:      this.ctx.fillRect(x + s, y + s * 2, s * 2, s * 4);
+  207:      this.ctx.fillRect(x + s * 3, y + s, s * 2, s * 5);
+  208:      this.ctx.fillRect(x + s * 5, y + s * 2, s * 2, s * 4);
+  209:      this.ctx.fillStyle = '#fef08a';
+  210:      this.ctx.fillRect(x + s * 3, y + s * 5, s * 2, s);
+  211:      this.ctx.fillStyle = '#ef4444';
+  212:      this.ctx.fillRect(x + s * 2, y + s * 3, s, s);
+  213:      this.ctx.fillStyle = '#38bdf8';
+  214:      this.ctx.fillRect(x + s * 4, y + s * 2, s, s);
+  215:    }
+***** SRC\RENDERER\RENDERER.TS
+  206:  
+  207:    private cityTierScore(city: City): number {
+  208:      return ({
+  209:        camp: 0, hamlet: 1, village: 2, town: 3, city: 4, metropolis: 5
+  210:      } as Record<string, number>)[city.tier] ?? 0;
+  211:    }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  216:  
+  217:    private drawPixelStar(x: number, y: number, size: number): void {
+  218:      const s = Math.max(1, size / 7);
+  219:      this.ctx.fillStyle = '#fef08a';
+  220:      this.ctx.fillRect(x + s * 3, y, s, s * 2);
+  221:      this.ctx.fillRect(x + s, y + s * 2, s * 5, s);
+  222:      this.ctx.fillRect(x + s * 2, y + s * 3, s * 3, s);
+  223:      this.ctx.fillStyle = '#f59e0b';
+  224:      this.ctx.fillRect(x, y + s * 3, s * 2, s);
+  225:      this.ctx.fillRect(x + s * 5, y + s * 3, s * 2, s);
+  226:      this.ctx.fillRect(x + s * 2, y + s * 4, s, s * 2);
+  227:      this.ctx.fillRect(x + s * 4, y + s * 4, s, s * 2);
+  228:    }
+***** SRC\RENDERER\RENDERER.TS
+  212:  
+  213:    private getCityAnchor(city: City): { x: number; y: number } {
+  214:      const civic = Array.from(city.buildings.values()).find(b => b.type === 'town_center')
+  215:        ?? Array.from(city.buildings.values()).find(b => b.type === 'palace')
+  216:        ?? Array.from(city.buildings.values()).find(b => b.type === 'keep');
+  217:      return civic ? { x: civic.x, y: civic.y } : { x: city.x, y: city.y };
+  218:    }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  229:  
+  230:    private isWater(type: TerrainType): boolean {
+  231:      return type === TerrainType.DEEP_OCEAN || type === TerrainType.SHALLOW_WATER;
+  232:    }
+  233:  
+  234:    private getOverlayTerrainColor(tile: Tile, overlayMode: OverlayMode): string | null {
+  235:      if (overlayMode === 'temperature') {
+  236:        const tNorm = clamp((tile.temperature + 20) / 70, 0, 1);
+  237:        if (tNorm < 0.5) return mixColor('#1d4ed8', '#a7f3d0', tNorm * 2);
+  238:        return mixColor('#f8e7a2', '#dc2626', (tNorm - 0.5) * 2);
+  239:      }
+***** SRC\RENDERER\RENDERER.TS
+  219:  
+  220:    private drawCityUrbanPattern(
+  221:      city: City,
+  222:      k: Kingdom | null,
+  223:      camera: Camera,
+  224:      width: number,
+  225:      height: number,
+  226:      tileSize: number
+  227:    ): void {
+  228:      if (tileSize < 8 || city.buildings.size === 0) return;
+  229:  
+  230:      const anchor = this.getCityAnchor(city);
+  231:      const center = camera.worldToScreen(anchor.x, anchor.y, width, height);
+  232:      const score = this.cityTierScore(city);
+  233:      const style = SPECIES_DEFINITIONS[city.species].urbanGridStyle ?? 'concentric_rings';
+  234:      const pathColor = city.prosperity >= 0.66 ? 'rgba(203, 186, 129, 0.22)'
+  235:        : city.prosperity <= 0.35 ? 'rgba(99, 74, 45, 0.18)'
+  236:        : 'rgba(154, 132, 92, 0.18)';
+  237:      const plazaColor = k ? `${k.color}22` : 'rgba(255,255,255,0.06)';
+  238:      const radius = tileSize * (1.2 + score * 0.55 + Math.min(1.4, city.buildings.size * 0.035));
+  239:  
+  240:      // Urban core / district tint.
+  241:      this.ctx.save();
+  242:      this.ctx.fillStyle = plazaColor;
+  243:      this.ctx.beginPath();
+  244:      this.ctx.ellipse(center.x + tileSize * 0.5, center.y + tileSize * 0.55, radius * 1.05, radius * 0.72, 0, 0, Math.PI * 2);
+  245:      this.ctx.fill();
+  246:  
+  247:      // Species-specific street grammar.
+  248:      this.ctx.strokeStyle = pathColor;
+  249:      this.ctx.lineWidth = Math.max(1, tileSize * 0.08);
+  250:      if (style === 'concentric_rings') {
+  251:        for (let r = 1; r <= Math.min(3, score); r++) {
+  252:          this.ctx.beginPath();
+  253:          this.ctx.ellipse(center.x + tileSize * 0.5, center.y + tileSize * 0.55, radius * (0.32 * r), radius * (0.22 * r), 0, 0,
+  254:   Math.PI * 2);
+  255:          this.ctx.stroke();
+  256:        }
+  257:      } else if (style === 'organic_canopy') {
+  258:        this.ctx.beginPath();
+  259:        this.ctx.moveTo(center.x - radius * 0.55, center.y + radius * 0.1);
+  260:        this.ctx.quadraticCurveTo(center.x - radius * 0.1, center.y - radius * 0.65, center.x + radius * 0.5, center.y - radius *
+  261:   0.1);
+  262:        this.ctx.quadraticCurveTo(center.x + radius * 0.75, center.y + radius * 0.15, center.x + radius * 0.2, center.y + radius 
+  263:  * 0.5);
+  264:        this.ctx.stroke();
+  265:        this.ctx.beginPath();
+  266:        this.ctx.moveTo(center.x - radius * 0.4, center.y + radius * 0.35);
+  267:        this.ctx.quadraticCurveTo(center.x + radius * 0.05, center.y, center.x + radius * 0.65, center.y + radius * 0.25);
+  268:        this.ctx.stroke();
+  269:      } else if (style === 'orthogonal_citadel') {
+  270:        for (let i = -1; i <= 1; i++) {
+  271:          this.ctx.strokeRect(center.x - radius * 0.5 + i * tileSize * 1.1, center.y - radius * 0.32 + i * tileSize * 0.35, radiu
+  272:  s, radius * 0.48);
+  273:        }
+  274:      } else if (style === 'diagonal_chevron') {
+  275:        for (let i = -1; i <= 1; i++) {
+  276:          this.ctx.beginPath();
+  277:          this.ctx.moveTo(center.x - radius * 0.75, center.y + i * tileSize * 0.9);
+  278:          this.ctx.lineTo(center.x, center.y - radius * 0.36 + i * tileSize * 0.9);
+  279:          this.ctx.lineTo(center.x + radius * 0.75, center.y + i * tileSize * 0.9);
+  280:          this.ctx.stroke();
+  281:        }
+  282:      }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  240:  
+  241:      if (overlayMode === 'resources' && tile.resourceType) {
+  242:        return RESOURCE_COLORS[tile.resourceType] ?? '#fbbf24';
+  243:      }
+  244:  
+  245:      return null;
+  246:    }
+***** SRC\RENDERER\RENDERER.TS
+  283:  
+  284:      // Connect up to a handful of visible buildings to the core.
+  285:      const visibleBuildings = Array.from(city.buildings.values()).slice(0, 10);
+  286:      for (const b of visibleBuildings) {
+  287:        const pos = camera.worldToScreen(b.x, b.y, width, height);
+  288:        this.ctx.beginPath();
+  289:        this.ctx.moveTo(center.x + tileSize * 0.5, center.y + tileSize * 0.6);
+  290:        if (style === 'organic_canopy') {
+  291:          this.ctx.quadraticCurveTo(
+  292:            (center.x + pos.x) * 0.5 + Math.sin(b.x * 0.9 + b.y * 1.1) * tileSize * 0.8,
+  293:            (center.y + pos.y) * 0.5 - tileSize * 0.5,
+  294:            pos.x + tileSize * 0.5, pos.y + tileSize * 0.75
+  295:          );
+  296:        } else if (style === 'orthogonal_citadel') {
+  297:          this.ctx.lineTo(pos.x + tileSize * 0.5, center.y + tileSize * 0.6);
+  298:          this.ctx.lineTo(pos.x + tileSize * 0.5, pos.y + tileSize * 0.75);
+  299:        } else if (style === 'diagonal_chevron') {
+  300:          const midX = (center.x + pos.x) * 0.5;
+  301:          const midY = (center.y + pos.y) * 0.5 - tileSize * 0.25;
+  302:          this.ctx.lineTo(midX, midY);
+  303:          this.ctx.lineTo(pos.x + tileSize * 0.5, pos.y + tileSize * 0.75);
+  304:        } else {
+  305:          this.ctx.lineTo(pos.x + tileSize * 0.5, pos.y + tileSize * 0.75);
+  306:        }
+  307:        this.ctx.stroke();
+  308:      }
+  309:      this.ctx.restore();
+  310:    }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  247:  
+  248:    private drawTerrainTile(
+  249:      tileMap: TileMap,
+  250:      tile: Tile,
+  251:      x: number,
+  252:      y: number,
+  253:      screenX: number,
+  254:      screenY: number,
+  255:      tileSize: number,
+  256:      overlayMode: OverlayMode
+  257:    ): void {
+  258:      const overlayColor = this.getOverlayTerrainColor(tile, overlayMode);
+  259:      const color = overlayColor ?? terrainSurfaceColor(tile, x, y, this.animTimer);
+  260:  
+  261:      this.ctx.fillStyle = color;
+  262:      this.ctx.fillRect(screenX, screenY, tileSize + 0.75, tileSize + 0.75);
+  263:  
+  264:      if (overlayColor) {
+  265:        this.drawDataTileTexture(tile, x, y, screenX, screenY, tileSize);
+  266:        return;
+  267:      }
+  268:  
+  269:      this.drawTerrainTexture(tile, x, y, screenX, screenY, tileSize);
+  270:      this.drawHeightRelief(tileMap, tile, x, y, screenX, screenY, tileSize);
+  271:      this.drawTerrainEdges(tileMap, tile, x, y, screenX, screenY, tileSize);
+  272:  
+  273:      if (tileSize >= 8) {
+  274:        this.drawTerrainDetails(tile, x, y, screenX, screenY, tileSize);
+  275:      }
+***** SRC\RENDERER\RENDERER.TS
+  311:  
+  312:    private drawBuildingLotBackdrop(
+  313:      city: City,
+  314:      b: { type: string; x: number; y: number },
+  315:      k: Kingdom | null,
+  316:      screenPos: { x: number; y: number },
+  317:      tileSize: number
+  318:    ): void {
+  319:      if (tileSize < 7) return;
+  320:      const category = this.buildingCategory(b.type);
+  321:      const prosperity = city.prosperity ?? 0.5;
+  322:      const lotY = screenPos.y + tileSize * 0.66;
+  323:      let base = prosperity > 0.7 ? 'rgba(175, 156, 117, 0.24)' : 'rgba(122, 98, 64, 0.16)';
+  324:      if (category === 'industrial') base = 'rgba(82, 78, 74, 0.24)';
+  325:      if (category === 'market') base = 'rgba(201, 164, 88, 0.18)';
+  326:      if (category === 'military') base = 'rgba(92, 88, 102, 0.2)';
+  327:      if (category === 'faith') base = 'rgba(116, 153, 198, 0.14)';
+  328:      if (category === 'residential') base = prosperity > 0.7 ? 'rgba(88, 148, 103, 0.14)' : 'rgba(88, 107, 78, 0.1)';
+  329:      if (category === 'utility') base = 'rgba(119, 123, 134, 0.16)';
+  330:  
+  331:      this.ctx.fillStyle = base;
+  332:      const lotW = category === 'industrial' || category === 'civic' ? tileSize * 1.15 : tileSize * 0.94;
+  333:      const offset = (tileSize - lotW) * 0.5;
+  334:      this.ctx.fillRect(screenPos.x + offset, lotY, lotW, Math.max(2, tileSize * 0.22));
+  335:  
+  336:      // A couple of tiny lot props so whole districts read differently.
+  337:      if (category === 'market') {
+  338:        this.ctx.fillStyle = '#d6b15f';
+  339:        this.ctx.fillRect(screenPos.x + tileSize * 0.12, lotY - 1, 2, 2);
+  340:        this.ctx.fillRect(screenPos.x + tileSize * 0.72, lotY - 1, 2, 2);
+  341:      } else if (category === 'industrial') {
+  342:        this.ctx.fillStyle = '#475569';
+  343:        this.ctx.fillRect(screenPos.x + tileSize * 0.12, lotY - 1, 2, 2);
+  344:        this.ctx.fillRect(screenPos.x + tileSize * 0.72, lotY - 1, 2, 2);
+  345:      } else if (category === 'residential' && prosperity > 0.55) {
+  346:        this.ctx.fillStyle = '#16a34a';
+  347:        this.ctx.fillRect(screenPos.x + tileSize * 0.1, lotY + 1, 1, 1);
+  348:        this.ctx.fillRect(screenPos.x + tileSize * 0.84, lotY + 1, 1, 1);
+  349:      } else if (category === 'civic' && k) {
+  350:        this.ctx.fillStyle = k.secondaryColor;
+  351:        this.ctx.fillRect(screenPos.x + tileSize * 0.47, lotY - 1, 2, 2);
+  352:      }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  277:  
+  278:    private drawDataTileTexture(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+  279:      if (tileSize < 6) return;
+  280:  
+  281:      const grain = hash2(x, y, 201);
+  282:      this.ctx.fillStyle = grain > 0.5 ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
+  283:      this.ctx.fillRect(
+  284:        screenX + tileSize * (0.2 + hash2(x, y, 202) * 0.45),
+  285:        screenY + tileSize * (0.2 + hash2(x, y, 203) * 0.45),
+  286:        Math.max(1, tileSize * 0.12),
+  287:        Math.max(1, tileSize * 0.12)
+  288:      );
+  289:    }
+***** SRC\RENDERER\RENDERER.TS
+  354:  
+  355:  
+  356:  
+  357:    private isLandmark(type: string): boolean {
+  358:      return SpriteGenerator.isLandmarkBuilding(type);
+  359:    }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  290:  
+  291:    private drawTerrainTexture(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+  292:      const visual = TERRAIN_VISUALS[tile.type];
+  293:      if (tileSize < 4) return;
+  294:  
+  295:      if (this.isWater(tile.type)) {
+  296:        const lineCount = tile.type === TerrainType.SHALLOW_WATER ? 2 : 1;
+  297:        for (let i = 0; i < lineCount; i++) {
+  298:          const drift = (this.animTimer * (tile.type === TerrainType.SHALLOW_WATER ? 0.26 : 0.16) + hash2(x, y, 220 + i)) % 1;
+  299:          const lineY = screenY + ((hash2(x, y, 221 + i) + drift) % 1) * tileSize;
+  300:          const lineX = screenX + tileSize * (0.12 + hash2(x, y, 222 + i) * 0.18);
+  301:          const lineW = tileSize * (0.38 + hash2(x, y, 223 + i) * 0.36);
+  302:          this.ctx.fillStyle = withAlpha(visual.accent, tile.type === TerrainType.SHALLOW_WATER ? 0.2 : 0.11);
+  303:          this.ctx.fillRect(lineX, lineY, lineW, Math.max(1, tileSize * 0.045));
+  304:        }
+  305:        return;
+  306:      }
+***** SRC\RENDERER\RENDERER.TS
+  360:  
+  361:    private drawCityMacroPresence(
+  362:      city: City,
+  363:      k: Kingdom | null,
+  364:      camera: Camera,
+  365:      width: number,
+  366:      height: number,
+  367:      tileSize: number
+  368:    ): void {
+  369:      if (city.buildings.size === 0 || tileSize < 3) return;
+  370:      const anchor = this.getCityAnchor(city);
+  371:      const center = camera.worldToScreen(anchor.x, anchor.y, width, height);
+  372:      const score = this.cityTierScore(city);
+  373:      const economicPerCapita = city.economicOutput / Math.max(1, city.population);
+  374:      const activity = Math.max(0, Math.min(1, economicPerCapita / 6));
+  375:      const isCapital = !!k && k.capitalCityId === city.id;
+  376:  
+  377:      // At zoomed-out scales, preserve a readable city silhouette instead of a pile of pixels.
+  378:      if (tileSize <= 9 && score >= 2) {
+  379:        const baseW = tileSize * (1.3 + score * 0.32);
+  380:        const baseH = Math.max(3, tileSize * (0.35 + score * 0.05));
+  381:        this.ctx.fillStyle = k ? `${k.color}55` : 'rgba(148,163,184,0.32)';
+  382:        this.ctx.fillRect(center.x - baseW * 0.5 + tileSize * 0.5, center.y + tileSize * 0.58, baseW, baseH);
+  383:  
+  384:        const bars = Math.min(5, 2 + Math.floor(score / 1.3));
+  385:        for (let i = 0; i < bars; i++) {
+  386:          const h = tileSize * (0.25 + score * 0.09 + ((i * 7 + city.population) % 3) * 0.08);
+  387:          const w = Math.max(2, tileSize * 0.26);
+  388:          const x = center.x + tileSize * 0.5 - (bars * w * 0.55) + i * w * 1.1;
+  389:          this.ctx.fillStyle = isCapital && i === Math.floor(bars / 2)
+  390:            ? (k?.secondaryColor ?? '#fbbf24')
+  391:            : 'rgba(30,41,59,0.72)';
+  392:          this.ctx.fillRect(x, center.y + tileSize * 0.58 - h, w, h);
+  393:        }
+  394:      }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  307:  
+  308:      const flecks = tileSize > 18 ? 5 : tileSize > 10 ? 3 : 1;
+  309:      for (let i = 0; i < flecks; i++) {
+  310:        const rx = hash2(x, y, 240 + i);
+  311:        const ry = hash2(x, y, 250 + i);
+  312:        const strong = hash2(x, y, 260 + i) > 0.55;
+  313:        const size = Math.max(1, tileSize * (0.035 + hash2(x, y, 270 + i) * 0.035));
+  314:        this.ctx.fillStyle = withAlpha(strong ? visual.high : visual.low, strong ? 0.16 : 0.14);
+  315:        this.ctx.fillRect(screenX + rx * tileSize, screenY + ry * tileSize, size, size);
+  316:      }
+***** SRC\RENDERER\RENDERER.TS
+  395:  
+  396:      // Economic activity is a soft ambient pulse, not a fake trade route.
+  397:      if (activity > 0.15 && tileSize >= 5) {
+  398:        const pulse = 0.72 + Math.sin(this.animTimer * 1.8 + city.x * 0.31) * 0.18;
+  399:        const radius = tileSize * (0.65 + score * 0.22 + activity * 0.55);
+  400:        this.ctx.strokeStyle = `rgba(245, 158, 11, ${0.08 + activity * 0.12 * pulse})`;
+  401:        this.ctx.lineWidth = Math.max(1, tileSize * 0.05);
+  402:        this.ctx.beginPath();
+  403:        this.ctx.ellipse(center.x + tileSize * 0.5, center.y + tileSize * 0.55, radius, radius * 0.58, 0, 0, Math.PI * 2);
+  404:        this.ctx.stroke();
+  405:      }
+  406:  
+  407:      // Capital halo stays subtle but makes the realm seat legible at medium zoom.
+  408:      if (isCapital && tileSize >= 6) {
+  409:        const radius = tileSize * (1.15 + score * 0.18);
+  410:        this.ctx.strokeStyle = k ? `${k.secondaryColor}66` : 'rgba(251,191,36,0.35)';
+  411:        this.ctx.lineWidth = Math.max(1, tileSize * 0.07);
+  412:        this.ctx.beginPath();
+  413:        this.ctx.ellipse(center.x + tileSize * 0.5, center.y + tileSize * 0.56, radius, radius * 0.56, 0, 0, Math.PI * 2);
+  414:        this.ctx.stroke();
+  415:      }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  318:  
+  319:    private drawHeightRelief(
+  320:      tileMap: TileMap,
+  321:      tile: Tile,
+  322:      x: number,
+  323:      y: number,
+  324:      screenX: number,
+  325:      screenY: number,
+  326:      tileSize: number
+***** SRC\RENDERER\RENDERER.TS
+  417:  
+  418:    private drawCityInfrastructureLinks(
+  419:      city: City,
+  420:      camera: Camera,
+  421:      width: number,
+  422:      height: number,
+  423:      tileSize: number
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  327:    ): void {
+  328:      if (this.isWater(tile.type) || tileSize < 5) return;
+  329:  
+  330:      const width = Math.max(1, tileSize * (tile.type === TerrainType.MOUNTAIN ? 0.16 : 0.08));
+  331:      const shadowAlpha = tile.type === TerrainType.MOUNTAIN ? 0.24 : 0.11;
+  332:      const highlightAlpha = tile.type === TerrainType.MOUNTAIN ? 0.2 : 0.08;
+  333:      const east = tileMap.getTile(x + 1, y);
+  334:      const south = tileMap.getTile(x, y + 1);
+  335:      const west = tileMap.getTile(x - 1, y);
+  336:      const north = tileMap.getTile(x, y - 1);
+  337:  
+  338:      if (east && tile.height - east.height > 0.055) {
+  339:        this.paintEdge(screenX, screenY, tileSize, 'right', `rgba(0,0,0,${shadowAlpha})`, width);
+  340:      }
+  341:      if (south && tile.height - south.height > 0.055) {
+  342:        this.paintEdge(screenX, screenY, tileSize, 'bottom', `rgba(0,0,0,${shadowAlpha})`, width);
+  343:      }
+  344:      if (west && tile.height - west.height > 0.08) {
+  345:        this.paintEdge(screenX, screenY, tileSize, 'left', `rgba(255,255,255,${highlightAlpha})`, width);
+  346:      }
+  347:      if (north && tile.height - north.height > 0.08) {
+  348:        this.paintEdge(screenX, screenY, tileSize, 'top', `rgba(255,255,255,${highlightAlpha})`, width);
+  349:      }
+  350:    }
+***** SRC\RENDERER\RENDERER.TS
+  424:    ): void {
+  425:      if (tileSize < 6) return;
+  426:  
+  427:      const all = Array.from(city.buildings.values());
+  428:      const walls = all.filter(b => b.type === 'wall');
+  429:      const aqueducts = all.filter(b => b.type === 'aqueduct' || b.type === 'grand_aqueduct');
+  430:  
+  431:      const connectNearest = (
+  432:        items: typeof all,
+  433:        maxDistance: number,
+  434:        outer: string,
+  435:        inner: string,
+  436:        outerW: number,
+  437:        innerW: number
+  438:      ) => {
+  439:        for (const a of items) {
+  440:          let nearest: (typeof items)[number] | null = null;
+  441:          let nearestD = Infinity;
+  442:          for (const b of items) {
+  443:            if (a.id === b.id) continue;
+  444:            const d = Math.hypot(a.x - b.x, a.y - b.y);
+  445:            if (d < nearestD && d <= maxDistance) {
+  446:              nearestD = d;
+  447:              nearest = b;
+  448:            }
+  449:          }
+  450:          if (!nearest || a.id > nearest.id) continue;
+  451:          const pa = camera.worldToScreen(a.x, a.y, width, height);
+  452:          const pb = camera.worldToScreen(nearest.x, nearest.y, width, height);
+  453:          this.ctx.lineCap = 'square';
+  454:          this.ctx.strokeStyle = outer;
+  455:          this.ctx.lineWidth = Math.max(2, tileSize * outerW);
+  456:          this.ctx.beginPath();
+  457:          this.ctx.moveTo(pa.x + tileSize * 0.5, pa.y + tileSize * 0.72);
+  458:          this.ctx.lineTo(pb.x + tileSize * 0.5, pb.y + tileSize * 0.72);
+  459:          this.ctx.stroke();
+  460:          this.ctx.strokeStyle = inner;
+  461:          this.ctx.lineWidth = Math.max(1, tileSize * innerW);
+  462:          this.ctx.stroke();
+  463:        }
+  464:      };
+  465:  
+  466:      connectNearest(walls, 4.5, 'rgba(30,41,59,0.8)', 'rgba(100,116,139,0.92)', 0.25, 0.13);
+  467:      connectNearest(aqueducts, 7, 'rgba(71,85,105,0.75)', 'rgba(125,211,252,0.72)', 0.18, 0.07);
+  468:    }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  351:  
+  352:    private drawTerrainEdges(
+  353:      tileMap: TileMap,
+  354:      tile: Tile,
+  355:      x: number,
+  356:      y: number,
+  357:      screenX: number,
+  358:      screenY: number,
+  359:      tileSize: number
+  360:    ): void {
+  361:      if (tileSize < 5) return;
+  362:  
+  363:      const dirs = [
+  364:        { dx: -1, dy: 0, edge: 'left' as const },
+  365:        { dx: 1, dy: 0, edge: 'right' as const },
+  366:        { dx: 0, dy: -1, edge: 'top' as const },
+  367:        { dx: 0, dy: 1, edge: 'bottom' as const }
+  368:      ];
+  369:      const water = this.isWater(tile.type);
+  370:  
+  371:      for (const dir of dirs) {
+  372:        const neighbor = tileMap.getTile(x + dir.dx, y + dir.dy);
+  373:        if (!neighbor || neighbor.type === tile.type) continue;
+  374:  
+  375:        const neighborWater = this.isWater(neighbor.type);
+  376:        if (water && !neighborWater) {
+  377:          const alpha = tile.type === TerrainType.SHALLOW_WATER ? 0.5 : 0.22;
+  378:          this.paintEdge(screenX, screenY, tileSize, dir.edge, withAlpha('#f8fafc', alpha), Math.max(1, tileSize * 0.09));
+  379:          this.paintEdge(screenX, screenY, tileSize, dir.edge, withAlpha(TERRAIN_VISUALS[TerrainType.SAND].high, 0.16), Math.max(
+  380:  1, tileSize * 0.2));
+  381:        } else if (!water && neighborWater) {
+  382:          const beach = tile.type === TerrainType.SAND ? TERRAIN_VISUALS[TerrainType.SAND].high : TERRAIN_VISUALS[TerrainType.SAN
+  383:  D].base;
+  384:          this.paintEdge(screenX, screenY, tileSize, dir.edge, withAlpha(beach, 0.3), Math.max(1, tileSize * 0.15));
+  385:        } else if (!water && !neighborWater) {
+  386:          const blended = mixColor(TERRAIN_VISUALS[tile.type].base, TERRAIN_VISUALS[neighbor.type].base, 0.42);
+  387:          this.paintEdge(screenX, screenY, tileSize, dir.edge, withAlpha(blended, 0.12), Math.max(1, tileSize * 0.08));
+  388:        }
+  389:      }
+***** SRC\RENDERER\RENDERER.TS
+  469:  
+  470:    private drawSpecialBuildingGroundworks(
+  471:      city: City,
+  472:      b: { type: string; x: number; y: number },
+  473:      k: Kingdom | null,
+  474:      screenPos: { x: number; y: number },
+  475:      tileSize: number,
+  476:      era: string
+  477:    ): void {
+  478:      if (tileSize < 7) return;
+  479:  
+  480:      if (b.type === 'harbor' || b.type === 'port') {
+  481:        // Timber/stone waterfront apron, crane mast and water glints.
+  482:        const advanced = era === 'industrial' || era === 'modern';
+  483:        this.ctx.fillStyle = advanced ? 'rgba(71,85,105,0.8)' : 'rgba(120,72,38,0.82)';
+  484:        this.ctx.fillRect(screenPos.x - tileSize * 0.12, screenPos.y + tileSize * 0.68, tileSize * 1.25, tileSize * 0.26);
+  485:        this.ctx.fillStyle = advanced ? 'rgba(148,163,184,0.72)' : 'rgba(180,120,62,0.62)';
+  486:        for (let i = 0; i < 3; i++) {
+  487:          this.ctx.fillRect(screenPos.x + i * tileSize * 0.35, screenPos.y + tileSize * 0.72, tileSize * 0.26, Math.max(1, tileSi
+  488:  ze * 0.05));
+  489:        }
+  490:  
+  491:        if (city.tier === 'city' || city.tier === 'metropolis') {
+  492:          this.ctx.fillStyle = '#475569';
+  493:          this.ctx.fillRect(screenPos.x + tileSize * 0.84, screenPos.y + tileSize * 0.16, Math.max(1, tileSize * 0.06), tileSize 
+  494:  * 0.55);
+  495:          this.ctx.fillRect(screenPos.x + tileSize * 0.62, screenPos.y + tileSize * 0.18, tileSize * 0.28, Math.max(1, tileSize *
+  496:   0.05));
+  497:        }
+  498:  
+  499:        const wave = 0.35 + (Math.sin(this.animTimer * 3.2 + b.x + b.y) + 1) * 0.12;
+  500:        this.ctx.fillStyle = `rgba(125,211,252,${wave})`;
+  501:        this.ctx.fillRect(screenPos.x - tileSize * 0.16, screenPos.y + tileSize * 0.98, tileSize * 0.34, Math.max(1, tileSize * 0
+  502:  .05));
+  503:        this.ctx.fillRect(screenPos.x + tileSize * 0.48, screenPos.y + tileSize * 1.02, tileSize * 0.42, Math.max(1, tileSize * 0
+  504:  .05));
+  505:        return;
+  506:      }
+  507:  
+  508:      if (b.type === 'palace' || b.type === 'monument' || b.type === 'great_library' || b.type === 'colosseum') {
+  509:        const civicColor = k?.secondaryColor ?? '#fbbf24';
+  510:        this.ctx.fillStyle = `${civicColor}22`;
+  511:        this.ctx.beginPath();
+  512:        this.ctx.ellipse(screenPos.x + tileSize * 0.5, screenPos.y + tileSize * 0.74, tileSize * 0.78, tileSize * 0.28, 0, 0, Mat
+  513:  h.PI * 2);
+  514:        this.ctx.fill();
+  515:        this.ctx.strokeStyle = `${civicColor}55`;
+  516:        this.ctx.lineWidth = Math.max(1, tileSize * 0.05);
+  517:        this.ctx.stroke();
+  518:      }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  391:  
+  392:    private paintEdge(
+  393:      screenX: number,
+  394:      screenY: number,
+  395:      tileSize: number,
+  396:      edge: 'left' | 'right' | 'top' | 'bottom',
+  397:      color: string,
+  398:      width: number
+  399:    ): void {
+  400:      const w = Math.max(1, width);
+  401:      this.ctx.fillStyle = color;
+  402:  
+  403:      if (edge === 'left') {
+  404:        this.ctx.fillRect(screenX, screenY, w, tileSize + 0.75);
+  405:      } else if (edge === 'right') {
+  406:        this.ctx.fillRect(screenX + tileSize - w, screenY, w + 0.75, tileSize + 0.75);
+  407:      } else if (edge === 'top') {
+  408:        this.ctx.fillRect(screenX, screenY, tileSize + 0.75, w);
+  409:      } else {
+  410:        this.ctx.fillRect(screenX, screenY + tileSize - w, tileSize + 0.75, w + 0.75);
+  411:      }
+  412:    }
+***** SRC\RENDERER\RENDERER.TS
+  520:  
+  521:    private drawLandmarkPresence(
+  522:      city: City,
+  523:      b: { type: string; x: number; y: number },
+  524:      k: Kingdom | null,
+  525:      screenPos: { x: number; y: number },
+  526:      tileSize: number
+  527:    ): void {
+  528:      if (!this.isLandmark(b.type) || tileSize < 7) return;
+  529:      const capital = !!k && k.capitalCityId === city.id;
+  530:      const glowColor = b.type === 'great_library' || b.type === 'academy'
+  531:        ? '56,189,248'
+  532:        : b.type === 'colosseum'
+  533:          ? '249,115,22'
+  534:          : capital
+  535:            ? '251,191,36'
+  536:            : '226,232,240';
+  537:      const pulse = 0.8 + Math.sin(this.animTimer * 1.5 + b.x * 0.4) * 0.2;
+  538:      const grad = this.ctx.createRadialGradient(
+  539:        screenPos.x + tileSize * 0.5, screenPos.y + tileSize * 0.45, 1,
+  540:        screenPos.x + tileSize * 0.5, screenPos.y + tileSize * 0.45, tileSize * 1.25
+  541:      );
+  542:      grad.addColorStop(0, `rgba(${glowColor},${0.12 * pulse})`);
+  543:      grad.addColorStop(1, `rgba(${glowColor},0)`);
+  544:      this.ctx.fillStyle = grad;
+  545:      this.ctx.beginPath();
+  546:      this.ctx.arc(screenPos.x + tileSize * 0.5, screenPos.y + tileSize * 0.45, tileSize * 1.25, 0, Math.PI * 2);
+  547:      this.ctx.fill();
+  548:    }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  413:  
+  414:    private tileRect(
+  415:      screenX: number,
+  416:      screenY: number,
+  417:      tileSize: number,
+  418:      rx: number,
+  419:      ry: number,
+  420:      rw: number,
+  421:      rh: number,
+  422:      color: string
+  423:    ): void {
+  424:      this.ctx.fillStyle = color;
+  425:      this.ctx.fillRect(
+  426:        screenX + rx * tileSize,
+  427:        screenY + ry * tileSize,
+  428:        Math.max(1, rw * tileSize),
+  429:        Math.max(1, rh * tileSize)
+  430:      );
+  431:    }
+***** SRC\RENDERER\RENDERER.TS
+  549:  
+  550:  
+  551:    private drawBuildingAmbientEffects(b: { id: string; type: string; x: number; y: number }, particles: ParticleManager): void {
+  552:      const last = this.buildingFxTime.get(b.id) ?? -999;
+  553:      const interval = b.type === 'factory' || b.type === 'refinery' ? 0.45
+  554:        : b.type === 'smithy' || b.type === 'workshop' || b.type === 'oil_well' ? 0.75
+  555:        : b.type === 'harbor' || b.type === 'port' ? 1.15
+  556:        : 999;
+  557:      if (this.animTimer - last < interval) return;
+  558:      this.buildingFxTime.set(b.id, this.animTimer);
+  559:  
+  560:      if (b.type === 'factory' || b.type === 'refinery' || b.type === 'smithy' || b.type === 'workshop' || b.type === 'oil_well')
+  561:   {
+  562:        const dark = b.type === 'oil_well' || b.type === 'refinery';
+  563:        particles.spawnParticle(
+  564:          b.x + 0.58,
+  565:          b.y - 0.42,
+  566:          dark ? 'rgba(71, 85, 105, 0.48)' : 'rgba(180, 180, 180, 0.38)',
+  567:          Math.sin(b.x * 1.7 + b.y) * 0.05,
+  568:          -0.28,
+  569:          1.1,
+  570:          b.type === 'factory' || b.type === 'refinery' ? 3 : 2
+  571:        );
+  572:        return;
+  573:      }
+  574:  
+  575:      if (b.type === 'harbor' || b.type === 'port') {
+  576:        particles.spawnParticle(b.x + 0.45, b.y + 0.55, 'rgba(125, 211, 252, 0.38)', 0.06, -0.04, 0.55, 2);
+  577:      }
+  578:    }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  432:  
+  433:    private drawTerrainDetails(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+  434:      const visual = TERRAIN_VISUALS[tile.type];
+  435:      const h = (salt: number) => hash2(x, y, salt);
+  436:  
+  437:      if (tile.type === TerrainType.GRASS || tile.type === TerrainType.FOREST) {
+  438:        const count = tile.type === TerrainType.FOREST ? 2 : 3;
+  439:        for (let i = 0; i < count; i++) {
+  440:          const rx = 0.16 + h(300 + i) * 0.68;
+  441:          const ry = 0.26 + h(310 + i) * 0.55;
+  442:          this.tileRect(screenX, screenY, tileSize, rx, ry, 0.045, 0.18, withAlpha(visual.accent, 0.34));
+  443:          this.tileRect(screenX, screenY, tileSize, rx + 0.035, ry + 0.05, 0.035, 0.12, withAlpha(visual.high, 0.26));
+  444:        }
+  445:        if (tile.type === TerrainType.GRASS && h(330) > 0.82) {
+  446:          this.tileRect(screenX, screenY, tileSize, 0.48 + h(331) * 0.2, 0.34 + h(332) * 0.3, 0.055, 0.055, '#fef08a');
+  447:        }
+***** SRC\RENDERER\RENDERER.TS
+  579:  
+  580:    private drawEntityActionEffects(
+  581:      e: Entity,
+  582:      centerX: number,
+  583:      centerY: number,
+  584:      tileSize: number,
+  585:      direction: SpriteDirection,
+  586:      animation: EntitySpriteAnimation,
+  587:      frame: number
+  588:    ): void {
+  589:      const fxColor = this.getSpeciesFxColor(e);
+  590:  
+  591:      if (animation === 'attack') {
+  592:        const dir = this.getDirectionVector(direction);
+  593:        const sideX = -dir.y;
+  594:        const sideY = dir.x;
+  595:        const reach = tileSize * (0.48 + frame * 0.04);
+  596:        const fxX = centerX + dir.x * reach;
+  597:        const fxY = centerY + dir.y * reach - tileSize * 0.08;
+  598:        const slash = Math.max(1, tileSize * 0.11);
+  599:  
+  600:        this.ctx.fillStyle = withAlpha(fxColor, frame === 0 ? 0.88 : 0.58);
+  601:        this.ctx.fillRect(fxX - slash / 2, fxY - slash / 2, slash, slash);
+  602:        this.ctx.fillRect(fxX + sideX * slash, fxY + sideY * slash, slash, slash);
+  603:        this.ctx.fillRect(fxX - sideX * slash, fxY - sideY * slash, slash, slash);
+  604:  
+  605:        if (e.species === SpeciesType.EMBERKIN || e.species === SpeciesType.DRAGON) {
+  606:          this.ctx.fillStyle = 'rgba(250, 204, 21, 0.5)';
+  607:          this.ctx.fillRect(fxX + dir.x * slash, fxY + dir.y * slash, slash, slash * 1.4);
+  608:        } else if (e.species === SpeciesType.SYLVANII) {
+  609:          this.ctx.fillStyle = 'rgba(217, 249, 157, 0.7)';
+  610:          this.ctx.fillRect(fxX - dir.x * tileSize * 0.25, fxY - dir.y * tileSize * 0.25, slash * 2.4, Math.max(1, slash * 0.55))
+  611:  ;
+  612:        } else if (e.species === SpeciesType.STONEKIN || e.species === SpeciesType.BEAR) {
+  613:          this.ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+  614:          this.ctx.fillRect(fxX - sideX * slash * 2, fxY - sideY * slash * 2, slash * 3, slash);
+  615:        }
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  450:  
+  451:      if (tile.type === TerrainType.SAND) {
+  452:        this.tileRect(screenX, screenY, tileSize, 0.12, 0.34 + h(340) * 0.18, 0.52, 0.045, withAlpha(visual.high, 0.25));
+  453:        this.tileRect(screenX, screenY, tileSize, 0.34, 0.64 + h(341) * 0.12, 0.42, 0.04, withAlpha(visual.low, 0.2));
+  454:        if (h(342) > 0.66) this.tileRect(screenX, screenY, tileSize, 0.22 + h(343) * 0.56, 0.2 + h(344) * 0.58, 0.055, 0.055, wit
+  455:  hAlpha(visual.shadow, 0.35));
+  456:        return;
+***** SRC\RENDERER\RENDERER.TS
+  618:  
+  619:      if (animation === 'heal') {
+  620:        const pulse = 0.24 + Math.sin(this.animTimer * 5) * 0.1;
+  621:        this.ctx.strokeStyle = withAlpha(fxColor, pulse);
+  622:        this.ctx.lineWidth = Math.max(1, tileSize * 0.06);
+  623:        this.ctx.beginPath();
+  624:        this.ctx.arc(centerX, centerY, tileSize * (0.48 + frame * 0.05), 0, Math.PI * 2);
+  625:        this.ctx.stroke();
+  626:        return;
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  458:  
+  459:      if (tile.type === TerrainType.SOIL) {
+  460:        for (let i = 0; i < 3; i++) {
+  461:          this.tileRect(screenX, screenY, tileSize, 0.1, 0.22 + i * 0.22 + h(350 + i) * 0.04, 0.78, 0.04, withAlpha(visual.low, 0
+  462:  .24));
+  463:        }
+  464:        this.tileRect(screenX, screenY, tileSize, 0.2 + h(355) * 0.5, 0.2 + h(356) * 0.58, 0.05, 0.05, withAlpha(visual.high, 0.2
+  465:  4));
+  466:        return;
+***** SRC\RENDERER\RENDERER.TS
+  628:  
+  629:      if ((animation === 'gather' || animation === 'build') && tileSize > 7) {
+  630:        const dir = this.getDirectionVector(direction);
+  631:        const sparkX = centerX + dir.x * tileSize * 0.42;
+  632:        const sparkY = centerY + dir.y * tileSize * 0.28 + tileSize * 0.18;
+  633:        const dust = animation === 'build' ? '#d6b783' : (e.profession === 'miner' ? '#cbd5e1' : '#86efac');
+  634:        this.ctx.fillStyle = withAlpha(dust, 0.38 + (frame % 2) * 0.18);
+  635:        this.ctx.fillRect(sparkX, sparkY, Math.max(1, tileSize * 0.12), Math.max(1, tileSize * 0.08));
+  636:        this.ctx.fillRect(sparkX - tileSize * 0.16, sparkY + tileSize * 0.10, Math.max(1, tileSize * 0.08), Math.max(1, tileSize 
+  637:  * 0.06));
+  638:        return;
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  468:  
+  469:      if (tile.type === TerrainType.SAVANNA) {
+  470:        for (let i = 0; i < 3; i++) {
+  471:          const rx = 0.15 + h(360 + i) * 0.68;
+  472:          const ry = 0.22 + h(370 + i) * 0.58;
+  473:          this.tileRect(screenX, screenY, tileSize, rx, ry, 0.12, 0.035, withAlpha(visual.accent, 0.28));
+  474:          this.tileRect(screenX, screenY, tileSize, rx + 0.03, ry + 0.04, 0.04, 0.16, withAlpha(visual.low, 0.24));
+  475:        }
+  476:        return;
+***** SRC\RENDERER\RENDERER.TS
+  640:  
+  641:      if (animation === 'shoot' && tileSize > 7) {
+  642:        const dir = this.getDirectionVector(direction);
+  643:        const flight = tileSize * (0.46 + frame * 0.08);
+  644:        const ax = centerX + dir.x * flight;
+  645:        const ay = centerY + dir.y * flight - tileSize * 0.08;
+  646:        this.ctx.fillStyle = '#e2e8f0';
+  647:        this.ctx.fillRect(ax, ay, Math.max(2, tileSize * 0.24), Math.max(1, tileSize * 0.055));
+  648:        this.ctx.fillStyle = fxColor;
+  649:        this.ctx.fillRect(ax + dir.x * tileSize * 0.14, ay, Math.max(1, tileSize * 0.08), Math.max(1, tileSize * 0.08));
+  650:        return;
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  478:  
+  479:      if (tile.type === TerrainType.SWAMP) {
+  480:        this.tileRect(screenX, screenY, tileSize, 0.16 + h(380) * 0.2, 0.46 + h(381) * 0.18, 0.32, 0.16, withAlpha('#183f4a', 0.3
+  481:  4));
+  482:        this.tileRect(screenX, screenY, tileSize, 0.58, 0.2 + h(382) * 0.42, 0.08, 0.08, withAlpha('#b7f7bd', 0.3));
+  483:        this.tileRect(screenX, screenY, tileSize, 0.72, 0.58, 0.06, 0.06, withAlpha('#b7f7bd', 0.22));
+  484:        return;
+***** SRC\RENDERER\RENDERER.TS
+  652:  
+  653:      if (animation === 'socialize' && tileSize > 7) {
+  654:        const pulse = 0.34 + Math.sin(this.animTimer * 4 + frame) * 0.12;
+  655:        this.ctx.fillStyle = withAlpha('#f8fafc', pulse);
+  656:        this.ctx.fillRect(centerX + tileSize * 0.26, centerY - tileSize * 0.50, Math.max(1, tileSize * 0.10), Math.max(1, tileSiz
+  657:  e * 0.10));
+  658:        this.ctx.fillStyle = withAlpha(fxColor, pulse);
+  659:        this.ctx.fillRect(centerX + tileSize * 0.34, centerY - tileSize * 0.60, Math.max(1, tileSize * 0.08), Math.max(1, tileSiz
+  660:  e * 0.08));
+  661:        return;
+*****
+
+***** SRC\RENDERER\Renderer.ts.bak
+  486:  
+  487:      if (tile.type === TerrainType.TUNDRA) {
+  488:        this.tileRect(screenX, screenY, tileSize, 0.12, 0.28 + h(390) * 0.12, 0.68, 0.04, withAlpha(visual.high, 0.24));
+  489:        this.tileRect(screenX, screenY, tileSize, 0.28 + h(391) * 0.34, 0.58 + h(392) * 0.14, 0.14, 0.08, withAlpha('#d8f3dc', 0.
+  490:  28));
+  491:        return;
+  492:      }
+  493:  
+  494:      if (tile.type === TerrainType.SNOW) {
+  495:        this.tileRect(screenX, screenY, tileSize, 0.08, 0.68 + h(400) * 0.12, 0.74, 0.04, withAlpha(visual.shadow, 0.18));
+  496:        if (h(401) > 0.5) this.tileRect(screenX, screenY, tileSize, 0.2 + h(402) * 0.56, 0.18 + h(403) * 0.48, 0.055, 0.055, with
+  497:  Alpha('#ffffff', 0.82));
+  498:        return;
+  499:      }
+  500:  
+  501:      if (tile.type === TerrainType.MOUNTAIN) {
+  502:        this.ctx.fillStyle = withAlpha(visual.high, 0.24);
+  503:        this.ctx.beginPath();
+  504:        this.ctx.moveTo(screenX + tileSize * 0.5, screenY + tileSize * 0.08);
+  505:        this.ctx.lineTo(screenX + tileSize * 0.16, screenY + tileSize * 0.82);
+  506:        this.ctx.lineTo(screenX + tileSize * 0.52, screenY + tileSize * 0.62);
+  507:        this.ctx.closePath();
+  508:        this.ctx.fill();
+  509:  
+  510:        this.ctx.fillStyle = withAlpha(visual.shadow, 0.34);
+  511:        this.ctx.beginPath();
+  512:        this.ctx.moveTo(screenX + tileSize * 0.5, screenY + tileSize * 0.08);
+  513:        this.ctx.lineTo(screenX + tileSize * 0.86, screenY + tileSize * 0.88);
+  514:        this.ctx.lineTo(screenX + tileSize * 0.52, screenY + tileSize * 0.62);
+  515:        this.ctx.closePath();
+  516:        this.ctx.fill();
+  517:  
+  518:        this.tileRect(screenX, screenY, tileSize, 0.45, 0.22, 0.06, 0.42, withAlpha(visual.accent, 0.38));
+  519:        if (h(410) > 0.48) this.tileRect(screenX, screenY, tileSize, 0.58, 0.58, 0.22, 0.05, withAlpha(visual.low, 0.38));
+  520:        return;
+  521:      }
+  522:  
+  523:      if (tile.type === TerrainType.LAVA) {
+  524:        const pulse = 0.35 + Math.sin(this.animTimer * 2.2 + x * 0.4 + y * 0.6) * 0.2;
+  525:        this.tileRect(screenX, screenY, tileSize, 0.12, 0.28, 0.76, 0.06, withAlpha(visual.high, pulse));
+  526:        this.tileRect(screenX, screenY, tileSize, 0.36, 0.34, 0.08, 0.38, withAlpha(visual.accent, pulse * 0.8));
+  527:        this.tileRect(screenX, screenY, tileSize, 0.52, 0.62, 0.32, 0.06, withAlpha(visual.high, pulse));
+  528:        return;
+  529:      }
+  530:  
+  531:      if (tile.type === TerrainType.ARCANE) {
+  532:        const glow = 0.35 + Math.sin(this.animTimer * 2.4 + h(420) * 6) * 0.18;
+  533:        this.tileRect(screenX, screenY, tileSize, 0.2 + h(421) * 0.5, 0.22 + h(422) * 0.48, 0.07, 0.07, withAlpha(visual.accent, 
+  534:  glow));
+  535:        this.tileRect(screenX, screenY, tileSize, 0.44, 0.42, 0.18, 0.05, withAlpha(visual.high, 0.22));
+  536:        return;
+  537:      }
+  538:  
+  539:      if (tile.type === TerrainType.CORRUPTED) {
+  540:        this.tileRect(screenX, screenY, tileSize, 0.18, 0.32, 0.44, 0.055, withAlpha(visual.shadow, 0.42));
+  541:        this.tileRect(screenX, screenY, tileSize, 0.58, 0.38, 0.06, 0.34, withAlpha(visual.accent, 0.24));
+  542:        if (h(430) > 0.62) this.tileRect(screenX, screenY, tileSize, 0.3 + h(431) * 0.42, 0.18 + h(432) * 0.56, 0.055, 0.055, wit
+  543:  hAlpha(visual.accent, 0.36));
+  544:      }
+***** SRC\RENDERER\RENDERER.TS
+  663:  
+  664:      if (animation === 'flee' && tileSize > 7) {
+  665:        const dir = this.getDirectionVector(direction);
+  666:        this.ctx.fillStyle = 'rgba(214, 188, 135, 0.28)';
+  667:        this.ctx.fillRect(centerX - dir.x * tileSize * 0.38, centerY - dir.y * tileSize * 0.38, Math.max(1, tileSize * 0.14), Mat
+  668:  h.max(1, tileSize * 0.08));
+  669:        this.ctx.fillRect(centerX - dir.x * tileSize * 0.55, centerY - dir.y * tileSize * 0.22, Math.max(1, tileSize * 0.1), Math
+  670:  .max(1, tileSize * 0.06));
+  671:      }
+*****
+
+Erro ao tentar sincronizar novamente. Os arquivos sÆo muito diferentes
+***** SRC\RENDERER\Renderer.ts.bak
+  546:  
+  547:    public render(
+  548:      camera: Camera,
+  549:      tileMap: TileMap,
+  550:      entities: Entity[],
+  551:      cities: Map<string, City>,
+  552:      kingdoms: Map<string, Kingdom>,
+  553:      particles: ParticleManager,
+  554:      overlayMode: OverlayMode,
+  555:      currentEra: WorldEra,
+  556:      brushX: number | null,
+  557:      brushY: number | null,
+  558:      brushSize: number,
+  559:      ships?: Iterable<Ship>,
+  560:      caravans?: Iterable<OverlandCaravan>
+  561:    ): void {
+  562:      const width = this.canvas.width;
+  563:      const height = this.canvas.height;
+  564:      this.ctx.fillStyle = '#090d16';
+  565:      this.ctx.fillRect(0, 0, width, height);
+  566:      this.animTimer = (this.animTimer + 0.04) % 628.318;
+  567:  
+  568:      // Determine visible tile bounds
+  569:      const topLeft = camera.screenToWorld(0, 0, width, height);
+  570:      const bottomRight = camera.screenToWorld(width, height, width, height);
+  571:  
+  572:      const minX = Math.max(0, Math.floor(topLeft.x));
+  573:      const maxX = Math.min(tileMap.width - 1, Math.ceil(bottomRight.x));
+  574:      const minY = Math.max(0, Math.floor(topLeft.y));
+  575:      const maxY = Math.min(tileMap.height - 1, Math.ceil(bottomRight.y));
+  576:  
+  577:      const tileSize = camera.tileSize * camera.zoom;
+  578:  
+  579:      // ========== 1. RENDER TERRAIN TILES ==========
+  580:      for (let x = minX; x <= maxX; x++) {
+  581:        for (let y = minY; y <= maxY; y++) {
+  582:          const tile = tileMap.grid[x][y];
+  583:          const screenPos = camera.worldToScreen(x, y, width, height);
+  584:          this.drawTerrainTile(tileMap, tile, x, y, screenPos.x, screenPos.y, tileSize, overlayMode);
+  585:  
+  586:          // ===== EVOLVING CONNECTED ROAD TILE OVERLAY =====
+  587:          if (tile.roadLevel > 0) {
+  588:            const roadW = Math.max(2, Math.min(tileSize * 0.35, tileSize - 2));
+  589:            const halfT = tileSize / 2;
+  590:            const halfR = roadW / 2;
+  591:  
+  592:            // Check 8 neighbors
+  593:            const nN = tileMap.getTile(x, y - 1);
+  594:            const nS = tileMap.getTile(x, y + 1);
+  595:            const nE = tileMap.getTile(x + 1, y);
+  596:            const nW = tileMap.getTile(x - 1, y);
+  597:            const nNE = tileMap.getTile(x + 1, y - 1);
+  598:            const nNW = tileMap.getTile(x - 1, y - 1);
+  599:            const nSE = tileMap.getTile(x + 1, y + 1);
+  600:            const nSW = tileMap.getTile(x - 1, y + 1);
+  601:  
+  602:            const hasN = !!(nN && nN.roadLevel > 0);
+  603:            const hasS = !!(nS && nS.roadLevel > 0);
+  604:            const hasE = !!(nE && nE.roadLevel > 0);
+  605:            const hasW = !!(nW && nW.roadLevel > 0);
+  606:            const hasNE = !!(nNE && nNE.roadLevel > 0);
+  607:            const hasNW = !!(nNW && nNW.roadLevel > 0);
+  608:            const hasSE = !!(nSE && nSE.roadLevel > 0);
+  609:            const hasSW = !!(nSW && nSW.roadLevel > 0);
+  610:  
+  611:            const mainColor = tile.roadLevel === 1 ? '#92400e' : tile.roadLevel === 2 ? '#64748b' : '#334155';
+  612:            const borderColor = tile.roadLevel === 1 ? '#451a03' : tile.roadLevel === 2 ? '#334155' : '#fbbf24';
+  613:  
+  614:            // Organic edge offset for dirt trails
+  615:            const edgeOff = tile.roadLevel === 1 ? Math.sin(x * 3.7 + y * 2.1) * 1 : 0;
+  616:  
+  617:            const sx = screenPos.x;
+  618:            const sy = screenPos.y;
+  619:  
+  620:            // Center node
+  621:            this.ctx.fillStyle = borderColor;
+  622:            this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy + halfT - halfR - 1, roadW + 2, roadW + 2);
+  623:            this.ctx.fillStyle = mainColor;
+  624:            this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy + halfT - halfR, roadW, roadW);
+  625:  
+  626:            // Cardinal arms
+  627:            if (hasN) {
+  628:              this.ctx.fillStyle = borderColor;
+  629:              this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy, roadW + 2, halfT);
+  630:              this.ctx.fillStyle = mainColor;
+  631:              this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy, roadW, halfT);
+  632:            }
+  633:            if (hasS) {
+  634:              this.ctx.fillStyle = borderColor;
+  635:              this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy + halfT, roadW + 2, halfT);
+  636:              this.ctx.fillStyle = mainColor;
+  637:              this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy + halfT, roadW, halfT);
+  638:            }
+  639:            if (hasW) {
+  640:              this.ctx.fillStyle = borderColor;
+  641:              this.ctx.fillRect(sx, sy + halfT - halfR - 1, halfT + edgeOff, roadW + 2);
+  642:              this.ctx.fillStyle = mainColor;
+  643:              this.ctx.fillRect(sx, sy + halfT - halfR, halfT + edgeOff, roadW);
+  644:            }
+  645:            if (hasE) {
+***** SRC\RENDERER\RENDERER.TS
+  673:  
+  674:    private drawPixelCrown(x: number, y: number, size: number): void {
+  675:      const s = Math.max(1, size / 8);
+  676:      this.ctx.fillStyle = '#92400e';
+  677:      this.ctx.fillRect(x + s, y + s * 5, s * 6, s * 2);
+  678:      this.ctx.fillStyle = '#fbbf24';
+  679:      this.ctx.fillRect(x + s, y + s * 2, s * 2, s * 4);
+  680:      this.ctx.fillRect(x + s * 3, y + s, s * 2, s * 5);
+  681:      this.ctx.fillRect(x + s * 5, y + s * 2, s * 2, s * 4);
+  682:      this.ctx.fillStyle = '#fef08a';
+  683:      this.ctx.fillRect(x + s * 3, y + s * 5, s * 2, s);
+  684:      this.ctx.fillStyle = '#ef4444';
+  685:      this.ctx.fillRect(x + s * 2, y + s * 3, s, s);
+  686:      this.ctx.fillStyle = '#38bdf8';
+  687:      this.ctx.fillRect(x + s * 4, y + s * 2, s, s);
+  688:    }
+  689:  
+  690:    private drawPixelStar(x: number, y: number, size: number): void {
+  691:      const s = Math.max(1, size / 7);
+  692:      this.ctx.fillStyle = '#fef08a';
+  693:      this.ctx.fillRect(x + s * 3, y, s, s * 2);
+  694:      this.ctx.fillRect(x + s, y + s * 2, s * 5, s);
+  695:      this.ctx.fillRect(x + s * 2, y + s * 3, s * 3, s);
+  696:      this.ctx.fillStyle = '#f59e0b';
+  697:      this.ctx.fillRect(x, y + s * 3, s * 2, s);
+  698:      this.ctx.fillRect(x + s * 5, y + s * 3, s * 2, s);
+  699:      this.ctx.fillRect(x + s * 2, y + s * 4, s, s * 2);
+  700:      this.ctx.fillRect(x + s * 4, y + s * 4, s, s * 2);
+  701:    }
+  702:  
+  703:    private isWater(type: TerrainType): boolean {
+  704:      return type === TerrainType.DEEP_OCEAN || type === TerrainType.SHALLOW_WATER;
+  705:    }
+  706:  
+  707:    /** Fast per-tile hash; equivalent to hash2(x, y, salt) for the current tile. */
+  708:    private h(salt: number): number {
+  709:      const n = (this.hSin * COS_SALT_TABLE[salt] + this.hCos * SIN_SALT_TABLE[salt]) * HASH_SCALE;
+  710:      const f = n % 1;
+  711:      return f < 0 ? f + 1 : f;
+  712:    }
+  713:  
+  714:    private setHashBase(x: number, y: number): void {
+  715:      const a = x * 127.1 + y * 311.7;
+  716:      this.hSin = Math.sin(a);
+  717:      this.hCos = Math.cos(a);
+  718:    }
+  719:  
+  720:    /** Ensure the offscreen terrain bake canvas exists and matches the map size; mark everything dirty on create/resize. */
+  721:    private ensureTerrainBake(tileMap: TileMap): void {
+  722:      if (this.terrainCanvas && this.terrainW === tileMap.width && this.terrainH === tileMap.height) return;
+  723:      this.terrainCanvas = document.createElement('canvas');
+  724:      this.terrainCanvas.width = tileMap.width * this.bakeTileSize;
+  725:      this.terrainCanvas.height = tileMap.height * this.bakeTileSize;
+  726:      this.terrainCtx = this.terrainCanvas.getContext('2d', { alpha: true })!;
+  727:      this.terrainCtx.imageSmoothingEnabled = false;
+  728:      this.terrainW = tileMap.width;
+  729:      this.terrainH = tileMap.height;
+  730:      tileMap.markAllDirty();
+  731:    }
+  732:  
+  733:    /** Redraw dirty static tiles into the bake canvas. Animated water/lava tiles are cleared to transparent (drawn per frame). *
+  734:  /
+  735:    private bakeDirtyTiles(tileMap: TileMap): void {
+  736:      if (!this.terrainCtx || tileMap.dirtyTiles.size === 0) return;
+  737:      const savedCtx = this.ctx;
+  738:      this.ctx = this.terrainCtx;
+  739:      const W = tileMap.width;
+  740:      const H = tileMap.height;
+  741:      for (const idx of tileMap.dirtyTiles) {
+  742:        const x = Math.floor(idx / H);
+  743:        const y = idx - x * H;
+  744:        if (x < 0 || x >= W || y < 0 || y >= H) continue;
+  745:        this.bakeStaticTile(tileMap, x, y);
+  746:      }
+  747:      this.ctx = savedCtx;
+  748:      tileMap.dirtyTiles.clear();
+  749:    }
+  750:  
+  751:    private bakeStaticTile(tileMap: TileMap, x: number, y: number): void {
+  752:      const tile = tileMap.grid[x][y];
+  753:      const ts = this.bakeTileSize;
+  754:      const bx = x * ts;
+  755:      const by = y * ts;
+  756:      this.ctx.clearRect(bx, by, ts, ts);
+  757:      // Animated surfaces stay transparent in the bake (drawn per frame).
+  758:      if (this.isWater(tile.type) || tile.type === TerrainType.LAVA) return;
+  759:  
+  760:      this.setHashBase(x, y);
+  761:      const color =
+  762:        tile.renderSurface !== null &&
+  763:        tile.renderSurfaceType === tile.type &&
+  764:        tile.renderSurfaceHeight === tile.height &&
+  765:        tile.renderSurfaceMoisture === tile.moisture &&
+  766:        tile.renderSurfaceTemp === tile.temperature
+  767:          ? tile.renderSurface
+  768:          : (() => {
+  769:              const c = terrainSurfaceColor(tile, x, y, this.animTimer);
+  770:              tile.renderSurface = c;
+  771:              tile.renderSurfaceType = tile.type;
+  772:              tile.renderSurfaceHeight = tile.height;
+*****
+

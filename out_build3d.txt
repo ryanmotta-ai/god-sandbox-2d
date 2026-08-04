@@ -1,0 +1,15 @@
+Year: 70
+
+Kingdom Clan of Thundara (sylvanii): techs=tribalism, stone_tools, fire_mastery, agriculture, chiefdom, animal_husbandry, pottery
+
+Kingdom Clan of Emberveil (stonekin): techs=tribalism, stone_tools, fire_mastery
+
+City Faeuston: pop=33 tier=village prosperity=0.83
+  Buildings: town_centerx1, housex9, lumber_campx2, farmx4
+  housingCapacity=46 slots=16 used=16
+  food=973 wood=122 stone=0
+
+City Ironuston: pop=2 tier=camp prosperity=0.81
+  Buildings: town_centerx1, housex3, lumber_campx1
+  housingCapacity=27 slots=5 used=5
+  food=387 wood=142 stone=7

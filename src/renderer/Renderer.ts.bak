@@ -1,0 +1,1236 @@
+import { Camera } from './Camera';
+import { TileMap } from '../world/TileMap';
+import { TerrainType } from '../world/Biomes';
+import type { Tile } from '../world/Tile';
+import { Entity } from '../entities/Entity';
+import { SpeciesType, SPECIES_DEFINITIONS } from '../entities/Species';
+import { Kingdom } from '../civ/Kingdom';
+import { City } from '../civ/City';
+import { ParticleManager } from './Particles';
+import { OverlayMode } from './Overlays';
+import { WorldEra } from '../world/WeatherEras';
+import { SpriteGenerator, type EntitySpriteAnimation, type SpriteDirection } from './SpriteGenerator';
+import { SpriteRegistry } from './SpriteRegistry';
+import { PixelIcons } from './PixelIcons';
+import { DiplomacyManager } from '../civ/Diplomacy';
+import { Ship, SHIP_TIERS } from '../civ/NavalSystem';
+import { OverlandCaravan } from '../civ/CaravanSystem';
+import {
+  RESOURCE_COLORS,
+  TERRAIN_VISUALS,
+  clamp,
+  hash2,
+  mixColor,
+  parseColor,
+  terrainSurfaceColor,
+  withAlpha
+} from './TerrainPalette';
+
+/** Player-controlled visual toggles, driven by the Settings screen. */
+export interface RenderOptions {
+  showGrid: boolean;
+  showCityNames: boolean;
+  showKingdomBadges: boolean;
+  showHealthBars: boolean;
+  showParticles: boolean;
+  showBrushCursor: boolean;
+}
+
+const DEFAULT_RENDER_OPTIONS: RenderOptions = {
+  showGrid: false,
+  showCityNames: true,
+  showKingdomBadges: true,
+  showHealthBars: true,
+  showParticles: true,
+  showBrushCursor: true
+};
+
+export class PixelRenderer {
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
+  private animTimer: number = 0;
+  private diplomacy: DiplomacyManager | null = null;
+  private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { alpha: false })!;
+    this.ctx.imageSmoothingEnabled = false;
+  }
+
+  public setDiplomacy(diplomacy: DiplomacyManager): void {
+    this.diplomacy = diplomacy;
+  }
+
+  public setOptions(options: Partial<RenderOptions>): void {
+    this.options = { ...this.options, ...options };
+  }
+
+  public resize(width: number, height: number): void {
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.ctx.imageSmoothingEnabled = false;
+  }
+
+  /** Parse hex color to RGB */
+  private hexToRgb(hex: string): { r: number; g: number; b: number } {
+    return parseColor(hex);
+  }
+
+  private getEntityDirection(e: Entity, moving: boolean): SpriteDirection {
+    const movedX = e.x - e.prevX;
+    const movedY = e.y - e.prevY;
+
+    if (moving && Math.abs(movedX) + Math.abs(movedY) > 0.002) {
+      if (Math.abs(movedX) >= Math.abs(movedY)) return movedX >= 0 ? 'right' : 'left';
+      return movedY >= 0 ? 'down' : 'up';
+    }
+
+    if ((e.aiState === 'attack' || e.aiState === 'hunt' || e.aiState === 'flee') && e.targetX !== null && e.targetY !== null) {
+      const targetDx = e.targetX - e.x;
+      const targetDy = e.targetY - e.y;
+      if (Math.abs(targetDx) >= Math.abs(targetDy)) return targetDx >= 0 ? 'right' : 'left';
+      return targetDy >= 0 ? 'down' : 'up';
+    }
+
+    return e.facing < 0 ? 'left' : 'right';
+  }
+
+  private getEntityAnimation(e: Entity, moving: boolean): EntitySpriteAnimation {
+    if ((e.aiState === 'attack' || e.aiState === 'hunt') && e.attackCooldown > 0) return 'attack';
+    if (e.aiState === 'flee') return 'flee';
+    if (e.aiState === 'heal') return 'heal';
+    if (moving) return 'walk';
+    return 'idle';
+  }
+
+  private getAnimationFrame(e: Entity, animation: EntitySpriteAnimation, idHash: number): number {
+    const rate = animation === 'attack' ? 11
+      : animation === 'flee' ? 13
+      : animation === 'walk' ? 8
+      : animation === 'heal' ? 4
+      : 2;
+    return Math.floor(this.animTimer * rate + idHash) % 4;
+  }
+
+  private getDirectionVector(direction: SpriteDirection): { x: number; y: number } {
+    switch (direction) {
+      case 'left': return { x: -1, y: 0 };
+      case 'right': return { x: 1, y: 0 };
+      case 'up': return { x: 0, y: -1 };
+      case 'down':
+      default:
+        return { x: 0, y: 1 };
+    }
+  }
+
+  private getSpeciesFxColor(e: Entity): string {
+    switch (e.species) {
+      case SpeciesType.LUMINI: return '#fef08a';
+      case SpeciesType.SYLVANII: return '#bef264';
+      case SpeciesType.STONEKIN: return '#cbd5e1';
+      case SpeciesType.EMBERKIN: return '#fb923c';
+      case SpeciesType.DRAGON: return '#f97316';
+      case SpeciesType.WOLF: return '#e2e8f0';
+      case SpeciesType.BEAR: return '#d97706';
+      case SpeciesType.DEER:
+      default:
+        return '#fde68a';
+    }
+  }
+
+  private drawEntityActionEffects(
+    e: Entity,
+    centerX: number,
+    centerY: number,
+    tileSize: number,
+    direction: SpriteDirection,
+    animation: EntitySpriteAnimation,
+    frame: number
+  ): void {
+    const fxColor = this.getSpeciesFxColor(e);
+
+    if (animation === 'attack') {
+      const dir = this.getDirectionVector(direction);
+      const sideX = -dir.y;
+      const sideY = dir.x;
+      const reach = tileSize * (0.48 + frame * 0.04);
+      const fxX = centerX + dir.x * reach;
+      const fxY = centerY + dir.y * reach - tileSize * 0.08;
+      const slash = Math.max(1, tileSize * 0.11);
+
+      this.ctx.fillStyle = withAlpha(fxColor, frame === 0 ? 0.88 : 0.58);
+      this.ctx.fillRect(fxX - slash / 2, fxY - slash / 2, slash, slash);
+      this.ctx.fillRect(fxX + sideX * slash, fxY + sideY * slash, slash, slash);
+      this.ctx.fillRect(fxX - sideX * slash, fxY - sideY * slash, slash, slash);
+
+      if (e.species === SpeciesType.EMBERKIN || e.species === SpeciesType.DRAGON) {
+        this.ctx.fillStyle = 'rgba(250, 204, 21, 0.5)';
+        this.ctx.fillRect(fxX + dir.x * slash, fxY + dir.y * slash, slash, slash * 1.4);
+      } else if (e.species === SpeciesType.SYLVANII) {
+        this.ctx.fillStyle = 'rgba(217, 249, 157, 0.7)';
+        this.ctx.fillRect(fxX - dir.x * tileSize * 0.25, fxY - dir.y * tileSize * 0.25, slash * 2.4, Math.max(1, slash * 0.55));
+      } else if (e.species === SpeciesType.STONEKIN || e.species === SpeciesType.BEAR) {
+        this.ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+        this.ctx.fillRect(fxX - sideX * slash * 2, fxY - sideY * slash * 2, slash * 3, slash);
+      }
+      return;
+    }
+
+    if (animation === 'heal') {
+      const pulse = 0.24 + Math.sin(this.animTimer * 5) * 0.1;
+      this.ctx.strokeStyle = withAlpha(fxColor, pulse);
+      this.ctx.lineWidth = Math.max(1, tileSize * 0.06);
+      this.ctx.beginPath();
+      this.ctx.arc(centerX, centerY, tileSize * (0.48 + frame * 0.05), 0, Math.PI * 2);
+      this.ctx.stroke();
+      return;
+    }
+
+    if (animation === 'flee' && tileSize > 7) {
+      const dir = this.getDirectionVector(direction);
+      this.ctx.fillStyle = 'rgba(214, 188, 135, 0.28)';
+      this.ctx.fillRect(centerX - dir.x * tileSize * 0.38, centerY - dir.y * tileSize * 0.38, Math.max(1, tileSize * 0.14), Math.max(1, tileSize * 0.08));
+      this.ctx.fillRect(centerX - dir.x * tileSize * 0.55, centerY - dir.y * tileSize * 0.22, Math.max(1, tileSize * 0.1), Math.max(1, tileSize * 0.06));
+    }
+  }
+
+  private drawPixelCrown(x: number, y: number, size: number): void {
+    const s = Math.max(1, size / 8);
+    this.ctx.fillStyle = '#92400e';
+    this.ctx.fillRect(x + s, y + s * 5, s * 6, s * 2);
+    this.ctx.fillStyle = '#fbbf24';
+    this.ctx.fillRect(x + s, y + s * 2, s * 2, s * 4);
+    this.ctx.fillRect(x + s * 3, y + s, s * 2, s * 5);
+    this.ctx.fillRect(x + s * 5, y + s * 2, s * 2, s * 4);
+    this.ctx.fillStyle = '#fef08a';
+    this.ctx.fillRect(x + s * 3, y + s * 5, s * 2, s);
+    this.ctx.fillStyle = '#ef4444';
+    this.ctx.fillRect(x + s * 2, y + s * 3, s, s);
+    this.ctx.fillStyle = '#38bdf8';
+    this.ctx.fillRect(x + s * 4, y + s * 2, s, s);
+  }
+
+  private drawPixelStar(x: number, y: number, size: number): void {
+    const s = Math.max(1, size / 7);
+    this.ctx.fillStyle = '#fef08a';
+    this.ctx.fillRect(x + s * 3, y, s, s * 2);
+    this.ctx.fillRect(x + s, y + s * 2, s * 5, s);
+    this.ctx.fillRect(x + s * 2, y + s * 3, s * 3, s);
+    this.ctx.fillStyle = '#f59e0b';
+    this.ctx.fillRect(x, y + s * 3, s * 2, s);
+    this.ctx.fillRect(x + s * 5, y + s * 3, s * 2, s);
+    this.ctx.fillRect(x + s * 2, y + s * 4, s, s * 2);
+    this.ctx.fillRect(x + s * 4, y + s * 4, s, s * 2);
+  }
+
+  private isWater(type: TerrainType): boolean {
+    return type === TerrainType.DEEP_OCEAN || type === TerrainType.SHALLOW_WATER;
+  }
+
+  private getOverlayTerrainColor(tile: Tile, overlayMode: OverlayMode): string | null {
+    if (overlayMode === 'temperature') {
+      const tNorm = clamp((tile.temperature + 20) / 70, 0, 1);
+      if (tNorm < 0.5) return mixColor('#1d4ed8', '#a7f3d0', tNorm * 2);
+      return mixColor('#f8e7a2', '#dc2626', (tNorm - 0.5) * 2);
+    }
+
+    if (overlayMode === 'resources' && tile.resourceType) {
+      return RESOURCE_COLORS[tile.resourceType] ?? '#fbbf24';
+    }
+
+    return null;
+  }
+
+  private drawTerrainTile(
+    tileMap: TileMap,
+    tile: Tile,
+    x: number,
+    y: number,
+    screenX: number,
+    screenY: number,
+    tileSize: number,
+    overlayMode: OverlayMode
+  ): void {
+    const overlayColor = this.getOverlayTerrainColor(tile, overlayMode);
+    const color = overlayColor ?? terrainSurfaceColor(tile, x, y, this.animTimer);
+
+    this.ctx.fillStyle = color;
+    this.ctx.fillRect(screenX, screenY, tileSize + 0.75, tileSize + 0.75);
+
+    if (overlayColor) {
+      this.drawDataTileTexture(tile, x, y, screenX, screenY, tileSize);
+      return;
+    }
+
+    this.drawTerrainTexture(tile, x, y, screenX, screenY, tileSize);
+    this.drawHeightRelief(tileMap, tile, x, y, screenX, screenY, tileSize);
+    this.drawTerrainEdges(tileMap, tile, x, y, screenX, screenY, tileSize);
+
+    if (tileSize >= 8) {
+      this.drawTerrainDetails(tile, x, y, screenX, screenY, tileSize);
+    }
+  }
+
+  private drawDataTileTexture(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+    if (tileSize < 6) return;
+
+    const grain = hash2(x, y, 201);
+    this.ctx.fillStyle = grain > 0.5 ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)';
+    this.ctx.fillRect(
+      screenX + tileSize * (0.2 + hash2(x, y, 202) * 0.45),
+      screenY + tileSize * (0.2 + hash2(x, y, 203) * 0.45),
+      Math.max(1, tileSize * 0.12),
+      Math.max(1, tileSize * 0.12)
+    );
+  }
+
+  private drawTerrainTexture(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+    const visual = TERRAIN_VISUALS[tile.type];
+    if (tileSize < 4) return;
+
+    if (this.isWater(tile.type)) {
+      const lineCount = tile.type === TerrainType.SHALLOW_WATER ? 2 : 1;
+      for (let i = 0; i < lineCount; i++) {
+        const drift = (this.animTimer * (tile.type === TerrainType.SHALLOW_WATER ? 0.26 : 0.16) + hash2(x, y, 220 + i)) % 1;
+        const lineY = screenY + ((hash2(x, y, 221 + i) + drift) % 1) * tileSize;
+        const lineX = screenX + tileSize * (0.12 + hash2(x, y, 222 + i) * 0.18);
+        const lineW = tileSize * (0.38 + hash2(x, y, 223 + i) * 0.36);
+        this.ctx.fillStyle = withAlpha(visual.accent, tile.type === TerrainType.SHALLOW_WATER ? 0.2 : 0.11);
+        this.ctx.fillRect(lineX, lineY, lineW, Math.max(1, tileSize * 0.045));
+      }
+      return;
+    }
+
+    const flecks = tileSize > 18 ? 5 : tileSize > 10 ? 3 : 1;
+    for (let i = 0; i < flecks; i++) {
+      const rx = hash2(x, y, 240 + i);
+      const ry = hash2(x, y, 250 + i);
+      const strong = hash2(x, y, 260 + i) > 0.55;
+      const size = Math.max(1, tileSize * (0.035 + hash2(x, y, 270 + i) * 0.035));
+      this.ctx.fillStyle = withAlpha(strong ? visual.high : visual.low, strong ? 0.16 : 0.14);
+      this.ctx.fillRect(screenX + rx * tileSize, screenY + ry * tileSize, size, size);
+    }
+  }
+
+  private drawHeightRelief(
+    tileMap: TileMap,
+    tile: Tile,
+    x: number,
+    y: number,
+    screenX: number,
+    screenY: number,
+    tileSize: number
+  ): void {
+    if (this.isWater(tile.type) || tileSize < 5) return;
+
+    const width = Math.max(1, tileSize * (tile.type === TerrainType.MOUNTAIN ? 0.16 : 0.08));
+    const shadowAlpha = tile.type === TerrainType.MOUNTAIN ? 0.24 : 0.11;
+    const highlightAlpha = tile.type === TerrainType.MOUNTAIN ? 0.2 : 0.08;
+    const east = tileMap.getTile(x + 1, y);
+    const south = tileMap.getTile(x, y + 1);
+    const west = tileMap.getTile(x - 1, y);
+    const north = tileMap.getTile(x, y - 1);
+
+    if (east && tile.height - east.height > 0.055) {
+      this.paintEdge(screenX, screenY, tileSize, 'right', `rgba(0,0,0,${shadowAlpha})`, width);
+    }
+    if (south && tile.height - south.height > 0.055) {
+      this.paintEdge(screenX, screenY, tileSize, 'bottom', `rgba(0,0,0,${shadowAlpha})`, width);
+    }
+    if (west && tile.height - west.height > 0.08) {
+      this.paintEdge(screenX, screenY, tileSize, 'left', `rgba(255,255,255,${highlightAlpha})`, width);
+    }
+    if (north && tile.height - north.height > 0.08) {
+      this.paintEdge(screenX, screenY, tileSize, 'top', `rgba(255,255,255,${highlightAlpha})`, width);
+    }
+  }
+
+  private drawTerrainEdges(
+    tileMap: TileMap,
+    tile: Tile,
+    x: number,
+    y: number,
+    screenX: number,
+    screenY: number,
+    tileSize: number
+  ): void {
+    if (tileSize < 5) return;
+
+    const dirs = [
+      { dx: -1, dy: 0, edge: 'left' as const },
+      { dx: 1, dy: 0, edge: 'right' as const },
+      { dx: 0, dy: -1, edge: 'top' as const },
+      { dx: 0, dy: 1, edge: 'bottom' as const }
+    ];
+    const water = this.isWater(tile.type);
+
+    for (const dir of dirs) {
+      const neighbor = tileMap.getTile(x + dir.dx, y + dir.dy);
+      if (!neighbor || neighbor.type === tile.type) continue;
+
+      const neighborWater = this.isWater(neighbor.type);
+      if (water && !neighborWater) {
+        const alpha = tile.type === TerrainType.SHALLOW_WATER ? 0.5 : 0.22;
+        this.paintEdge(screenX, screenY, tileSize, dir.edge, withAlpha('#f8fafc', alpha), Math.max(1, tileSize * 0.09));
+        this.paintEdge(screenX, screenY, tileSize, dir.edge, withAlpha(TERRAIN_VISUALS[TerrainType.SAND].high, 0.16), Math.max(1, tileSize * 0.2));
+      } else if (!water && neighborWater) {
+        const beach = tile.type === TerrainType.SAND ? TERRAIN_VISUALS[TerrainType.SAND].high : TERRAIN_VISUALS[TerrainType.SAND].base;
+        this.paintEdge(screenX, screenY, tileSize, dir.edge, withAlpha(beach, 0.3), Math.max(1, tileSize * 0.15));
+      } else if (!water && !neighborWater) {
+        const blended = mixColor(TERRAIN_VISUALS[tile.type].base, TERRAIN_VISUALS[neighbor.type].base, 0.42);
+        this.paintEdge(screenX, screenY, tileSize, dir.edge, withAlpha(blended, 0.12), Math.max(1, tileSize * 0.08));
+      }
+    }
+  }
+
+  private paintEdge(
+    screenX: number,
+    screenY: number,
+    tileSize: number,
+    edge: 'left' | 'right' | 'top' | 'bottom',
+    color: string,
+    width: number
+  ): void {
+    const w = Math.max(1, width);
+    this.ctx.fillStyle = color;
+
+    if (edge === 'left') {
+      this.ctx.fillRect(screenX, screenY, w, tileSize + 0.75);
+    } else if (edge === 'right') {
+      this.ctx.fillRect(screenX + tileSize - w, screenY, w + 0.75, tileSize + 0.75);
+    } else if (edge === 'top') {
+      this.ctx.fillRect(screenX, screenY, tileSize + 0.75, w);
+    } else {
+      this.ctx.fillRect(screenX, screenY + tileSize - w, tileSize + 0.75, w + 0.75);
+    }
+  }
+
+  private tileRect(
+    screenX: number,
+    screenY: number,
+    tileSize: number,
+    rx: number,
+    ry: number,
+    rw: number,
+    rh: number,
+    color: string
+  ): void {
+    this.ctx.fillStyle = color;
+    this.ctx.fillRect(
+      screenX + rx * tileSize,
+      screenY + ry * tileSize,
+      Math.max(1, rw * tileSize),
+      Math.max(1, rh * tileSize)
+    );
+  }
+
+  private drawTerrainDetails(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+    const visual = TERRAIN_VISUALS[tile.type];
+    const h = (salt: number) => hash2(x, y, salt);
+
+    if (tile.type === TerrainType.GRASS || tile.type === TerrainType.FOREST) {
+      const count = tile.type === TerrainType.FOREST ? 2 : 3;
+      for (let i = 0; i < count; i++) {
+        const rx = 0.16 + h(300 + i) * 0.68;
+        const ry = 0.26 + h(310 + i) * 0.55;
+        this.tileRect(screenX, screenY, tileSize, rx, ry, 0.045, 0.18, withAlpha(visual.accent, 0.34));
+        this.tileRect(screenX, screenY, tileSize, rx + 0.035, ry + 0.05, 0.035, 0.12, withAlpha(visual.high, 0.26));
+      }
+      if (tile.type === TerrainType.GRASS && h(330) > 0.82) {
+        this.tileRect(screenX, screenY, tileSize, 0.48 + h(331) * 0.2, 0.34 + h(332) * 0.3, 0.055, 0.055, '#fef08a');
+      }
+      return;
+    }
+
+    if (tile.type === TerrainType.SAND) {
+      this.tileRect(screenX, screenY, tileSize, 0.12, 0.34 + h(340) * 0.18, 0.52, 0.045, withAlpha(visual.high, 0.25));
+      this.tileRect(screenX, screenY, tileSize, 0.34, 0.64 + h(341) * 0.12, 0.42, 0.04, withAlpha(visual.low, 0.2));
+      if (h(342) > 0.66) this.tileRect(screenX, screenY, tileSize, 0.22 + h(343) * 0.56, 0.2 + h(344) * 0.58, 0.055, 0.055, withAlpha(visual.shadow, 0.35));
+      return;
+    }
+
+    if (tile.type === TerrainType.SOIL) {
+      for (let i = 0; i < 3; i++) {
+        this.tileRect(screenX, screenY, tileSize, 0.1, 0.22 + i * 0.22 + h(350 + i) * 0.04, 0.78, 0.04, withAlpha(visual.low, 0.24));
+      }
+      this.tileRect(screenX, screenY, tileSize, 0.2 + h(355) * 0.5, 0.2 + h(356) * 0.58, 0.05, 0.05, withAlpha(visual.high, 0.24));
+      return;
+    }
+
+    if (tile.type === TerrainType.SAVANNA) {
+      for (let i = 0; i < 3; i++) {
+        const rx = 0.15 + h(360 + i) * 0.68;
+        const ry = 0.22 + h(370 + i) * 0.58;
+        this.tileRect(screenX, screenY, tileSize, rx, ry, 0.12, 0.035, withAlpha(visual.accent, 0.28));
+        this.tileRect(screenX, screenY, tileSize, rx + 0.03, ry + 0.04, 0.04, 0.16, withAlpha(visual.low, 0.24));
+      }
+      return;
+    }
+
+    if (tile.type === TerrainType.SWAMP) {
+      this.tileRect(screenX, screenY, tileSize, 0.16 + h(380) * 0.2, 0.46 + h(381) * 0.18, 0.32, 0.16, withAlpha('#183f4a', 0.34));
+      this.tileRect(screenX, screenY, tileSize, 0.58, 0.2 + h(382) * 0.42, 0.08, 0.08, withAlpha('#b7f7bd', 0.3));
+      this.tileRect(screenX, screenY, tileSize, 0.72, 0.58, 0.06, 0.06, withAlpha('#b7f7bd', 0.22));
+      return;
+    }
+
+    if (tile.type === TerrainType.TUNDRA) {
+      this.tileRect(screenX, screenY, tileSize, 0.12, 0.28 + h(390) * 0.12, 0.68, 0.04, withAlpha(visual.high, 0.24));
+      this.tileRect(screenX, screenY, tileSize, 0.28 + h(391) * 0.34, 0.58 + h(392) * 0.14, 0.14, 0.08, withAlpha('#d8f3dc', 0.28));
+      return;
+    }
+
+    if (tile.type === TerrainType.SNOW) {
+      this.tileRect(screenX, screenY, tileSize, 0.08, 0.68 + h(400) * 0.12, 0.74, 0.04, withAlpha(visual.shadow, 0.18));
+      if (h(401) > 0.5) this.tileRect(screenX, screenY, tileSize, 0.2 + h(402) * 0.56, 0.18 + h(403) * 0.48, 0.055, 0.055, withAlpha('#ffffff', 0.82));
+      return;
+    }
+
+    if (tile.type === TerrainType.MOUNTAIN) {
+      this.ctx.fillStyle = withAlpha(visual.high, 0.24);
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenX + tileSize * 0.5, screenY + tileSize * 0.08);
+      this.ctx.lineTo(screenX + tileSize * 0.16, screenY + tileSize * 0.82);
+      this.ctx.lineTo(screenX + tileSize * 0.52, screenY + tileSize * 0.62);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      this.ctx.fillStyle = withAlpha(visual.shadow, 0.34);
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenX + tileSize * 0.5, screenY + tileSize * 0.08);
+      this.ctx.lineTo(screenX + tileSize * 0.86, screenY + tileSize * 0.88);
+      this.ctx.lineTo(screenX + tileSize * 0.52, screenY + tileSize * 0.62);
+      this.ctx.closePath();
+      this.ctx.fill();
+
+      this.tileRect(screenX, screenY, tileSize, 0.45, 0.22, 0.06, 0.42, withAlpha(visual.accent, 0.38));
+      if (h(410) > 0.48) this.tileRect(screenX, screenY, tileSize, 0.58, 0.58, 0.22, 0.05, withAlpha(visual.low, 0.38));
+      return;
+    }
+
+    if (tile.type === TerrainType.LAVA) {
+      const pulse = 0.35 + Math.sin(this.animTimer * 2.2 + x * 0.4 + y * 0.6) * 0.2;
+      this.tileRect(screenX, screenY, tileSize, 0.12, 0.28, 0.76, 0.06, withAlpha(visual.high, pulse));
+      this.tileRect(screenX, screenY, tileSize, 0.36, 0.34, 0.08, 0.38, withAlpha(visual.accent, pulse * 0.8));
+      this.tileRect(screenX, screenY, tileSize, 0.52, 0.62, 0.32, 0.06, withAlpha(visual.high, pulse));
+      return;
+    }
+
+    if (tile.type === TerrainType.ARCANE) {
+      const glow = 0.35 + Math.sin(this.animTimer * 2.4 + h(420) * 6) * 0.18;
+      this.tileRect(screenX, screenY, tileSize, 0.2 + h(421) * 0.5, 0.22 + h(422) * 0.48, 0.07, 0.07, withAlpha(visual.accent, glow));
+      this.tileRect(screenX, screenY, tileSize, 0.44, 0.42, 0.18, 0.05, withAlpha(visual.high, 0.22));
+      return;
+    }
+
+    if (tile.type === TerrainType.CORRUPTED) {
+      this.tileRect(screenX, screenY, tileSize, 0.18, 0.32, 0.44, 0.055, withAlpha(visual.shadow, 0.42));
+      this.tileRect(screenX, screenY, tileSize, 0.58, 0.38, 0.06, 0.34, withAlpha(visual.accent, 0.24));
+      if (h(430) > 0.62) this.tileRect(screenX, screenY, tileSize, 0.3 + h(431) * 0.42, 0.18 + h(432) * 0.56, 0.055, 0.055, withAlpha(visual.accent, 0.36));
+    }
+  }
+
+  public render(
+    camera: Camera,
+    tileMap: TileMap,
+    entities: Entity[],
+    cities: Map<string, City>,
+    kingdoms: Map<string, Kingdom>,
+    particles: ParticleManager,
+    overlayMode: OverlayMode,
+    currentEra: WorldEra,
+    brushX: number | null,
+    brushY: number | null,
+    brushSize: number,
+    ships?: Iterable<Ship>,
+    caravans?: Iterable<OverlandCaravan>
+  ): void {
+    const width = this.canvas.width;
+    const height = this.canvas.height;
+    this.ctx.fillStyle = '#090d16';
+    this.ctx.fillRect(0, 0, width, height);
+    this.animTimer = (this.animTimer + 0.04) % 628.318;
+
+    // Determine visible tile bounds
+    const topLeft = camera.screenToWorld(0, 0, width, height);
+    const bottomRight = camera.screenToWorld(width, height, width, height);
+
+    const minX = Math.max(0, Math.floor(topLeft.x));
+    const maxX = Math.min(tileMap.width - 1, Math.ceil(bottomRight.x));
+    const minY = Math.max(0, Math.floor(topLeft.y));
+    const maxY = Math.min(tileMap.height - 1, Math.ceil(bottomRight.y));
+
+    const tileSize = camera.tileSize * camera.zoom;
+
+    // ========== 1. RENDER TERRAIN TILES ==========
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        const tile = tileMap.grid[x][y];
+        const screenPos = camera.worldToScreen(x, y, width, height);
+        this.drawTerrainTile(tileMap, tile, x, y, screenPos.x, screenPos.y, tileSize, overlayMode);
+
+        // ===== EVOLVING CONNECTED ROAD TILE OVERLAY =====
+        if (tile.roadLevel > 0) {
+          const roadW = Math.max(2, Math.min(tileSize * 0.35, tileSize - 2));
+          const halfT = tileSize / 2;
+          const halfR = roadW / 2;
+
+          // Check 8 neighbors
+          const nN = tileMap.getTile(x, y - 1);
+          const nS = tileMap.getTile(x, y + 1);
+          const nE = tileMap.getTile(x + 1, y);
+          const nW = tileMap.getTile(x - 1, y);
+          const nNE = tileMap.getTile(x + 1, y - 1);
+          const nNW = tileMap.getTile(x - 1, y - 1);
+          const nSE = tileMap.getTile(x + 1, y + 1);
+          const nSW = tileMap.getTile(x - 1, y + 1);
+
+          const hasN = !!(nN && nN.roadLevel > 0);
+          const hasS = !!(nS && nS.roadLevel > 0);
+          const hasE = !!(nE && nE.roadLevel > 0);
+          const hasW = !!(nW && nW.roadLevel > 0);
+          const hasNE = !!(nNE && nNE.roadLevel > 0);
+          const hasNW = !!(nNW && nNW.roadLevel > 0);
+          const hasSE = !!(nSE && nSE.roadLevel > 0);
+          const hasSW = !!(nSW && nSW.roadLevel > 0);
+
+          const mainColor = tile.roadLevel === 1 ? '#92400e' : tile.roadLevel === 2 ? '#64748b' : '#334155';
+          const borderColor = tile.roadLevel === 1 ? '#451a03' : tile.roadLevel === 2 ? '#334155' : '#fbbf24';
+
+          // Organic edge offset for dirt trails
+          const edgeOff = tile.roadLevel === 1 ? Math.sin(x * 3.7 + y * 2.1) * 1 : 0;
+
+          const sx = screenPos.x;
+          const sy = screenPos.y;
+
+          // Center node
+          this.ctx.fillStyle = borderColor;
+          this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy + halfT - halfR - 1, roadW + 2, roadW + 2);
+          this.ctx.fillStyle = mainColor;
+          this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy + halfT - halfR, roadW, roadW);
+
+          // Cardinal arms
+          if (hasN) {
+            this.ctx.fillStyle = borderColor;
+            this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy, roadW + 2, halfT);
+            this.ctx.fillStyle = mainColor;
+            this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy, roadW, halfT);
+          }
+          if (hasS) {
+            this.ctx.fillStyle = borderColor;
+            this.ctx.fillRect(sx + halfT - halfR - 1 + edgeOff, sy + halfT, roadW + 2, halfT);
+            this.ctx.fillStyle = mainColor;
+            this.ctx.fillRect(sx + halfT - halfR + edgeOff, sy + halfT, roadW, halfT);
+          }
+          if (hasW) {
+            this.ctx.fillStyle = borderColor;
+            this.ctx.fillRect(sx, sy + halfT - halfR - 1, halfT + edgeOff, roadW + 2);
+            this.ctx.fillStyle = mainColor;
+            this.ctx.fillRect(sx, sy + halfT - halfR, halfT + edgeOff, roadW);
+          }
+          if (hasE) {
+            this.ctx.fillStyle = borderColor;
+            this.ctx.fillRect(sx + halfT + edgeOff, sy + halfT - halfR - 1, halfT - edgeOff, roadW + 2);
+            this.ctx.fillStyle = mainColor;
+            this.ctx.fillRect(sx + halfT + edgeOff, sy + halfT - halfR, halfT - edgeOff, roadW);
+          }
+
+          // Diagonal corners: fill the corner quadrant when a diagonal neighbor has a road
+          const cSize = Math.max(2, roadW * 0.6);
+          if (hasNE) {
+            this.ctx.fillStyle = borderColor;
+            this.ctx.fillRect(sx + halfT + halfR - 1 + edgeOff, sy + halfT - halfR - cSize, cSize + 1, cSize + 1);
+            this.ctx.fillStyle = mainColor;
+            this.ctx.fillRect(sx + halfT + halfR + edgeOff, sy + halfT - halfR - cSize + 1, cSize, cSize);
+          }
+          if (hasNW) {
+            this.ctx.fillStyle = borderColor;
+            this.ctx.fillRect(sx + halfT - halfR - cSize + edgeOff, sy + halfT - halfR - cSize, cSize + 1, cSize + 1);
+            this.ctx.fillStyle = mainColor;
+            this.ctx.fillRect(sx + halfT - halfR - cSize + edgeOff, sy + halfT - halfR - cSize + 1, cSize, cSize);
+          }
+          if (hasSE) {
+            this.ctx.fillStyle = borderColor;
+            this.ctx.fillRect(sx + halfT + halfR - 1 + edgeOff, sy + halfT + halfR - 1, cSize + 1, cSize + 1);
+            this.ctx.fillStyle = mainColor;
+            this.ctx.fillRect(sx + halfT + halfR + edgeOff, sy + halfT + halfR, cSize, cSize);
+          }
+          if (hasSW) {
+            this.ctx.fillStyle = borderColor;
+            this.ctx.fillRect(sx + halfT - halfR - cSize + edgeOff, sy + halfT + halfR - 1, cSize + 1, cSize + 1);
+            this.ctx.fillStyle = mainColor;
+            this.ctx.fillRect(sx + halfT - halfR - cSize + edgeOff, sy + halfT + halfR, cSize, cSize);
+          }
+        }
+
+        // ===== KINGDOM TERRITORY PAINT (WorldBox style) =====
+        if (tile.kingdomId && kingdoms.has(tile.kingdomId)) {
+          const k = kingdoms.get(tile.kingdomId)!;
+          this.ctx.fillStyle = overlayMode === 'political' ? k.cachedRgba45 : k.cachedRgba18;
+          this.ctx.fillRect(screenPos.x, screenPos.y, tileSize + 0.5, tileSize + 0.5);
+
+          // Territory border
+          if (tileSize > 4) {
+            const borderWidth = Math.max(1, tileSize * 0.12);
+            this.ctx.fillStyle = k.cachedRgbaBorder;
+            if (x > 0 && tileMap.grid[x - 1][y].kingdomId !== tile.kingdomId) {
+              this.ctx.fillRect(screenPos.x, screenPos.y, borderWidth, tileSize);
+            }
+            if (x < tileMap.width - 1 && tileMap.grid[x + 1][y].kingdomId !== tile.kingdomId) {
+              this.ctx.fillRect(screenPos.x + tileSize - borderWidth, screenPos.y, borderWidth, tileSize);
+            }
+            if (y > 0 && tileMap.grid[x][y - 1].kingdomId !== tile.kingdomId) {
+              this.ctx.fillRect(screenPos.x, screenPos.y, tileSize, borderWidth);
+            }
+            if (y < tileMap.height - 1 && tileMap.grid[x][y + 1].kingdomId !== tile.kingdomId) {
+              this.ctx.fillRect(screenPos.x, screenPos.y + tileSize - borderWidth, tileSize, borderWidth);
+            }
+          }
+        }
+
+        // ===== SPECIES URBAN GRID CULTURE OVERLAY =====
+        if (tile.cityId && cities.has(tile.cityId) && tileSize > 5) {
+          const city = cities.get(tile.cityId)!;
+          const speciesDef = SPECIES_DEFINITIONS[city.species];
+          const gridStyle = speciesDef?.urbanGridStyle;
+          const dx = x - city.x;
+          const dy = y - city.y;
+
+          if (gridStyle === 'concentric_rings') {
+            // Lumini: Radial Golden Rings & Sunbeam Avenues
+            const dist = Math.hypot(dx, dy);
+            if (Math.abs(dist - Math.round(dist)) < 0.2 || dx === 0 || dy === 0 || Math.abs(dx) === Math.abs(dy)) {
+              this.ctx.fillStyle = 'rgba(251, 191, 36, 0.18)';
+              this.ctx.fillRect(screenPos.x, screenPos.y, tileSize, tileSize);
+            }
+          } else if (gridStyle === 'orthogonal_citadel') {
+            // Stonekin: Square Citadel Blocks
+            if (dx % 2 === 0 || dy % 2 === 0) {
+              this.ctx.fillStyle = 'rgba(148, 163, 184, 0.22)';
+              this.ctx.fillRect(screenPos.x, screenPos.y, tileSize, tileSize);
+            }
+          } else if (gridStyle === 'diagonal_chevron') {
+            // Emberkin: Diagonal Chevron Diamonds
+            if (Math.abs(dx) === Math.abs(dy) || (dx + dy) % 3 === 0) {
+              this.ctx.fillStyle = 'rgba(249, 115, 22, 0.22)';
+              this.ctx.fillRect(screenPos.x, screenPos.y, tileSize, tileSize);
+            }
+          } else if (gridStyle === 'organic_canopy') {
+            // Sylvanii: Organic Emerald Boardwalks
+            if ((dx * dx + dy * dy) % 3 === 0) {
+              this.ctx.fillStyle = 'rgba(52, 211, 153, 0.18)';
+              this.ctx.fillRect(screenPos.x, screenPos.y, tileSize, tileSize);
+            }
+          }
+        }
+
+        // ===== TREE & VEGETATION SPRITES with Sway =====
+        const sway = Math.sin(this.animTimer * 2 + x * 0.5 + y * 0.3) * 1.5;
+
+        if (tile.type === TerrainType.FOREST) {
+          const s = SpriteRegistry.get('tree_oak');
+          if (s) this.ctx.drawImage(s, screenPos.x + sway, screenPos.y - tileSize * 0.2, tileSize, tileSize * 1.2);
+        } else if (tile.type === TerrainType.TUNDRA || tile.type === TerrainType.SNOW) {
+          const s = SpriteRegistry.get('tree_pine');
+          if (s) this.ctx.drawImage(s, screenPos.x + sway, screenPos.y - tileSize * 0.2, tileSize, tileSize * 1.2);
+        } else if (tile.type === TerrainType.SAVANNA) {
+          const s = SpriteRegistry.get('tree_palm');
+          if (s) this.ctx.drawImage(s, screenPos.x + sway, screenPos.y - tileSize * 0.15, tileSize, tileSize * 1.15);
+        } else if (tile.type === TerrainType.SWAMP) {
+          const s = SpriteRegistry.get('swamp_reed');
+          if (s) this.ctx.drawImage(s, screenPos.x + sway * 0.5, screenPos.y, tileSize, tileSize);
+        } else if (tile.type === TerrainType.ARCANE) {
+          const s = SpriteRegistry.get('arcane_crystal');
+          if (s) {
+            // Pulsing glow for crystals
+            this.ctx.globalAlpha = 0.7 + Math.sin(this.animTimer * 3) * 0.3;
+            this.ctx.drawImage(s, screenPos.x, screenPos.y, tileSize, tileSize);
+            this.ctx.globalAlpha = 1.0;
+          }
+        } else if (tile.type === TerrainType.CORRUPTED) {
+          const s = SpriteRegistry.get('corrupted_skull');
+          if (s) this.ctx.drawImage(s, screenPos.x, screenPos.y, tileSize, tileSize);
+        }
+
+        // Resource Node Sprites
+        if (tile.resourceType) {
+          const nodeSprite = SpriteRegistry.get(`node_${tile.resourceType}`);
+          if (nodeSprite) this.ctx.drawImage(nodeSprite, screenPos.x, screenPos.y, tileSize, tileSize);
+        }
+
+        // Fire overlay
+        if (tile.isOnFire) {
+          const fireSprite = SpriteRegistry.get('fx_fire');
+          if (fireSprite) {
+            // Flickering animation
+            const flicker = Math.sin(this.animTimer * 8 + x * 2 + y * 3) > 0;
+            this.ctx.globalAlpha = flicker ? 1.0 : 0.75;
+            this.ctx.drawImage(fireSprite, screenPos.x, screenPos.y - tileSize * 0.3, tileSize, tileSize * 1.3);
+            this.ctx.globalAlpha = 1.0;
+          } else {
+            this.ctx.fillStyle = Math.random() < 0.5 ? '#ef4444' : '#f59e0b';
+            this.ctx.fillRect(screenPos.x, screenPos.y, tileSize, tileSize);
+          }
+
+          // Glow gradient
+          if (tileSize > 8) {
+            const grad = this.ctx.createRadialGradient(
+              screenPos.x + tileSize / 2, screenPos.y + tileSize / 2, 2,
+              screenPos.x + tileSize / 2, screenPos.y + tileSize / 2, tileSize * 1.5
+            );
+            grad.addColorStop(0, 'rgba(245, 158, 11, 0.35)');
+            grad.addColorStop(1, 'rgba(245, 158, 11, 0)');
+            this.ctx.fillStyle = grad;
+            this.ctx.beginPath();
+            this.ctx.arc(screenPos.x + tileSize / 2, screenPos.y + tileSize / 2, tileSize * 1.5, 0, Math.PI * 2);
+            this.ctx.fill();
+          }
+        }
+      }
+    }
+
+    // ========== 2. RENDER BUILDINGS ==========
+    for (const city of cities.values()) {
+      const k = city.kingdomId && kingdoms.has(city.kingdomId) ? kingdoms.get(city.kingdomId)! : null;
+      for (const b of city.buildings.values()) {
+        if (b.x >= minX && b.x <= maxX && b.y >= minY && b.y <= maxY) {
+          const screenPos = camera.worldToScreen(b.x, b.y, width, height);
+
+          // Building Drop Shadow
+          this.ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+          this.ctx.fillRect(screenPos.x + 3, screenPos.y + tileSize * 0.7, tileSize * 0.9, tileSize * 0.3);
+
+          // Building Sprite. Evolve visually per era — try b_{type}_{era} first,
+          // then fall back to b_{type}, then generic b_house.
+          const era = k ? k.research.currentEra() : 'stone';
+          let finalSpriteKey: string | null = null;
+          const eraKeys = [`b_${b.type}_${era}`, `b_${b.type}`];
+          for (const key of eraKeys) {
+            if (SpriteGenerator.has(key)) { finalSpriteKey = key; break; }
+          }
+          const sprite = finalSpriteKey
+            ? SpriteGenerator.getSprite(finalSpriteKey, () => {})
+            : SpriteGenerator.getSprite('b_house', () => {});
+          this.ctx.drawImage(sprite, screenPos.x, screenPos.y - tileSize * 0.15, tileSize, tileSize * 1.15);
+
+          // Chimney Smoke Puffs
+          if (Math.random() < 0.06) {
+            particles.spawnParticle(b.x + 0.5, b.y - 0.5, 'rgba(180, 180, 180, 0.4)', (Math.random() - 0.5) * 0.1, -0.3, 1.2, 2);
+          }
+
+          // Kingdom Banner Flag on Town Center
+          if (b.type === 'town_center' && k) {
+            // Flag pole
+            this.ctx.fillStyle = '#78350f';
+            this.ctx.fillRect(screenPos.x + tileSize - 3, screenPos.y - tileSize * 0.5, 2, tileSize * 0.6);
+            // Flag wave animation
+            const flagWave = Math.sin(this.animTimer * 4) * 1;
+            this.ctx.fillStyle = k.color;
+            this.ctx.fillRect(screenPos.x + tileSize - 12 + flagWave, screenPos.y - tileSize * 0.5, 9, 6);
+            // Flag stripe
+            this.ctx.fillStyle = k.secondaryColor;
+            this.ctx.fillRect(screenPos.x + tileSize - 12 + flagWave, screenPos.y - tileSize * 0.5 + 2, 9, 2);
+          }
+        }
+      }
+    }
+
+    // ========== 3. RENDER ENTITIES ==========
+    for (const e of entities) {
+      if (e.x >= minX && e.x <= maxX && e.y >= minY && e.y <= maxY) {
+        const screenPos = camera.worldToScreen(e.x, e.y, width, height);
+
+        const idHash = parseInt(e.id.slice(-4) || '0', 16);
+        const safeHash = Number.isNaN(idHash) ? 0 : idHash;
+        const movement = Math.hypot(e.x - e.prevX, e.y - e.prevY);
+        const isMoving = movement > 0.002 || (e.targetX !== null && e.targetY !== null && e.aiState !== 'idle');
+        const direction = this.getEntityDirection(e, isMoving);
+        const animation = this.getEntityAnimation(e, isMoving);
+        const frame = this.getAnimationFrame(e, animation, safeHash);
+        const bob = (animation === 'walk' || animation === 'flee') ? Math.sin(this.animTimer * 13 + safeHash) * 1.4 : 0;
+        const breathe = animation === 'idle' ? Math.sin(this.animTimer * 2.2 + safeHash * 0.01) * 0.45 : 0;
+        const entitySize = tileSize;
+        const ageScale = e.isChild ? 0.78 : 1;
+        const speciesScale = e.species === SpeciesType.DRAGON ? 1.45
+          : e.species === SpeciesType.BEAR ? 1.22
+          : e.species === SpeciesType.DEER || e.species === SpeciesType.WOLF ? 1.05
+          : 1.12;
+        const spriteSize = entitySize * speciesScale * ageScale;
+        const centerX = screenPos.x + entitySize / 2;
+        const centerY = screenPos.y + entitySize * 0.55;
+        const spriteX = centerX - spriteSize / 2;
+        const spriteY = screenPos.y + entitySize * 0.98 - spriteSize + bob + breathe;
+
+        this.ctx.fillStyle = e.species === SpeciesType.DRAGON ? 'rgba(0, 0, 0, 0.36)' : 'rgba(0, 0, 0, 0.28)';
+        this.ctx.beginPath();
+        this.ctx.ellipse(
+          centerX,
+          screenPos.y + entitySize * 0.88,
+          entitySize * (e.species === SpeciesType.DRAGON ? 0.58 : 0.35),
+          entitySize * (e.species === SpeciesType.BEAR ? 0.16 : 0.12),
+          0, 0, Math.PI * 2
+        );
+        this.ctx.fill();
+
+        if (animation === 'heal' || animation === 'flee') {
+          this.drawEntityActionEffects(e, centerX, centerY, entitySize, direction, animation, frame);
+        }
+
+        const sprite = SpriteGenerator.getSpeciesSprite(e.species, direction, animation, frame);
+        this.ctx.drawImage(sprite, spriteX, spriteY, spriteSize, spriteSize);
+
+        if (animation === 'attack') {
+          this.drawEntityActionEffects(e, centerX, centerY, entitySize, direction, animation, frame);
+        }
+
+        // Kingdom-colored outline for humanoid species
+        if (e.kingdomId && kingdoms.has(e.kingdomId) && tileSize > 8) {
+          const k = kingdoms.get(e.kingdomId)!;
+          const rgb = this.hexToRgb(k.color);
+          this.ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.5)`;
+          this.ctx.lineWidth = 1;
+          this.ctx.strokeRect(spriteX + spriteSize * 0.18, spriteY + spriteSize * 0.18, spriteSize * 0.64, spriteSize * 0.72);
+        }
+
+        if (e.profession === 'king') {
+          const crownSize = Math.max(7, Math.floor(tileSize * 0.45));
+          this.drawPixelCrown(centerX - crownSize / 2, spriteY - crownSize * 0.35, crownSize);
+        }
+
+        if (e.equipment.weapon && tileSize > 8 && animation !== 'attack') {
+          const weaponSize = Math.max(6, Math.floor(tileSize * 0.35));
+          this.ctx.fillStyle = '#e2e8f0';
+          this.ctx.fillRect(screenPos.x + entitySize * 0.78, screenPos.y + entitySize * 0.3 + bob, weaponSize * 0.25, weaponSize);
+          this.ctx.fillStyle = '#78350f';
+          this.ctx.fillRect(screenPos.x + entitySize * 0.74, screenPos.y + entitySize * 0.3 + weaponSize + bob, weaponSize * 0.55, weaponSize * 0.25);
+          this.ctx.fillStyle = 'rgba(254, 240, 138, 0.65)';
+          this.ctx.fillRect(screenPos.x + entitySize * 0.8, screenPos.y + entitySize * 0.28 + bob, Math.max(1, weaponSize * 0.16), Math.max(1, weaponSize * 0.16));
+        }
+
+        // Health Bar if Damaged
+        if (this.options.showHealthBars && e.hp < e.maxHp) {
+          const barW = tileSize;
+          const barH = Math.max(2, tileSize * 0.12);
+          const hpRatio = Math.max(0, e.hp / e.maxHp);
+          const barX = screenPos.x;
+          const barY = spriteY - 4;
+
+          // Background
+          this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          this.ctx.fillRect(barX - 0.5, barY - 0.5, barW + 1, barH + 1);
+          // HP fill
+          const hpColor = hpRatio > 0.5 ? '#10b981' : (hpRatio > 0.2 ? '#f59e0b' : '#ef4444');
+          this.ctx.fillStyle = hpColor;
+          this.ctx.fillRect(barX, barY, barW * hpRatio, barH);
+        }
+
+        // Floating Emote Pixel-Art Icon Bubble
+        if (e.emote && e.emoteTimer > 0 && tileSize > 6) {
+          const emoteSize = Math.max(12, Math.floor(tileSize * 0.65));
+          const icon = PixelIcons.getIcon(e.emote);
+          this.ctx.drawImage(icon, centerX - emoteSize / 2, spriteY - emoteSize, emoteSize, emoteSize);
+        }
+
+        if (e.isGreatPerson) {
+          const goldGlow = 0.35 + Math.sin(this.animTimer * 4) * 0.15;
+          this.ctx.fillStyle = `rgba(251, 191, 36, ${goldGlow})`;
+          this.ctx.beginPath();
+          this.ctx.arc(centerX, centerY, tileSize * 0.75, 0, Math.PI * 2);
+          this.ctx.fill();
+
+          const starSize = Math.max(8, tileSize * 0.4);
+          this.drawPixelStar(centerX - starSize / 2, spriteY - starSize * 0.8, starSize);
+        }
+
+        if (e.isFavorite) {
+          const starSize = Math.max(7, tileSize * 0.34);
+          this.drawPixelStar(centerX - starSize / 2, screenPos.y + entitySize + 2, starSize);
+        }
+      }
+    }
+
+    // ========== 3c. NAVAL SHIPS & CARAVANS ==========
+    if (ships) {
+      for (const ship of ships) {
+        if (ship.x < minX || ship.x > maxX || ship.y < minY || ship.y > maxY) continue;
+        const screenPos = camera.worldToScreen(ship.x, ship.y, width, height);
+        const shipSize = Math.max(16, tileSize * 1.3);
+
+        // Animated water wake behind ship
+        const wakeRadius = Math.max(4, tileSize * 0.45);
+        const wakeX = screenPos.x + (ship.direction > 0 ? -4 : shipSize + 4);
+        const wakeY = screenPos.y + shipSize * 0.65;
+        this.ctx.fillStyle = 'rgba(56, 189, 248, 0.45)';
+        this.ctx.beginPath();
+        this.ctx.arc(wakeX, wakeY, wakeRadius, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Pixel-Art Ship Sprite
+        const spriteKey = `ship_tier_${ship.tier}`;
+        const sprite = SpriteGenerator.has(spriteKey)
+          ? SpriteGenerator.getSprite(spriteKey, () => {}, 24, 24)
+          : SpriteGenerator.getSprite('ship_tier_1', () => {}, 24, 24);
+
+        this.ctx.save();
+        if (ship.direction < 0) {
+          this.ctx.translate(screenPos.x + shipSize, screenPos.y);
+          this.ctx.scale(-1, 1);
+          this.ctx.drawImage(sprite, 0, 0, shipSize, shipSize);
+        } else {
+          this.ctx.drawImage(sprite, screenPos.x, screenPos.y, shipSize, shipSize);
+        }
+        this.ctx.restore();
+
+        // Kingdom Flag Banner on Mast
+        if (tileSize > 6) {
+          const flagX = screenPos.x + shipSize * 0.45;
+          const flagY = screenPos.y - 4;
+          const flagWave = Math.sin(this.animTimer * 5 + ship.x) * 1.2;
+          this.ctx.fillStyle = ship.kingdomColor ?? '#fbbf24';
+          this.ctx.fillRect(flagX + flagWave, flagY, 9, 6);
+          this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+          this.ctx.lineWidth = 1;
+          this.ctx.strokeRect(flagX + flagWave, flagY, 9, 6);
+        }
+      }
+    }
+
+    // ========== 3d. OVERLAND CARAVANS ==========
+    if (caravans) {
+      for (const caravan of caravans) {
+        if (caravan.x < minX || caravan.x > maxX || caravan.y < minY || caravan.y > maxY) continue;
+        const screenPos = camera.worldToScreen(caravan.x, caravan.y, width, height);
+        const caravanSize = Math.max(14, tileSize * 1.15);
+
+        // Ground dust trail effect
+        this.ctx.fillStyle = 'rgba(217, 119, 6, 0.25)';
+        this.ctx.beginPath();
+        this.ctx.arc(screenPos.x + caravanSize * 0.5, screenPos.y + caravanSize * 0.8, caravanSize * 0.35, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Pixel-Art Caravan Sprite
+        const spriteKey = `caravan_${caravan.caravanType}`;
+        const sprite = SpriteGenerator.has(spriteKey)
+          ? SpriteGenerator.getSprite(spriteKey, () => {}, 24, 24)
+          : SpriteGenerator.getSprite('caravan_donkey', () => {}, 24, 24);
+
+        this.ctx.save();
+        if (caravan.direction < 0) {
+          this.ctx.translate(screenPos.x + caravanSize, screenPos.y);
+          this.ctx.scale(-1, 1);
+          this.ctx.drawImage(sprite, 0, 0, caravanSize, caravanSize);
+        } else {
+          this.ctx.drawImage(sprite, screenPos.x, screenPos.y, caravanSize, caravanSize);
+        }
+        this.ctx.restore();
+
+        // Kingdom Banner on Pack Saddle
+        if (tileSize > 6) {
+          this.ctx.fillStyle = caravan.kingdomColor ?? '#fbbf24';
+          this.ctx.fillRect(screenPos.x + caravanSize * 0.4, screenPos.y - 2, 7, 4);
+        }
+      }
+    }
+
+    // ========== 3a. SIEGE RINGS ==========
+    // A besieged settlement gets a pulsing red ring so the player can see where
+    // a war is actually being decided, not just that one was declared.
+    if (tileSize > 3) {
+      for (const city of cities.values()) {
+        if (!city.besiegerId) continue;
+        if (city.x < minX - 8 || city.x > maxX + 8 || city.y < minY - 8 || city.y > maxY + 8) continue;
+
+        const screenPos = camera.worldToScreen(city.x, city.y, width, height);
+        const centerX = screenPos.x + tileSize / 2;
+        const centerY = screenPos.y + tileSize / 2;
+        const radius = 7 * tileSize;
+        const pulse = 0.45 + Math.sin(this.animTimer * 4) * 0.2;
+
+        this.ctx.strokeStyle = `rgba(239, 68, 68, ${pulse})`;
+        this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
+        this.ctx.setLineDash([tileSize * 0.5, tileSize * 0.4]);
+        this.ctx.beginPath();
+        this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        // Progress arc: how close the walls are to falling.
+        if (city.siegeProgress > 0) {
+          this.ctx.strokeStyle = 'rgba(248, 113, 113, 0.95)';
+          this.ctx.lineWidth = Math.max(2, tileSize * 0.2);
+          this.ctx.beginPath();
+          this.ctx.arc(centerX, centerY, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, city.siegeProgress));
+          this.ctx.stroke();
+        }
+      }
+    }
+
+    // ========== 3b. CITY NAME LABELS ==========
+    if (this.options.showCityNames && tileSize > 5) {
+      this.ctx.textAlign = 'center';
+      for (const city of cities.values()) {
+        if (city.x < minX || city.x > maxX || city.y < minY || city.y > maxY) continue;
+        const screenPos = camera.worldToScreen(city.x, city.y, width, height);
+        const k = city.kingdomId ? kingdoms.get(city.kingdomId) : null;
+        const fontSize = Math.max(9, Math.min(13, tileSize * 0.6));
+
+        const labelX = screenPos.x + tileSize / 2;
+        const labelY = screenPos.y + tileSize * 1.6;
+
+        this.ctx.font = `600 ${fontSize}px 'Outfit', sans-serif`;
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        this.ctx.fillText(city.name, labelX + 1, labelY + 1);
+        this.ctx.fillStyle = k ? k.secondaryColor : '#e2e8f0';
+        this.ctx.fillText(city.name, labelX, labelY);
+
+        // Population count under the name
+        this.ctx.font = `${Math.max(8, fontSize * 0.75)}px 'Outfit', sans-serif`;
+        this.ctx.fillStyle = 'rgba(226, 232, 240, 0.65)';
+        this.ctx.fillText(`${city.population}`, labelX, labelY + fontSize);
+      }
+      this.ctx.textAlign = 'start';
+    }
+
+    // ========== 4. RENDER PARTICLES & DAMAGE NUMBERS ==========
+    if (this.options.showParticles) for (const p of particles.activeParticles) {
+      if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) {
+        const screenPos = camera.worldToScreen(p.x, p.y, width, height);
+        this.ctx.globalAlpha = p.alpha;
+
+        if (p.text) {
+          this.ctx.font = 'bold 12px var(--font-mono)';
+          this.ctx.fillStyle = p.color;
+          // Text shadow
+          this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          this.ctx.fillText(p.text, screenPos.x + 1, screenPos.y + 1);
+          this.ctx.fillStyle = p.color;
+          this.ctx.fillText(p.text, screenPos.x, screenPos.y);
+        } else {
+          this.ctx.fillStyle = p.color;
+          this.ctx.fillRect(screenPos.x, screenPos.y, p.size, p.size);
+        }
+
+        this.ctx.globalAlpha = 1.0;
+      }
+    }
+
+    // ========== 5. FLOATING KINGDOM BADGES (WorldBox-style) ==========
+    if (this.options.showKingdomBadges && tileSize > 3) {
+      for (const kingdom of kingdoms.values()) {
+        if (kingdom.cityIds.size === 0) continue;
+
+        // Use cached kingdom center
+        const center = kingdom.cachedCenter;
+        if (center.x < minX || center.x > maxX || center.y < minY || center.y > maxY) continue;
+
+        const screenCenter = camera.worldToScreen(center.x, center.y, width, height);
+
+        // Floating bounce animation
+        const floatY = Math.sin(this.animTimer * 1.5 + center.x * 0.1) * 3;
+        const badgeX = screenCenter.x;
+        const badgeY = screenCenter.y - tileSize * 2 + floatY;
+
+        // Measure text
+        const fontSize = Math.max(10, Math.min(14, tileSize * 0.7));
+        this.ctx.font = `bold ${fontSize}px 'Inter', sans-serif`;
+        const textWidth = this.ctx.measureText(kingdom.name).width;
+        const badgeW = textWidth + 32;
+        const badgeH = fontSize + 12;
+
+        // Badge background (glassmorphic pill)
+        const rgb = this.hexToRgb(kingdom.color);
+        this.ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`;
+        const bx = badgeX - badgeW / 2;
+        const by = badgeY - badgeH / 2;
+        this.ctx.beginPath();
+        this.ctx.roundRect(bx, by, badgeW, badgeH, badgeH / 2);
+        this.ctx.fill();
+
+        // Badge border glow
+        this.ctx.strokeStyle = `rgba(${Math.min(255, rgb.r + 60)}, ${Math.min(255, rgb.g + 60)}, ${Math.min(255, rgb.b + 60)}, 0.6)`;
+        this.ctx.lineWidth = 1.5;
+        this.ctx.stroke();
+
+        // Pixel-Art Emblem icon
+        const emblemIcon = PixelIcons.getIcon(kingdom.emblem);
+        const iconSize = Math.max(12, fontSize);
+        this.ctx.drawImage(emblemIcon, bx + 5, badgeY - iconSize / 2, iconSize, iconSize);
+
+        // Kingdom name text
+        this.ctx.font = `bold ${fontSize}px 'Inter', sans-serif`;
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(kingdom.name, bx + iconSize + 10, badgeY + fontSize * 0.35);
+        this.ctx.textAlign = 'start';
+
+        // War indicator: crossed swords pixel icon if at war
+        if (this.diplomacy) {
+          const wars = this.diplomacy.getWarsFor(kingdom.id);
+          if (wars.length > 0) {
+            // Red pulsing war indicator
+            const warPulse = Math.sin(this.animTimer * 5) * 0.3 + 0.7;
+            this.ctx.globalAlpha = warPulse;
+            const warIcon = PixelIcons.getIcon('swords');
+            this.ctx.drawImage(warIcon, bx + badgeW - iconSize - 4, badgeY - iconSize / 2, iconSize, iconSize);
+            this.ctx.globalAlpha = 1.0;
+          }
+        }
+
+        // Connection line from badge to territory center
+        this.ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.25)`;
+        this.ctx.lineWidth = 1;
+        this.ctx.setLineDash([2, 3]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(badgeX, by + badgeH);
+        this.ctx.lineTo(screenCenter.x, screenCenter.y);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+      }
+    }
+
+    // ========== 6. ERA VIGNETTE ==========
+    if (currentEra === WorldEra.AGE_OF_ASHES) {
+      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.06)';
+      this.ctx.fillRect(0, 0, width, height);
+    } else if (currentEra === WorldEra.FROZEN_AGE) {
+      this.ctx.fillStyle = 'rgba(56, 189, 248, 0.08)';
+      this.ctx.fillRect(0, 0, width, height);
+    } else if (currentEra === WorldEra.DARK_AGE) {
+      this.ctx.fillStyle = 'rgba(88, 28, 135, 0.1)';
+      this.ctx.fillRect(0, 0, width, height);
+    }
+
+    // ========== 6b. TILE GRID ==========
+    if (this.options.showGrid && tileSize >= 6) {
+      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      for (let x = minX; x <= maxX + 1; x++) {
+        const sx = Math.round(camera.worldToScreen(x, minY, width, height).x) + 0.5;
+        this.ctx.moveTo(sx, camera.worldToScreen(x, minY, width, height).y);
+        this.ctx.lineTo(sx, camera.worldToScreen(x, maxY + 1, width, height).y);
+      }
+      for (let y = minY; y <= maxY + 1; y++) {
+        const sy = Math.round(camera.worldToScreen(minX, y, width, height).y) + 0.5;
+        this.ctx.moveTo(camera.worldToScreen(minX, y, width, height).x, sy);
+        this.ctx.lineTo(camera.worldToScreen(maxX + 1, y, width, height).x, sy);
+      }
+      this.ctx.stroke();
+    }
+
+    // ========== 7. BRUSH CURSOR ==========
+    if (this.options.showBrushCursor && brushX !== null && brushY !== null) {
+      const screenPos = camera.worldToScreen(brushX, brushY, width, height);
+      const brushRadiusPx = brushSize * tileSize;
+
+      this.ctx.beginPath();
+      this.ctx.arc(screenPos.x, screenPos.y, brushRadiusPx, 0, Math.PI * 2);
+      this.ctx.strokeStyle = '#fbbf24';
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([4, 4]);
+      this.ctx.stroke();
+      this.ctx.setLineDash([]);
+    }
+  }
+}

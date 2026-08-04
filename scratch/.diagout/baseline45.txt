@@ -1,0 +1,24 @@
+=== AETHORIA SYSTEMS AUDIT ===
+size=100 seed=12345 years=45 ticksPerYear=34560
+
+--- DEPOSITS ON MAP ---
+  food         tiles=1268   amount=137794
+  wood         tiles=240    amount=28565
+  stone        tiles=0      amount=0
+  clay         tiles=182    amount=12304
+  copper       tiles=61     amount=4696
+  tin          tiles=25     amount=1534
+  iron         tiles=71     amount=7405
+  coal         tiles=53     amount=6095
+  salt         tiles=29     amount=2612
+  gold         tiles=20     amount=947
+  gems         tiles=1      amount=42
+  horses       tiles=55     amount=3502
+  cotton       tiles=80     amount=5699
+  spices       tiles=10     amount=567
+  furs         tiles=0      amount=0
+  oil          tiles=23     amount=4559
+  saltpeter    tiles=19     amount=1667
+  rubber       tiles=29     amount=2768
+  uranium      tiles=0      amount=0
+  !! RAW GOODS WITH ZERO DEPOSITS: stone, furs, uranium

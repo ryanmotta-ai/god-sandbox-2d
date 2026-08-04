@@ -1,0 +1,34 @@
+Year: 70
+
+Kingdom Clan of Aethon (lumini): techs=tribalism, stone_tools, mining, fire_mastery, masonry, agriculture
+
+Kingdom Clan of Brighthollow (sylvanii): techs=tribalism, stone_tools, mining, fire_mastery, agriculture, masonry
+
+Kingdom Clan of Brighthollow (stonekin): techs=tribalism, stone_tools
+
+Kingdom Clan of Frostholm (emberkin): techs=tribalism, stone_tools, mining
+
+City Heloston: pop=11 tier=hamlet prosperity=0.84
+  Buildings: town_centerx1, housex4, lumber_campx5
+  housingCapacity=21 slots=10 used=10
+  food=480 wood=598 stone=0
+
+City Virorton: pop=22 tier=village prosperity=0.86
+  Buildings: town_centerx1, housex5, lumber_campx5, quarryx4, farmx1
+  housingCapacity=25 slots=16 used=16
+  food=741 wood=733 stone=220
+
+City Ironiston: pop=2 tier=camp prosperity=0.83
+  Buildings: town_centerx1, housex4
+  housingCapacity=21 slots=5 used=5
+  food=431 wood=124 stone=7
+
+City Drakoston: pop=4 tier=camp prosperity=0.83
+  Buildings: town_centerx1, housex4
+  housingCapacity=21 slots=5 used=5
+  food=442 wood=125 stone=1
+
+City VirorWatch: pop=4 tier=camp prosperity=0.81
+  Buildings: town_centerx1, lumber_campx3, minex1
+  housingCapacity=5 slots=5 used=5
+  food=120 wood=450 stone=7

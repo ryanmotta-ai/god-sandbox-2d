@@ -1,0 +1,23 @@
+=== AETHORIA SYSTEMS AUDIT ===
+size=100 seed=12345 years=30 ticksPerYear=34560
+
+--- DEPOSITS ON MAP ---
+  food         tiles=1283   amount=137747
+  wood         tiles=308    amount=28231
+  stone        tiles=219    amount=16321
+  clay         tiles=220    amount=14857
+  copper       tiles=50     amount=3905
+  tin          tiles=24     amount=1526
+  iron         tiles=69     amount=7264
+  coal         tiles=58     amount=6473
+  salt         tiles=18     amount=1750
+  gold         tiles=16     amount=740
+  gems         tiles=4      amount=185
+  horses       tiles=61     amount=4013
+  cotton       tiles=53     amount=3758
+  spices       tiles=15     amount=926
+  furs         tiles=12     amount=751
+  oil          tiles=15     amount=3135
+  saltpeter    tiles=17     amount=1266
+  rubber       tiles=22     amount=2105
+  uranium      tiles=7      amount=457

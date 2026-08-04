@@ -1,0 +1,16 @@
+Year: 42
+
+City Auroston: pop=15 tier=hamlet prosperity=0.83
+  Buildings: town_centerx1, housex4, lumber_campx2, farmx3
+  housingCapacity=31 slots=10 used=10
+  food=845 wood=336 stone=0
+
+City Veranton: pop=13 tier=hamlet prosperity=0.84
+  Buildings: town_centerx1, housex4, lumber_campx5
+  housingCapacity=21 slots=10 used=10
+  food=509 wood=600 stone=0
+
+City Kragorton: pop=2 tier=camp prosperity=0.82
+  Buildings: town_centerx1, housex4
+  housingCapacity=31 slots=5 used=5
+  food=751 wood=53 stone=0
