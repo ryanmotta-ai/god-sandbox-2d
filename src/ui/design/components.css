@@ -1528,3 +1528,344 @@
 @media (prefers-reduced-motion: reduce) {
   .ae-dock-menu, .ae-selcard-in, .ae-alert, .ae-event { animation: none; }
 }
+
+/* ==========================================================================
+   UI-2 — INSPECTOR
+
+   A side panel over a live map, so it obeys the same rules as the rest of the
+   HUD: it flexes between a floor and a ceiling rather than pinning a width, its
+   body is the only scrolling region, and it never spans an edge it doesn't need.
+   ========================================================================== */
+
+.ae-inspector {
+  position: absolute;
+  top: calc(var(--ae-control-h) + var(--ae-space-8));
+  right: var(--ae-space-4);
+  /* Bounded below so the map keeps the room the whole rework is about. The
+     bottom stop clears the minimap in its corner. */
+  bottom: calc(var(--ae-minimap-clearance) + var(--ae-space-5));
+  width: var(--ae-side-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ae-panel-veil);
+  border: 1px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-3);
+  box-shadow: var(--ae-shadow-lg);
+  z-index: var(--ae-z-drawer);
+  animation: aeInspIn 0.14s var(--ae-ease) both;
+}
+.ae-inspector.hidden { display: none; }
+@keyframes aeInspIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Title bar stays put; only the body scrolls. */
+.ae-insp-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  flex: 0 0 auto;
+  padding: var(--ae-pad-head);
+  background: var(--ae-panel-sunken);
+  border-bottom: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-3) var(--ae-radius-3) 0 0;
+}
+.ae-insp-bar-icon { opacity: 0.6; }
+.ae-insp-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-insp-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--ae-control-h-sm);
+  height: var(--ae-control-h-sm);
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-insp-close:hover { background: rgba(214, 197, 168, 0.08); border-color: var(--ae-border); }
+
+.ae-insp-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--ae-space-4);
+}
+
+/* ============================ HEADER BLOCK ============================
+   Name, what it is doing, and why — above every panel, with no border of its
+   own so it reads as the subject rather than as another section. */
+.ae-insp-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  padding-bottom: var(--ae-space-4);
+  border-bottom: 1px solid var(--ae-border);
+}
+/* A Great Person is marked at the header, not with a badge further down. */
+.ae-insp-header-great {
+  padding: var(--ae-space-4);
+  margin: calc(var(--ae-space-4) * -1) calc(var(--ae-space-4) * -1) 0;
+  background: var(--ae-accent-fill);
+  border-bottom-color: var(--ae-accent-line);
+}
+
+.ae-insp-identity { display: flex; align-items: center; gap: var(--ae-space-4); min-width: 0; }
+.ae-insp-identity-text { min-width: 0; }
+.ae-insp-name {
+  font-size: var(--ae-text-object-name);
+  font-weight: 700;
+  color: var(--ae-text);
+  letter-spacing: -0.2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-insp-subtitle {
+  display: block;
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+}
+
+.ae-insp-great {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-accent-bright);
+}
+
+/* The activity line: the inspector's central answer. Its own slab, so it cannot
+   be mistaken for one of the label/value rows below. */
+.ae-insp-activity {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ae-space-3);
+  padding: var(--ae-space-3) var(--ae-space-4);
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-neutral);
+  border-radius: var(--ae-radius-2);
+}
+.ae-insp-activity-positive { border-left-color: var(--ae-positive); }
+.ae-insp-activity-neutral { border-left-color: var(--ae-neutral); }
+.ae-insp-activity-warning { border-left-color: var(--ae-warning); background: var(--ae-warning-fill); }
+.ae-insp-activity-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-insp-activity-icon { margin-top: 1px; }
+.ae-insp-activity-text { display: flex; flex-direction: column; gap: var(--ae-space-1); min-width: 0; }
+.ae-insp-activity-label {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+/* The "why". Smaller and quieter than the state it explains — it is support, not
+   a second headline. */
+.ae-insp-activity-reason {
+  font-size: var(--ae-text-meta);
+  line-height: 1.45;
+  color: var(--ae-text-secondary);
+}
+.ae-insp-activity-critical .ae-insp-activity-label { color: var(--ae-critical); }
+.ae-insp-activity-warning .ae-insp-activity-label { color: var(--ae-warning); }
+
+.ae-insp-blurb {
+  font-size: var(--ae-text-meta);
+  line-height: 1.5;
+  color: var(--ae-text-muted);
+}
+.ae-insp-note {
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border-left: 2px solid var(--ae-border-strong);
+  font-size: var(--ae-text-meta);
+  line-height: 1.5;
+  color: var(--ae-text-muted);
+  font-style: italic;
+}
+
+.ae-insp-actions { display: flex; align-items: center; gap: var(--ae-space-3); }
+.ae-insp-actions .ae-btn { flex: 1 1 auto; }
+
+/* Follow: its own strip, so a camera lock can never be on without being seen. */
+.ae-insp-following {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  padding: var(--ae-space-2) var(--ae-space-3);
+  background: var(--ae-accent-fill);
+  border: 1px solid var(--ae-accent-line);
+  border-radius: var(--ae-radius-2);
+}
+.ae-insp-following-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  color: var(--ae-accent-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-insp-following-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--ae-fast), background var(--ae-fast);
+}
+.ae-insp-following-stop:hover { opacity: 1; background: rgba(214, 197, 168, 0.12); }
+
+/* Jump-to-map button, inline at the end of a relationship row. */
+.ae-insp-goto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-left: var(--ae-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--ae-fast), background var(--ae-fast);
+}
+.ae-insp-goto:hover { opacity: 1; background: var(--ae-accent-fill); border-color: var(--ae-accent-line); }
+
+/* ============================ ROUTINE ============================
+   Four phases, one marked as current. It describes the world's clock, not a
+   personal timetable, which is why the phases carry hour ranges rather than
+   per-citizen times. */
+.ae-insp-routine {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: var(--ae-space-2);
+}
+.ae-insp-phase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ae-space-1);
+  padding: var(--ae-space-3) var(--ae-space-2);
+  border: 1px solid var(--ae-border-inset);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  text-align: center;
+}
+.ae-insp-phase-now {
+  border-color: var(--ae-accent-line);
+  background: var(--ae-accent-fill);
+  box-shadow: var(--ae-edge-accent);
+}
+.ae-insp-phase-label {
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--ae-text-secondary);
+  white-space: nowrap;
+}
+.ae-insp-phase-now .ae-insp-phase-label { color: var(--ae-accent-bright); }
+.ae-insp-phase-hours {
+  font-family: var(--ae-font-pixel);
+  font-size: 0.5rem;
+  color: var(--ae-text-muted);
+}
+
+/* ============================ PRODUCTION CHAIN ============================ */
+.ae-insp-chain {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  flex-wrap: wrap;
+  padding: var(--ae-space-3);
+  border: 1px solid var(--ae-border-inset);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-insp-chain-side { display: flex; flex-direction: column; gap: var(--ae-space-1); min-width: 0; }
+.ae-insp-chain-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  white-space: nowrap;
+}
+.ae-insp-chain-out { color: var(--ae-accent-bright); font-weight: 700; }
+.ae-insp-chain-arrow { color: var(--ae-text-muted); font-weight: 700; }
+
+/* An exhausted deposit has to be unmissable — it is the difference between a
+   building that is slow and one that will never produce again. */
+.ae-insp-depleted {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  padding: var(--ae-space-3) var(--ae-space-4);
+  background: var(--ae-critical-fill);
+  border: 1px solid var(--ae-critical-line);
+  border-radius: var(--ae-radius-2);
+  font-size: var(--ae-text-meta);
+  line-height: 1.45;
+  color: var(--ae-critical);
+  font-weight: 600;
+}
+
+/* ============================ HISTORY ============================ */
+.ae-insp-history { display: flex; flex-direction: column; }
+.ae-insp-event {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-1);
+  padding: var(--ae-space-3) 0;
+  border-bottom: 1px solid var(--ae-border-inset);
+  border-left: 2px solid transparent;
+  padding-left: var(--ae-space-3);
+}
+.ae-insp-event:last-child { border-bottom: none; }
+/* Importance as a left edge, so a legendary entry is findable in a stack. */
+.ae-insp-event-major { border-left-color: var(--ae-accent-deep); }
+.ae-insp-event-legendary { border-left-color: var(--ae-accent); }
+.ae-insp-event-year {
+  font-family: var(--ae-font-pixel);
+  font-size: 0.5625rem;
+  color: var(--ae-text-muted);
+}
+.ae-insp-event-text {
+  font-size: var(--ae-text-meta);
+  line-height: 1.45;
+  color: var(--ae-text-secondary);
+}
+
+/* ============================ RESPONSIVE ============================ */
+@media (max-width: 1100px) {
+  /* On a narrow viewport the inspector and the selection card would meet in the
+     middle, so the panel takes the full height of the right edge and the minimap
+     clearance is dropped. */
+  .ae-inspector { bottom: var(--ae-space-4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ae-inspector { animation: none; }
+}

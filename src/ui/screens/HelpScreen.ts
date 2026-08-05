@@ -39,7 +39,7 @@ const SCREEN_KEYS: KeyBinding[] = [
   { keys: ['G'], action: 'Statistics' },
   { keys: ['B'], action: 'Bestiary' },
   { keys: ['M'], action: 'Toggle minimap' },
-  { keys: ['I'], action: 'Toggle inspector drawer' },
+  { keys: ['I'], action: 'Abrir o inspetor do alvo selecionado' },
   { keys: ['Tab'], action: 'Hide the entire interface' },
   { keys: ['F1'], action: 'This help screen' },
   { keys: ['F3'], action: 'Debug panel' },

@@ -13,7 +13,7 @@ import { withTooltip, TooltipSource } from './Tooltip';
 import {
   Status, Sentiment, Direction,
   STATUS_VAR, STATUS_FILL_VAR, STATUS_LINE_VAR,
-  statusForTrend, directionOf, clamp01
+  statusForTrend, directionOf, clamp01, withAlpha
 } from './Tokens';
 
 // ============================ NUMBERS ============================
@@ -286,16 +286,21 @@ export interface BadgeOptions {
 export function badge(text: string, opts: BadgeOptions = {}): HTMLElement {
   const variant = opts.variant ?? 'soft';
   const color = opts.color ?? (opts.status ? STATUS_VAR[opts.status] : 'var(--ae-text-secondary)');
+  // A custom colour is derived into a translucent fill and a mid-alpha border,
+  // the same way the status tokens are. Using the colour itself as the fill made
+  // the text exactly the colour of what it sat on, so any badge given a `color`
+  // rendered as a solid unreadable block.
   const fill = opts.color
-    ? opts.color
+    ? withAlpha(opts.color, 0.14)
     : opts.status ? STATUS_FILL_VAR[opts.status] : 'rgba(214, 197, 168, 0.08)';
   const line = opts.color
-    ? opts.color
+    ? withAlpha(opts.color, 0.42)
     : opts.status ? STATUS_LINE_VAR[opts.status] : 'var(--ae-border)';
 
+  const solidFill = opts.color ?? color;
   const style: Partial<CSSStyleDeclaration> =
     variant === 'solid'
-      ? { background: color, borderColor: color, color: 'var(--ae-text-on-accent)' }
+      ? { background: solidFill, borderColor: solidFill, color: 'var(--ae-text-on-accent)' }
       : variant === 'outline'
         ? { background: 'transparent', borderColor: line, color }
         : { background: fill, borderColor: line, color };

@@ -163,19 +163,6 @@ body { user-select: none; }
 }
 .icon-close:hover { background: rgba(239, 68, 68, 0.16); border-color: rgba(239, 68, 68, 0.45); color: #fca5a5; }
 
-.inline-link {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--cyan);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-  text-align: right;
-  transition: color var(--fast);
-}
-.inline-link:hover { color: #fff; text-decoration: underline; }
-
 kbd {
   font-family: var(--font-pixel);
   font-size: 0.625rem;
@@ -891,66 +878,6 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
 .dock.compact .power-icon { font-size: 1.0625rem; }
 .dock.compact .power-name { font-size: 0.5625rem; }
 .dock.compact .tab-label { display: none; }
-
-/* ---- Inspector drawer ---- */
-.drawer {
-  position: absolute;
-  top: 68px;
-  right: 14px;
-  width: 340px;
-  max-height: calc(100vh - 300px);
-  display: flex;
-  flex-direction: column;
-  background: var(--surface-1);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-  transition: transform var(--med), opacity var(--fast);
-}
-.drawer.hidden {
-  display: flex !important;
-  transform: translateX(calc(100% + 24px));
-  opacity: 0;
-  pointer-events: none;
-}
-.drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 13px 15px;
-  background: rgba(0, 0, 0, 0.4);
-  border-bottom: 1px solid var(--line);
-}
-.drawer-title {
-  font-size: 0.9375rem;
-  font-weight: 700;
-  color: var(--gold);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.drawer-body {
-  padding: 15px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.inspect-hero {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-}
-.inspect-hero-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.inspect-hero-name { font-size: 0.9375rem; font-weight: 700; }
-.inspect-hero-sub { font-size: 0.75rem; color: var(--text-dim); }
 .inspect-block { display: flex; flex-direction: column; gap: 8px; }
 .block-title {
   font-size: 0.6875rem;
@@ -3403,14 +3330,6 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
   image-rendering: pixelated;
   font-size: 0;
   flex: 0 0 auto;
-}
-
-/* The inspector drawer flexes between a floor and a ceiling rather than pinning
-   340px, so it holds together from a laptop to an ultrawide. UI-2 replaces it. */
-.drawer {
-  width: var(--ae-side-w);
-  background: var(--ae-panel-veil);
-  border-radius: var(--ae-radius-3);
 }
 
 /* Native tooltips are suppressed wherever a real one is attached, so the two can

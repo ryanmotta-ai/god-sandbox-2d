@@ -143,6 +143,11 @@ class AethoriaGame implements GameContext {
     this.setupInput();
     this.setupSimulationEvents();
     this.registerObjectNavigation();
+    // The inspector's own link handlers replace the ones above for the kinds it
+    // can display, so that following a link opens the panel rather than only
+    // moving the camera. Registered after, because `registerOpener` replaces by
+    // kind and the more capable handler must win.
+    this.hud.inspector.registerLinkNavigation();
     this.applySettings();
 
     this.screens.replace('main-menu');
@@ -932,4 +937,7 @@ if (import.meta.env.DEV) {
   // The event bus, so the alert layer can be driven with real payloads without
   // waiting years of simulated time for a war to break out on its own.
   (window as any).aethoriaEvents = events;
+  // The chronicle, so history-dependent UI can be exercised against real
+  // structured records rather than waiting for a century of simulation.
+  (window as any).aethoriaChronicle = chronicle;
 }

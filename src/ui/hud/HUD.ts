@@ -19,7 +19,7 @@ import { settings } from '../core/Settings';
 import { sound } from '../../core/SoundSynth';
 import { DisasterSystem } from '../../powers/Disasters';
 import { Toolbar } from './Toolbar';
-import { Inspector } from './Inspector';
+import { Inspector } from '../inspector/Inspector';
 import { Minimap } from './Minimap';
 import { TopBar } from './TopBar';
 import { ToolDock } from './ToolDock';
@@ -28,7 +28,6 @@ import { AlertFeed, EventFeed } from './Feeds';
 import { alerts } from '../core/Alerts';
 import { TICKS_PER_DAY } from '../../ai/EntityAI';
 import { icon } from '../kit';
-import type { SelectionView } from './Selection';
 import type { OverlayMode } from '../../renderer/Overlays';
 import type { GameContext } from '../core/GameContext';
 
@@ -75,7 +74,9 @@ export class HUD {
     this.toolDock = new ToolDock(ctx, () => this.toolbar.toggle());
 
     this.selectionCard = new SelectionCard({
-      onInspect: view => this.openInspector(view),
+      // The inspector renders whatever is selected, so "inspect this" is simply
+      // "open the panel" — there is nothing to hand over.
+      onInspect: () => this.inspector.show(),
       onFocus: view => ctx.focusOn(view.worldPos.x, view.worldPos.y),
       onClose: () => ctx.selection.clear()
     });
@@ -144,43 +145,11 @@ export class HUD {
   /**
    * Opens the inspector for whatever is selected. Bound to `I`.
    *
-   * With nothing selected the key falls back to toggling the drawer, which is what
-   * it did before UI-1 — so the shortcut never becomes a no-op.
+   * With nothing selected this still opens the panel, which shows its own empty
+   * state explaining what to click — more useful than a key that does nothing.
    */
   public openInspectorForSelection(): void {
-    const view = this.ctx.selection.resolve();
-    if (view) this.openInspector(view);
-    else this.inspector.toggle();
-  }
-
-  /** Hands a selection to the existing inspector. UI-2 replaces the drawer itself. */
-  private openInspector(view: SelectionView): void {
-    const target = this.ctx.selection.current;
-    if (!target) return;
-    switch (target.kind) {
-      case 'citizen': {
-        const entity = this.ctx.sim.entities.find(e => e.id === target.id);
-        if (entity) this.inspector.inspectEntity(entity);
-        return;
-      }
-      case 'city': {
-        const city = this.ctx.sim.cities.get(target.id);
-        if (city) this.inspector.inspectCity(city);
-        return;
-      }
-      case 'kingdom':
-        this.inspector.inspectKingdom(target.id);
-        return;
-      case 'tile': {
-        const tile = this.ctx.tileMap.getTile(target.x, target.y);
-        if (tile) this.inspector.inspectTile(tile);
-        return;
-      }
-      default:
-        // Buildings have no inspector view yet; the card said so by hiding the
-        // button, and this is the belt-and-braces case.
-        this.ctx.toast(`${view.name} — painel detalhado chega na próxima fase`, 'info');
-    }
+    this.inspector.toggle();
   }
 
   // ============================ UPDATE ============================
@@ -236,6 +205,9 @@ export class HUD {
       return true;
     }
     if (this.inspector.isOpen) { this.inspector.hide(); return true; }
+    // Follow is a camera lock the player may not realise is on, so ESC releases it
+    // before it clears the selection.
+    if (this.ctx.camera.targetEntityId) { this.ctx.trackEntity(null); return true; }
     if (this.ctx.selection.isActive) { this.ctx.selection.clear(); return true; }
     return false;
   }

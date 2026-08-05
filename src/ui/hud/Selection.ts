@@ -126,6 +126,17 @@ export class SelectionManager {
     return this.target !== null;
   }
 
+  /**
+   * True when something is selected but no longer exists in the world.
+   *
+   * Distinct from "nothing selected": the player picked a citizen who has since
+   * died, or a building that has been razed. The inspector uses it to explain
+   * rather than to show an empty panel.
+   */
+  public get isStale(): boolean {
+    return this.target !== null && this.resolve() === null;
+  }
+
   public select(target: SelectionTarget | null): void {
     this.target = target;
     this.cachedEntity = null;
@@ -141,11 +152,17 @@ export class SelectionManager {
 
   private notify(): void {
     const view = this.resolve();
-    // A target that no longer resolves is a target that no longer exists.
-    if (!view) {
-      this.target = null;
-      this.cachedEntity = null;
-    }
+    // A target that stops resolving is *kept*, not dropped.
+    //
+    // UI-1 cleared it here, which was right for the selection card — a card for a
+    // dead citizen should disappear. But it made it impossible for anything else
+    // to know that the thing had died rather than been deselected, and the
+    // inspector needs exactly that distinction to say "this no longer exists"
+    // instead of "nothing selected".
+    //
+    // So the target survives and `resolve()` returns null. Consumers decide:
+    // the card hides, the map drops its ring, the inspector explains.
+    if (!view) this.cachedEntity = null;
     this.markState = view
       ? {
           x: view.worldPos.x,
@@ -378,12 +395,20 @@ export class SelectionManager {
     const kingdom = city.kingdomId ? this.sim!.kingdoms.get(city.kingdomId) : undefined;
     const jobs = def?.jobs ?? 0;
 
-    // "Operating" is a claim, so it is derived from staffing rather than
-    // asserted: a mine with nobody in it is not operating.
+    // "Operating" is a claim, so it is derived rather than asserted. The order
+    // matters and must match the inspector's, or the card and the panel will
+    // disagree about the same building: an exhausted seam is terminal and outranks
+    // any staffing problem, because no number of workers can fix it.
     const staffed = building.assignedWorkerIds.size;
-    const status = jobs === 0
-      ? 'Em funcionamento'
-      : staffed === 0 ? 'Parada' : staffed < jobs ? 'Sem pessoal suficiente' : 'Em funcionamento';
+    const tile = this.tileMap?.getTile(building.x, building.y);
+    const extracts = Boolean(BUILDINGS[building.type]?.extractionRate || building.extractedGood);
+    const depleted = extracts && tile != null && tile.resourceMax > 0 && tile.resourceAmount <= 0;
+
+    const status = depleted
+      ? 'Esgotada'
+      : jobs === 0
+        ? 'Em funcionamento'
+        : staffed === 0 ? 'Parada' : staffed < jobs ? 'Sem pessoal suficiente' : 'Em funcionamento';
 
     const facts: Fact[] = [
       { label: 'Cidade', value: city.name },
@@ -401,8 +426,9 @@ export class SelectionManager {
       worldPos: { x: building.x, y: building.y },
       radius: KIND_RADIUS.building,
       ref: { kind: 'building', id: building.id, name: def?.name ?? building.type, qualifier: city.name },
-      // The inspector has no building view yet; UI-2 adds one.
-      inspectable: false
+      // UI-2 gave buildings a full inspector view, so the card's Inspect button is
+      // no longer a dead end for them.
+      inspectable: true
     };
   }
 
