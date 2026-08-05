@@ -80,10 +80,19 @@ const HUMAN_SKIN_TONES: { skin: string; skinShade: string }[] = [
   { skin: '#c68642', skinShade: '#96602c' },
   { skin: '#8d5524', skinShade: '#6b3e18' },
   { skin: '#5c3a21', skinShade: '#412715' },
-  { skin: '#ffdbb4', skinShade: '#d8ab86' }
+  { skin: '#ffdbb4', skinShade: '#d8ab86' },
+  { skin: '#d2a679', skinShade: '#a47648' }, // Bronze mediterrâneo
+  { skin: '#fff0db', skinShade: '#e0c2a6' }, // Porcelana nórdica
+  { skin: '#b87d4b', skinShade: '#875326' }, // Moreno dourado
+  { skin: '#3b2219', skinShade: '#24140e' }, // Ébano profundo
+  { skin: '#9e5b32', skinShade: '#733e1f' }, // Cobre quente
+  { skin: '#f4d0a3', skinShade: '#ca9e6e' }  // Bege trópico
 ];
 
-const HUMAN_HAIR: string[] = ['#2b1a10', '#4a2c17', '#7a4a21', '#b5651d', '#d9c17a', '#8a8a8a', '#1c1c1c'];
+const HUMAN_HAIR: string[] = [
+  '#2b1a10', '#4a2c17', '#7a4a21', '#b5651d', '#d9c17a', '#8a8a8a', '#1c1c1c',
+  '#f7e8aa', '#9e381b', '#8a5a2b', '#d1d5db', '#111827', '#5c3d24', '#3b4252'
+];
 
 const HUMAN_OUTFITS: { cloth: string; clothShade: string; trim: string; boot: string }[] = [
   { cloth: '#3b6fd4', clothShade: '#26478a', trim: '#7ba3e8', boot: '#4a3524' }, // Azul
@@ -92,7 +101,16 @@ const HUMAN_OUTFITS: { cloth: string; clothShade: string; trim: string; boot: st
   { cloth: '#c9762b', clothShade: '#8f501a', trim: '#efa957', boot: '#3d2b1f' }, // Laranja
   { cloth: '#6b4b8a', clothShade: '#48305e', trim: '#a887c9', boot: '#3d2b1f' }, // Roxo
   { cloth: '#7a6a52', clothShade: '#544736', trim: '#a8967a', boot: '#4a3524' }, // Linho
-  { cloth: '#2f4858', clothShade: '#1d2e39', trim: '#5b7f94', boot: '#2b2018' }  // Ardósia
+  { cloth: '#2f4858', clothShade: '#1d2e39', trim: '#5b7f94', boot: '#2b2018' }, // Ardósia
+  { cloth: '#991b1b', clothShade: '#6b1111', trim: '#fca5a5', boot: '#3d2b1f' }, // Carmesim Imperial
+  { cloth: '#065f46', clothShade: '#043e2e', trim: '#6ee7b7', boot: '#2b2018' }, // Esmeralda Nobre
+  { cloth: '#b45309', clothShade: '#78350f', trim: '#fde68a', boot: '#4a3524' }, // Ocre do Deserto
+  { cloth: '#5b21b6', clothShade: '#3b147d', trim: '#ddd6fe', boot: '#2b2018' }, // Violeta Real
+  { cloth: '#0e7490', clothShade: '#084b5e', trim: '#a5f3fc', boot: '#3d2b1f' }, // Turquesa Náutico
+  { cloth: '#374151', clothShade: '#1f2937', trim: '#9ca3af', boot: '#111827' }, // Carvão Urbano
+  { cloth: '#d97706', clothShade: '#92400e', trim: '#fef08a', boot: '#4a3524' }, // Açafrão Dourado
+  { cloth: '#9a3412', clothShade: '#6c220a', trim: '#ffedd5', boot: '#3d2b1f' }, // Terracota Rústico
+  { cloth: '#e2e8f0', clothShade: '#cbd5e1', trim: '#fbbf24', boot: '#4a3524' }  // Algodão Nobre
 ];
 
 const HUMAN_SKINS: HumanoidSpritePalette[] = HUMAN_SKIN_TONES.map((tone, i) => {
@@ -488,6 +506,17 @@ export class SpriteGenerator {
       this.rect(ctx, side ? 10 : 9, 16 + bob, side ? 7 : 6, 1, '#fbbf24');
     }
 
+    // Off-hand Shield rendering for soldiers or shield-equipped units
+    const hasShield = armor.includes('shield') || (profession === 'soldier' && !armor.includes('cloth'));
+    if (hasShield && animation !== 'carry') {
+      const shieldX = side ? 5 : 4;
+      const shieldY = 11 + bob;
+      const metalColor = armor.includes('citadel') ? '#e0f2fe' : armor.includes('iron') ? '#94a3b8' : '#78350f';
+      this.rect(ctx, shieldX, shieldY, 4, 6, metalColor);
+      this.rect(ctx, shieldX + 1, shieldY + 1, 2, 4, p.clothShade);
+      this.px(ctx, shieldX + 1, shieldY + 2, p.accent);
+    }
+
     // Activity props make the simulation legible without opening a menu.
     if (animation === 'carry') {
       const lift = frame % 2 === 0 ? 0 : -1;
@@ -590,7 +619,90 @@ export class SpriteGenerator {
     const x = side ? 17 : 16;
     const y = 8 + bob + (frame < 2 ? -1 : 0);
 
-    if (category === 'ranged' || lower.includes('bow') || lower.includes('crossbow') || lower.includes('sling')) {
+    // 1. FIREARMS (Musket, Blunderbuss, Rifle, Cannon)
+    if (lower.includes('musket') || lower.includes('rifle')) {
+      // Stock
+      this.rect(ctx, x - 2, y + 4, 5, 2, '#5c2306');
+      // Barrel
+      this.rect(ctx, x + 3, y + 3, 7, 1, '#94a3b8');
+      // Muzzle & Trigger
+      this.px(ctx, x + 1, y + 5, '#cbd5e1');
+      if (frame % 2 === 0) {
+        // Muzzle smoke flash on fire frame
+        this.px(ctx, x + 10, y + 2, '#fbbf24');
+        this.px(ctx, x + 11, y + 3, '#f97316');
+        this.px(ctx, x + 12, y + 2, 'rgba(226,232,240,0.6)');
+      }
+      return;
+    }
+    if (lower.includes('blunderbuss')) {
+      // Stock
+      this.rect(ctx, x - 1, y + 4, 4, 2, '#78350f');
+      // Flared Brass Barrel
+      this.rect(ctx, x + 3, y + 3, 4, 2, '#d97706');
+      this.rect(ctx, x + 7, y + 2, 3, 4, '#fbbf24');
+      if (frame % 2 === 0) {
+        this.rect(ctx, x + 10, y + 1, 3, 5, 'rgba(249,115,22,0.7)');
+      }
+      return;
+    }
+    if (lower.includes('cannon') || lower.includes('field gun')) {
+      // Heavy Carriage Wheels
+      this.rect(ctx, x - 2, y + 5, 5, 5, '#451a03');
+      this.px(ctx, x, y + 7, '#d97706');
+      // Dark Steel/Bronze Barrel
+      const barrelColor = lower.includes('bronze') ? '#b45309' : '#334155';
+      this.rect(ctx, x - 1, y + 2, 9, 3, barrelColor);
+      this.rect(ctx, x + 8, y + 1, 2, 5, '#1e293b');
+      if (frame % 2 === 0) {
+        // Cannon Blast
+        this.rect(ctx, x + 10, y, 4, 6, '#ef4444');
+        this.rect(ctx, x + 12, y + 1, 3, 4, '#f59e0b');
+      }
+      return;
+    }
+
+    // 2. PRIMITIVE WEAPONS (Stone Club, Sling)
+    if (lower.includes('club')) {
+      // Heavy knobbly wooden handle & stone head
+      this.rect(ctx, x, y + 3, 2, 7, '#78350f');
+      this.rect(ctx, x - 2, y - 1, 5, 5, '#64748b');
+      this.rect(ctx, x - 1, y, 3, 3, '#94a3b8');
+      this.px(ctx, x - 2, y - 1, '#475569');
+      return;
+    }
+    if (lower.includes('sling')) {
+      // Leather pouch and cord
+      this.rect(ctx, x, y + 2, 1, 6, '#78350f');
+      this.rect(ctx, x + 1, y + 7, 3, 3, '#b45309');
+      this.px(ctx, x + 2, y + 8, '#94a3b8'); // Sling stone
+      return;
+    }
+
+    // 3. LEGENDARY WEAPONS SPECIAL VISUAL EFFECTS
+    if (lower.includes('sunfire')) {
+      // Flaming Golden Blade
+      this.rect(ctx, x, y + 3, 2, 8, '#f59e0b');
+      this.rect(ctx, x + 1, y - 1, 2, 9, '#fef08a');
+      this.rect(ctx, x, y + 7, 4, 1, '#d97706');
+      // Fire aura particles
+      this.px(ctx, x + 2, y + 1 + (frame % 2), '#ef4444');
+      this.px(ctx, x + 3, y + 3, '#f97316');
+      this.px(ctx, x + 1, y - 2, '#ffffff');
+      return;
+    }
+    if (lower.includes('aether')) {
+      // Luminescent Crystal Energy Bow
+      this.rect(ctx, x, y - 1, 2, 11, '#0284c7');
+      this.rect(ctx, x + 1, y, 1, 9, '#38bdf8');
+      this.rect(ctx, x + 2, y + 4, 7, 1, '#e0f2fe'); // Energy arrow
+      this.px(ctx, x + 8, y + 4, '#ffffff');
+      this.px(ctx, x, y - 2, '#7dd3fc');
+      this.px(ctx, x, y + 10, '#7dd3fc');
+      return;
+    }
+
+    if (category === 'ranged' || lower.includes('bow') || lower.includes('crossbow')) {
       this.rect(ctx, x, y, 1, 10, '#78350f');
       this.rect(ctx, x + 1, y + 1, 1, 2, '#d9f99d');
       this.rect(ctx, x + 1, y + 7, 1, 2, '#d9f99d');

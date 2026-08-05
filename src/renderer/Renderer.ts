@@ -1980,6 +1980,59 @@ export class PixelRenderer {
       }
     }
 
+    // ========== 4.1 RENDER FLYING PROJECTILES (Arrows, Bullets, Cannonballs, Spears) ==========
+    if (this.options.showParticles && particles.activeProjectiles) {
+      for (const proj of particles.activeProjectiles) {
+        if (proj.x >= minX - 2 && proj.x <= maxX + 2 && proj.y >= minY - 2 && proj.y <= maxY + 2) {
+          const arcOffset = proj.arcHeight ? Math.sin(proj.progress * Math.PI) * proj.arcHeight : 0;
+          const screenPos = camera.worldToScreen(proj.x, proj.y - arcOffset, width, height);
+
+          this.ctx.save();
+          const angle = Math.atan2(proj.targetY - proj.startY, proj.targetX - proj.startX);
+
+          if (proj.type === 'arrow') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            this.ctx.strokeStyle = '#78350f';
+            this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, 0);
+            this.ctx.lineTo(6, 0);
+            this.ctx.stroke();
+            this.ctx.fillStyle = '#e2e8f0';
+            this.ctx.fillRect(4, -1.5, 3, 3);
+          } else if (proj.type === 'bullet') {
+            this.ctx.strokeStyle = '#fde047';
+            this.ctx.lineWidth = Math.max(2, tileSize * 0.15);
+            this.ctx.beginPath();
+            this.ctx.moveTo(screenPos.x - Math.cos(angle) * 8, screenPos.y - Math.sin(angle) * 8);
+            this.ctx.lineTo(screenPos.x, screenPos.y);
+            this.ctx.stroke();
+          } else if (proj.type === 'cannonball') {
+            const r = Math.max(3, tileSize * 0.25);
+            this.ctx.fillStyle = '#1e293b';
+            this.ctx.beginPath();
+            this.ctx.arc(screenPos.x, screenPos.y, r, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.strokeStyle = '#475569';
+            this.ctx.stroke();
+          } else if (proj.type === 'spear_thrust') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            this.ctx.fillStyle = '#cbd5e1';
+            this.ctx.fillRect(-2, -1.5, 8, 3);
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.fillRect(4, -1, 3, 2);
+          } else {
+            this.ctx.fillStyle = proj.color;
+            this.ctx.fillRect(screenPos.x - 2, screenPos.y - 2, 4, 4);
+          }
+
+          this.ctx.restore();
+        }
+      }
+    }
+
     // ========== 5. FLOATING KINGDOM BADGES (WorldBox-style) ==========
     if (this.options.showKingdomBadges && tileSize > 3) {
       for (const kingdom of kingdoms.values()) {

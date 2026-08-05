@@ -13,9 +13,27 @@ export interface Particle {
   text?: string;
 }
 
+export interface Projectile {
+  x: number;
+  y: number;
+  startX: number;
+  startY: number;
+  targetX: number;
+  targetY: number;
+  speed: number;
+  progress: number;
+  type: 'arrow' | 'bullet' | 'cannonball' | 'sling_stone' | 'spear_thrust' | 'magic_bolt';
+  color: string;
+  damage: number;
+  targetEntity?: any;
+  arcHeight?: number;
+  onImpact?: (x: number, y: number, damage: number, targetEntity?: any) => void;
+}
+
 export class ParticleManager {
   private pool: ObjectPool<Particle>;
   public activeParticles: Particle[] = [];
+  public activeProjectiles: Projectile[] = [];
 
   constructor() {
     this.pool = new ObjectPool<Particle>(
@@ -74,6 +92,66 @@ export class ParticleManager {
     this.activeParticles.push(p);
   }
 
+  public spawnProjectile(
+    startX: number,
+    startY: number,
+    targetX: number,
+    targetY: number,
+    type: Projectile['type'],
+    damage: number,
+    targetEntity?: any,
+    onImpact?: (x: number, y: number, damage: number, targetEntity?: any) => void
+  ): void {
+    const speed = type === 'bullet' ? 32 : type === 'cannonball' ? 10 : type === 'arrow' ? 15 : type === 'spear_thrust' ? 18 : 11;
+    const arcHeight = type === 'cannonball' ? 1.2 : type === 'arrow' ? 0.5 : type === 'sling_stone' ? 0.3 : 0;
+    const color = type === 'bullet' ? '#fde047' : type === 'cannonball' ? '#1e293b' : type === 'magic_bolt' ? '#38bdf8' : '#78350f';
+
+    // Muzzle smoke flash for firearms
+    if (type === 'bullet') {
+      this.spawnParticle(startX, startY, 'rgba(251,191,36,0.9)', 0, 0, 0.2, 4);
+      this.spawnParticle(startX, startY, 'rgba(226,232,240,0.6)', (Math.random()-0.5)*0.3, -0.4, 0.35, 3);
+    }
+
+    this.activeProjectiles.push({
+      x: startX,
+      y: startY,
+      startX,
+      startY,
+      targetX,
+      targetY,
+      speed,
+      progress: 0,
+      type,
+      color,
+      damage,
+      targetEntity,
+      arcHeight,
+      onImpact
+    });
+  }
+
+  private triggerProjectileImpact(proj: Projectile, index: number): void {
+    if (proj.onImpact) {
+      proj.onImpact(proj.targetX, proj.targetY, proj.damage, proj.targetEntity);
+    } else {
+      this.spawnDamageNumber(proj.targetX, proj.targetY, proj.damage);
+      if (proj.targetEntity && proj.targetEntity.hp !== undefined) {
+        proj.targetEntity.hp -= proj.damage;
+      }
+    }
+
+    // Impact visual effects
+    if (proj.type === 'cannonball') {
+      this.spawnExplosion(proj.targetX, proj.targetY, '#ef4444', 25);
+    } else if (proj.type === 'bullet') {
+      this.spawnParticle(proj.targetX, proj.targetY, '#fde047', 0, -0.2, 0.2, 3);
+    } else {
+      this.spawnParticle(proj.targetX, proj.targetY, '#cbd5e1', 0, -0.2, 0.2, 2);
+    }
+
+    this.activeProjectiles.splice(index, 1);
+  }
+
   public update(dt: number): void {
     for (let i = this.activeParticles.length - 1; i >= 0; i--) {
       const p = this.activeParticles[i];
@@ -85,6 +163,33 @@ export class ParticleManager {
       if (p.life >= p.maxLife) {
         this.activeParticles.splice(i, 1);
         this.pool.release(p);
+      }
+    }
+
+    for (let i = this.activeProjectiles.length - 1; i >= 0; i--) {
+      const proj = this.activeProjectiles[i];
+      const totalDist = Math.hypot(proj.targetX - proj.startX, proj.targetY - proj.startY);
+      if (totalDist < 0.01) {
+        this.triggerProjectileImpact(proj, i);
+        continue;
+      }
+
+      proj.progress += (proj.speed * dt) / totalDist;
+      if (proj.progress >= 1.0) {
+        proj.progress = 1.0;
+        proj.x = proj.targetX;
+        proj.y = proj.targetY;
+        this.triggerProjectileImpact(proj, i);
+      } else {
+        proj.x = proj.startX + (proj.targetX - proj.startX) * proj.progress;
+        proj.y = proj.startY + (proj.targetY - proj.startY) * proj.progress;
+
+        // Particle trail
+        if (proj.type === 'bullet') {
+          this.spawnParticle(proj.x, proj.y, 'rgba(253, 224, 71, 0.6)', 0, 0, 0.12, 2);
+        } else if (proj.type === 'cannonball') {
+          this.spawnParticle(proj.x, proj.y, 'rgba(71, 85, 105, 0.7)', (Math.random() - 0.5) * 0.1, -0.2, 0.3, 3);
+        }
       }
     }
   }

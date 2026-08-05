@@ -1328,40 +1328,92 @@ if (e.kingdomId) {
           const hasCommanderNearby = nearby.some(o => o.kingdomId === e.kingdomId && o.profession === 'king');
           const moraleMult = hasCommanderNearby ? 1.25 : 1.0;
 
-          // Reach based on weapon / species
-          const maxReach = e.equipment.weapon?.category === 'ranged' ? 5.5 : COMBAT_RANGE;
+          // Reach based on weapon item properties / category
+          const weapon = e.equipment.weapon;
+          const category = weapon?.category;
+          const weaponName = (weapon?.name || '').toLowerCase();
+
+          let maxReach = weapon?.attackRange || (category === 'ranged' ? 6.0 : category === 'siege' ? 9.0 : COMBAT_RANGE);
+          if (weaponName.includes('spear') || weaponName.includes('halberd')) maxReach = 2.4;
 
           if (targetDist <= maxReach && e.attackCooldown <= 0) {
             let dmg = Math.max(1, Math.floor((e.damage - target.defense) * moraleMult));
-            
-            // What the weapon is decides what the blow does. Heavy arms carry
-            // enough force through armour to always land something.
-            const category = e.equipment.weapon?.category;
-            if (category === 'heavy') {
-              dmg = Math.max(dmg, Math.floor(e.damage * 0.75 * moraleMult));
-            }
-            if (category === 'ranged') {
-              particles.spawnParticle(target.x, target.y, '#e2e8f0', 0, -0.2, 0.3, 2);
-            }
+            if (category === 'heavy') dmg = Math.max(dmg, Math.floor(e.damage * 0.75 * moraleMult));
 
-            target.hp -= dmg;
-            e.attackCooldown = ATTACK_COOLDOWN;
-            particles.spawnDamageNumber(target.x, target.y, dmg);
-            sound.playHit();
+            const isRanged = category === 'ranged' || category === 'siege' || weaponName.includes('bow') || weaponName.includes('musket') || weaponName.includes('rifle') || weaponName.includes('blunderbuss') || weaponName.includes('sling');
 
-            if (target.hp <= 0) {
-              e.kills++;
-              e.gainXp(30 + target.level * 5);
-              if (e.kingdomId && target.kingdomId) {
+            if (isRanged) {
+              let projType: 'arrow' | 'bullet' | 'cannonball' | 'sling_stone' | 'magic_bolt' = 'arrow';
+              if (weaponName.includes('musket') || weaponName.includes('rifle') || weaponName.includes('blunderbuss')) {
+                projType = 'bullet';
+              } else if (category === 'siege' || weaponName.includes('cannon')) {
+                projType = 'cannonball';
+              } else if (weaponName.includes('sling')) {
+                projType = 'sling_stone';
+              } else if (category === 'magic') {
+                projType = 'magic_bolt';
+              }
+
+              e.attackCooldown = projType === 'bullet' ? ATTACK_COOLDOWN + 2 : ATTACK_COOLDOWN;
+
+              particles.spawnProjectile(
+                e.x,
+                e.y,
+                target.x,
+                target.y,
+                projType,
+                dmg,
+                target,
+                (tx, ty, d, targetEnt) => {
+                  if (targetEnt && targetEnt.hp > 0) {
+                    targetEnt.hp -= d;
+                    particles.spawnDamageNumber(tx, ty, d);
+                    sound.playHit();
+                    if (targetEnt.hp <= 0 && e.kingdomId && targetEnt.kingdomId) {
+                      e.kills++;
+                      e.gainXp(30 + targetEnt.level * 5);
+                      this.diplomacy.recordBattle(e.kingdomId, targetEnt.kingdomId, 1, 0);
+                    }
+                  }
+                }
+              );
+            } else if (weaponName.includes('spear') || weaponName.includes('halberd')) {
+              // SPEAR THRUST & KNOCKBACK
+              const dx = (target.x - e.x) / (targetDist || 1);
+              const dy = (target.y - e.y) / (targetDist || 1);
+
+              target.x += dx * 0.22;
+              target.y += dy * 0.22;
+              target.hp -= dmg;
+              e.attackCooldown = ATTACK_COOLDOWN;
+
+              particles.spawnProjectile(e.x, e.y, target.x, target.y, 'spear_thrust', dmg);
+              particles.spawnDamageNumber(target.x, target.y, dmg);
+              sound.playHit();
+
+              if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
+                e.kills++;
+                e.gainXp(30 + target.level * 5);
+                this.diplomacy.recordBattle(e.kingdomId, target.kingdomId, 1, 0);
+              }
+            } else {
+              // Standard Melee Blow
+              target.hp -= dmg;
+              e.attackCooldown = ATTACK_COOLDOWN;
+              particles.spawnDamageNumber(target.x, target.y, dmg);
+              sound.playHit();
+
+              if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
+                e.kills++;
+                e.gainXp(30 + target.level * 5);
                 this.diplomacy.recordBattle(e.kingdomId, target.kingdomId, 1, 0);
               }
             }
           } else {
-            // An archer already in range holds position and keeps shooting.
-            const isArcher = e.equipment.weapon?.category === 'ranged' && targetDist < 4;
-            if (!isArcher) {
-              // Heavy arms are slow to carry into the charge.
-              const attackSpeed = e.equipment.weapon?.category === 'heavy' ? speed * 0.85 : speed;
+            // An archer or rifleman already in range holds position and keeps shooting.
+            const isRangedUnit = (category === 'ranged' || category === 'siege') && targetDist < maxReach * 0.85;
+            if (!isRangedUnit) {
+              const attackSpeed = category === 'heavy' ? speed * 0.85 : speed;
               const pos = SimplePathfinder.getStepTowards(e.x, e.y, target.x, target.y, tileMap, attackSpeed);
               e.x = pos.x; e.y = pos.y;
             }
