@@ -58,12 +58,17 @@ export function buildCityPanel(city: City, host: InspectorHost): Child[] {
       ])
     ]),
     el('div', { class: 'ae-insp-actions' }, [
-      button('Centralizar', () => host.focusOn(city.x, city.y), {
-        variant: 'secondary', size: 'sm', icon: 'map'
+      // The dossier is the primary action now that UI-3 exists: the preview
+      // answers "which city is this", the dossier answers "how is it doing".
+      button('Dossiê', () => host.openCityDossier(city.id), {
+        variant: 'primary', size: 'sm', icon: 'city',
+        tooltip: {
+          title: 'Dossiê da cidade',
+          description: 'População, mercado, indústria, logística e história em uma tela.'
+        }
       }),
-      button('Economia', () => host.openEconomy(undefined, city.id), {
-        variant: 'ghost', size: 'sm', icon: 'economy',
-        tooltip: { title: 'Economia', description: 'Abre a tela de economia focada nesta cidade.', shortcut: 'E' }
+      button('Centralizar', () => host.focusOn(city.x, city.y), {
+        variant: 'ghost', size: 'sm', icon: 'map'
       })
     ])
   ]);
@@ -125,7 +130,7 @@ export function buildCityPanel(city: City, host: InspectorHost): Child[] {
 
     // Says out loud that this is a preview, so its shallowness reads as a phase
     // boundary rather than as missing work.
-    el('p', { class: 'ae-insp-note', text: 'Prévia da cidade. O dossiê completo — economia, política e obras — chega na UI-3.' })
+    el('p', { class: 'ae-insp-note', text: 'Prévia da cidade. Abra o dossiê para diagnóstico, indústria, comércio e história.' })
   ];
 }
 

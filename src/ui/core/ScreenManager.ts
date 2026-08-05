@@ -25,6 +25,7 @@ export type ScreenId =
   | 'ecosystem'
   | 'techtree'
   | 'infrastructure'
+  | 'city'
   /** Development-only gallery of the design system. Reached from the debug panel. */
   | 'ui-kit';
 
@@ -47,8 +48,16 @@ export interface NavParams {
   withKingdom?: string;
   /** Trade route to highlight (Infrastructure). */
   routeId?: string;
-  /** Settlement to highlight (Infrastructure, Economy). */
+  /** Settlement to highlight, or to open the dossier on (City, Infrastructure, Economy). */
   cityId?: string;
+  /**
+   * Condition to draw the eye to on the city dossier — `food`, `employment`,
+   * `industry`, `trade`, `housing`, `security`.
+   *
+   * This is the deep link that lets an alert about a starving city land the
+   * player on its food line rather than on a screen they then have to search.
+   */
+  highlightCondition?: string;
 
   // Non-navigational params the older screens already take.
   /** Loading screen caption. */

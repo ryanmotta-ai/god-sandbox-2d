@@ -51,6 +51,14 @@ export interface Alert {
   focus?: { x: number; y: number };
   /** What to select, expressed in the UI-0 object vocabulary. */
   ref?: ObjectRef;
+  /**
+   * The city-dossier condition this alert is about, when there is one.
+   *
+   * Lets a click on "escassez de alimento" land the player on that city's food
+   * line rather than on a screen they then have to search. Only set where the
+   * mapping is exact — an alert about a war has no single condition to point at.
+   */
+  conditionHint?: string;
   /** How many occurrences are folded into this line. 1 for a single alert. */
   count: number;
   /** Real time it was raised, for ordering and fading. */
@@ -250,6 +258,8 @@ export class AlertCenter {
     ref?: ObjectRef;
     /** Overrides the kind's default severity. */
     severity?: Severity;
+    /** City-dossier condition this alert maps onto. */
+    conditionHint?: string;
   }): void {
     if (!this.enabled) return;
     const now = performance.now();
@@ -286,6 +296,7 @@ export class AlertCenter {
       year,
       focus: spec.focus,
       ref: spec.ref,
+      conditionHint: spec.conditionHint,
       count: 1,
       raisedAt: now
     });
@@ -338,7 +349,8 @@ export class AlertCenter {
       title: 'Escassez de alimento',
       description: `${worst.name} · ${worst.famineYears} ${worst.famineYears === 1 ? 'ano' : 'anos'} de fome`,
       focus: { x: worst.x, y: worst.y },
-      ref: this.cityRef(worst)
+      ref: this.cityRef(worst),
+      conditionHint: 'food'
     });
   }
 
@@ -379,7 +391,8 @@ export class AlertCenter {
         title: 'Cidade sitiada',
         description: besieger ? `${city.name} · cercada por ${besieger.name}` : city.name,
         focus: { x: city.x, y: city.y },
-        ref: this.cityRef(city)
+        ref: this.cityRef(city),
+        conditionHint: 'security'
       });
     });
 

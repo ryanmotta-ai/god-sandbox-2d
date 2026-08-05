@@ -1869,3 +1869,301 @@
 @media (prefers-reduced-motion: reduce) {
   .ae-inspector { animation: none; }
 }
+
+/* ==========================================================================
+   UI-3 — CITY DOSSIER
+
+   A large screen that has to stay readable at laptop width. The layout rule is
+   the brief's: problems first, then summary, then detail — expressed as document
+   order, so it survives reflow without media queries reordering anything.
+   ========================================================================== */
+
+/* Realm identity, applied narrowly. The dossier is tinted at its edges and its
+   accents; the panels stay stone. A screen washed in a saturated realm colour
+   would be unreadable and would stop looking like Aethoria. */
+.ae-city-screen .ae-screen-head { border-bottom-color: var(--ae-realm-line); }
+
+.ae-city-identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  flex: 0 0 auto;
+  padding: var(--ae-space-5);
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border);
+  border-left: 2px solid var(--ae-realm);
+  border-radius: var(--ae-radius-3);
+}
+
+/* The headline figures. A flex row that wraps rather than a fixed grid, so a
+   narrow window reflows instead of scrolling sideways. */
+.ae-city-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ae-space-7);
+}
+.ae-city-headline-item { display: flex; align-items: center; gap: var(--ae-space-3); min-width: 0; }
+.ae-city-headline-icon { opacity: 0.65; }
+.ae-city-headline-text { display: flex; flex-direction: column; line-height: 1.15; }
+.ae-city-headline-value {
+  font-size: var(--ae-text-value-primary);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+.ae-city-headline-label {
+  font-size: var(--ae-text-meta);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-muted);
+}
+.ae-city-headline-realm {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  margin-left: auto;
+  padding-left: var(--ae-space-5);
+  border-left: 1px solid var(--ae-border-inset);
+}
+
+/* Prev / next city, so the player can compare settlements without going back to
+   the map for each one. */
+.ae-city-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  padding: 0 var(--ae-space-2);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-city-nav-btn {
+  width: var(--ae-control-h-sm);
+  height: var(--ae-control-h-sm);
+  border: none;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  color: var(--ae-text-secondary);
+  font-size: var(--ae-text-body);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--ae-fast), color var(--ae-fast);
+}
+.ae-city-nav-btn:hover { background: rgba(214, 197, 168, 0.1); color: var(--ae-text); }
+.ae-city-nav-count {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ============================ CONDITIONS ============================
+   The verdict rows. A left edge carries the severity; the arithmetic behind the
+   verdict lives in the tooltip so six conditions stay six lines. */
+.ae-city-urgent { border-color: var(--ae-warning-line); }
+.ae-city-urgent > .ae-panel-head { background: var(--ae-warning-fill); }
+
+.ae-city-condition {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  width: 100%;
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-neutral);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+}
+.ae-city-condition-positive { border-left-color: var(--ae-positive); }
+.ae-city-condition-neutral { border-left-color: var(--ae-neutral); }
+.ae-city-condition-warning { border-left-color: var(--ae-warning); background: var(--ae-warning-fill); }
+.ae-city-condition-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-city-condition-live { cursor: pointer; transition: border-color var(--ae-fast); }
+.ae-city-condition-live:hover { border-color: var(--ae-accent-line); }
+.ae-city-condition-icon { opacity: 0.8; }
+.ae-city-condition-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-city-condition-label {
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-secondary);
+}
+.ae-city-condition-finding {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 600;
+  color: var(--ae-text);
+  line-height: 1.35;
+}
+
+/* A deep link from an alert marks its condition, briefly. Non-modal and
+   self-expiring: the screen must not be left in a special state. */
+.ae-city-condition-flash {
+  animation: aeConditionFlash 2.4s var(--ae-ease) both;
+}
+@keyframes aeConditionFlash {
+  0%, 60% { box-shadow: 0 0 0 2px var(--ae-accent); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+
+/* ============================ BOTTLENECKS ============================ */
+.ae-city-bottleneck {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-warning);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-city-bottleneck-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-city-bottleneck-icon { opacity: 0.8; }
+.ae-city-bottleneck-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-city-bottleneck-subject {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-city-bottleneck-cause {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  line-height: 1.4;
+}
+.ae-city-bottleneck-actions { display: flex; align-items: center; gap: var(--ae-space-2); flex: 0 0 auto; }
+
+/* Inline jump-to buttons, used in bottlenecks, building lists and tables. */
+.ae-city-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--ae-fast), background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-city-mini-btn:hover {
+  opacity: 1;
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+}
+
+/* ============================ BAR CHART ============================
+   Profession distribution. A bar per trade, widths relative to the largest —
+   enough to compare at a glance without a charting library. */
+.ae-city-bars { display: flex; flex-direction: column; gap: var(--ae-space-2); }
+.ae-city-bar-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 30%) 1fr auto;
+  align-items: center;
+  gap: var(--ae-space-4);
+}
+.ae-city-bar-label {
+  font-size: var(--ae-text-secondary-size);
+  color: var(--ae-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-city-bar-track {
+  height: 10px;
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border-inset);
+  border-radius: var(--ae-radius-1);
+  overflow: hidden;
+}
+.ae-city-bar-fill {
+  height: 100%;
+  min-width: 2px;
+  background: var(--ae-realm);
+  border-radius: var(--ae-radius-1) 0 0 var(--ae-radius-1);
+  transition: width var(--ae-med);
+}
+.ae-city-bar-value {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+}
+
+/* ============================ SECTORS ============================ */
+.ae-city-sector-figures { display: flex; flex-direction: column; gap: var(--ae-space-3); }
+
+.ae-city-note {
+  font-size: var(--ae-text-meta);
+  line-height: 1.5;
+  color: var(--ae-text-muted);
+  font-style: italic;
+}
+
+/* ============================ TIMELINE ============================ */
+.ae-city-timeline { display: flex; flex-direction: column; }
+.ae-city-event {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-4) 0 var(--ae-space-4) var(--ae-space-4);
+  border-bottom: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-border-strong);
+}
+.ae-city-event:last-child { border-bottom: none; }
+/* Importance as a left edge, so a legendary entry is findable in a long column. */
+.ae-city-event-major { border-left-color: var(--ae-accent-deep); }
+.ae-city-event-legendary { border-left-color: var(--ae-accent); }
+.ae-city-event-year {
+  flex: 0 0 auto;
+  min-width: 4ch;
+  font-family: var(--ae-font-pixel);
+  font-size: 0.625rem;
+  color: var(--ae-text-muted);
+  padding-top: 2px;
+}
+.ae-city-event-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-city-event-title {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-city-event-text {
+  font-size: var(--ae-text-meta);
+  line-height: 1.5;
+  color: var(--ae-text-secondary);
+}
+
+/* ============================ RESPONSIVE ============================
+   The dossier gives up horizontal room before it gives up vertical: figures
+   reflow, the realm link drops below, and tables scroll inside their own box
+   rather than widening the page. */
+@media (max-width: 1100px) {
+  .ae-city-headline { gap: var(--ae-space-5); }
+  .ae-city-headline-realm {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+    width: 100%;
+  }
+}
+@media (max-width: 820px) {
+  .ae-city-bar-row { grid-template-columns: minmax(72px, 40%) 1fr auto; }
+  .ae-city-headline-value { font-size: var(--ae-text-object-name); }
+  /* A table narrower than its columns scrolls in place; the page never does. */
+  .ae-city-screen .ae-table { overflow-x: auto; }
+  .ae-city-screen .ae-table-head,
+  .ae-city-screen .ae-table-row { min-width: 560px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ae-city-condition-flash { animation: none; box-shadow: 0 0 0 2px var(--ae-accent); }
+  .ae-city-bar-fill { transition: none; }
+}

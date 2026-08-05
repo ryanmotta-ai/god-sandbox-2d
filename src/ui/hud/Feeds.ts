@@ -28,8 +28,18 @@ const SEVERITY_LABEL: Record<Severity, string> = {
 };
 
 export interface FeedHandlers {
-  /** Take the camera to a place and select what is there. */
-  onGoTo: (target: { focus?: { x: number; y: number }; ref?: Alert['ref'] }) => void;
+  /**
+   * Take the camera to a place and select what is there.
+   *
+   * `dossier` is set when the alert maps onto a city-dossier condition, so the
+   * HUD can open the settlement's dossier on the relevant line instead of only
+   * dropping a ring on the map.
+   */
+  onGoTo: (target: {
+    focus?: { x: number; y: number };
+    ref?: Alert['ref'];
+    dossier?: { cityId: string; condition: string };
+  }) => void;
   onDismiss: (id: string) => void;
   onDismissAll: () => void;
 }
@@ -112,7 +122,13 @@ export class AlertFeed {
         ? {
             click: () => {
               sound.playClick();
-              this.handlers.onGoTo({ focus: alert.focus, ref: alert.ref });
+              this.handlers.onGoTo({
+                focus: alert.focus,
+                ref: alert.ref,
+                dossier: alert.conditionHint && alert.ref?.kind === 'city'
+                  ? { cityId: alert.ref.id, condition: alert.conditionHint }
+                  : undefined
+              });
             }
           }
         : undefined
@@ -135,7 +151,9 @@ export class AlertFeed {
         { label: 'Ano', value: `${alert.year}` },
         ...(alert.count > 1 ? [{ label: 'Ocorrências', value: `${alert.count}` }] : [])
       ],
-      footnote: navigable ? 'Clique para ir até lá' : undefined
+      footnote: alert.conditionHint && alert.ref?.kind === 'city'
+        ? 'Clique para abrir o dossiê da cidade nesta condição'
+        : navigable ? 'Clique para ir até lá' : undefined
     });
   }
 }

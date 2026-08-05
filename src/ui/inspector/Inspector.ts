@@ -47,6 +47,8 @@ export interface InspectorHost {
   openChronicle(): void;
   openEconomy(good?: GoodId, cityId?: string): void;
   openKingdoms(kingdomId?: string): void;
+  /** Opens the full city dossier, optionally landing on one condition. */
+  openCityDossier(cityId: string, highlightCondition?: string): void;
 }
 
 /** How often an open inspector re-reads the world. */
@@ -299,6 +301,10 @@ export class Inspector implements InspectorHost {
 
   public openKingdoms(kingdomId?: string): void {
     this.ctx.screens.open('kingdoms', { focusKingdom: kingdomId });
+  }
+
+  public openCityDossier(cityId: string, highlightCondition?: string): void {
+    this.ctx.screens.open('city', { cityId, highlightCondition });
   }
 
   /**

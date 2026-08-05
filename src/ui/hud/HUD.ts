@@ -81,7 +81,7 @@ export class HUD {
       onClose: () => ctx.selection.clear()
     });
 
-    const goTo = (target: { focus?: { x: number; y: number }; ref?: any }) => this.goTo(target);
+    const goTo = (target: Parameters<HUD['goTo']>[0]) => this.goTo(target);
     this.alertFeed = new AlertFeed(alerts, {
       onGoTo: goTo,
       onDismiss: id => alerts.dismiss(id),
@@ -119,7 +119,22 @@ export class HUD {
    * and selection are independent: an alert may know where to look without
    * knowing what to select, and vice versa.
    */
-  private goTo(target: { focus?: { x: number; y: number }; ref?: any }): void {
+  private goTo(target: {
+    focus?: { x: number; y: number };
+    ref?: any;
+    dossier?: { cityId: string; condition: string };
+  }): void {
+    // An alert that names a city condition opens the dossier on that line. This is
+    // strictly better than a ring on the map for a problem like a famine, where
+    // the answer is a set of figures rather than a place.
+    if (target.dossier) {
+      this.ctx.selection.select({ kind: 'city', id: target.dossier.cityId });
+      this.ctx.screens.open('city', {
+        cityId: target.dossier.cityId,
+        highlightCondition: target.dossier.condition
+      });
+      return;
+    }
     if (target.focus) {
       this.ctx.focusOn(target.focus.x, target.focus.y);
     }

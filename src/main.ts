@@ -49,6 +49,7 @@ import { EcosystemScreen } from './ui/screens/EcosystemScreen';
 import { TechTreeScreen } from './ui/screens/TechTreeScreen';
 import { InfrastructureScreen } from './ui/screens/InfrastructureScreen';
 import { UIKitScreen } from './ui/screens/UIKitScreen';
+import { CityScreen } from './ui/screens/CityScreen';
 import { SelectionManager } from './ui/hud/Selection';
 import { WorldSnapshotProvider } from './ui/core/WorldSnapshot';
 import { alerts } from './ui/core/Alerts';
@@ -183,6 +184,7 @@ class AethoriaGame implements GameContext {
     this.screens.register(new EcosystemScreen());
     this.screens.register(new TechTreeScreen());
     this.screens.register(new InfrastructureScreen());
+    this.screens.register(new CityScreen());
     // Development gallery for the UI kit. Not on any navigation path — opened
     // from the debug panel.
     this.screens.register(new UIKitScreen());
