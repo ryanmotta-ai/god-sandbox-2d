@@ -10,6 +10,8 @@ import { BLUEPRINT_LIST } from '../../world/WorldBlueprints';
 import { SpeciesType } from '../../entities/Species';
 import { StatsTracker } from './StatsTracker';
 import type { ScreenManager } from './ScreenManager';
+import type { SelectionManager } from '../hud/Selection';
+import type { WorldSnapshot } from './WorldSnapshot';
 import type { ToastType } from '../components/Toasts';
 
 /** Everything the "New World" screen can configure. */
@@ -59,6 +61,8 @@ export interface GameContext {
   readonly overlays: OverlayManager;
   readonly stats: StatsTracker;
   readonly screens: ScreenManager;
+  /** What the player currently has selected. See `hud/Selection.ts`. */
+  readonly selection: SelectionManager;
 
   /** Current world generation parameters (for re-rolls and the pause screen summary). */
   readonly worldConfig: WorldConfig;
@@ -89,4 +93,15 @@ export interface GameContext {
   toast(message: string, type?: ToastType): void;
   /** Re-read the settings store and push the values into the renderer/audio. */
   applySettings(): void;
+
+  /**
+   * The world's aggregate figures, as of the last refresh.
+   *
+   * The HUD reads this instead of the simulation. It is a plain object, so
+   * anything holding it is holding a value and cannot accidentally observe a
+   * half-updated world mid-tick.
+   */
+  readonly snapshot: WorldSnapshot;
+  /** Rebuilds the snapshot if it has gone stale, and returns it. */
+  refreshSnapshot(now: number): WorldSnapshot;
 }

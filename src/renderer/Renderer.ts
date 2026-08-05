@@ -47,6 +47,25 @@ export interface RenderOptions {
   showBrushCursor: boolean;
 }
 
+/**
+ * The map-side half of selection: where the ring goes and what it says.
+ *
+ * Deliberately dumb — a position, a size, a colour and a caption. The renderer
+ * does not know what a city is; the HUD resolves the selection and hands over
+ * only what has to be drawn.
+ */
+export interface SelectionMark {
+  /** World tile coordinates of the centre. */
+  x: number;
+  y: number;
+  /** Ring radius in tiles. */
+  radius: number;
+  /** Realm colour when the thing belongs to a realm; bronze otherwise. */
+  color: string;
+  /** Short caption drawn under the ring. Omit for no label. */
+  label?: string;
+}
+
 const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   showGrid: false,
   showCityNames: true,
@@ -100,6 +119,8 @@ export class PixelRenderer {
   private animTimer: number = 0;
   private diplomacy: DiplomacyManager | null = null;
   private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
+  /** Current selection ring, or null when nothing is selected. */
+  private selection: SelectionMark | null = null;
   /** Last ambient FX emission per building; avoids particle spam at high FPS. */
   private buildingFxTime: Map<string, number> = new Map();
   /** sin/cos of (x*127.1 + y*311.7) for the tile currently being drawn. */
@@ -124,6 +145,16 @@ export class PixelRenderer {
 
   public setOptions(options: Partial<RenderOptions>): void {
     this.options = { ...this.options, ...options };
+  }
+
+  /**
+   * What the player currently has selected, so the map can mark it.
+   *
+   * Set through its own method rather than added to `render`'s already long
+   * parameter list — same reasoning as `setDiplomacy`. Pass null to clear.
+   */
+  public setSelection(selection: SelectionMark | null): void {
+    this.selection = selection;
   }
 
   public resize(width: number, height: number): void {
@@ -2053,7 +2084,10 @@ export class PixelRenderer {
       this.ctx.stroke();
     }
 
-    // ========== 7. BRUSH CURSOR ==========
+    // ========== 7. SELECTION ==========
+    if (this.selection) this.drawSelectionMark(camera, width, height, tileSize);
+
+    // ========== 8. BRUSH CURSOR ==========
     if (this.options.showBrushCursor && brushX !== null && brushY !== null) {
       const screenPos = camera.worldToScreen(brushX, brushY, width, height);
       const brushRadiusPx = brushSize * tileSize;
@@ -2066,6 +2100,74 @@ export class PixelRenderer {
       this.ctx.stroke();
       this.ctx.setLineDash([]);
     }
+  }
+
+  /**
+   * The selection ring.
+   *
+   * Answers one question — "what did I just click?" — and then gets out of the
+   * way. Which is why it is a thin bracketed ring rather than a filled overlay:
+   * the thing being marked is pixel art, and covering it in a tinted wash is how
+   * you make the player unable to see what they selected.
+   *
+   * Four corner brackets rather than a full circle. A closed ring reads as a
+   * radius of effect — the brush cursor already uses one, and the two must not
+   * be confusable.
+   */
+  private drawSelectionMark(camera: Camera, width: number, height: number, tileSize: number): void {
+    const mark = this.selection!;
+    const ctx = this.ctx;
+    const pos = camera.worldToScreen(mark.x, mark.y, width, height);
+    const r = Math.max(9, mark.radius * tileSize);
+
+    // A slow pulse, so the ring is findable on a busy map without flashing.
+    const pulse = 0.72 + 0.28 * Math.sin(this.animTimer * 2.2);
+    // Bracket arms scale with the ring but stay a usable length when zoomed out.
+    const arm = Math.max(4, r * 0.34);
+
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    ctx.strokeStyle = mark.color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'butt';
+
+    // Snapped to whole pixels: a 2px stroke on a half-pixel boundary renders as
+    // two grey lines, which looks like a bug next to crisp pixel art.
+    const cx = Math.round(pos.x);
+    const cy = Math.round(pos.y);
+    const d = Math.round(r);
+
+    ctx.beginPath();
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      const x = cx + sx * d;
+      const y = cy + sy * d;
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - sx * arm, y);
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y - sy * arm);
+    }
+    ctx.stroke();
+
+    // A caption, only when there is room for it to be legible.
+    if (mark.label && tileSize >= 6) {
+      ctx.globalAlpha = 1;
+      ctx.font = '600 11px Outfit, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const ty = cy + d + 5;
+      const textWidth = ctx.measureText(mark.label).width;
+
+      // Drawn on its own plate: light text over bright terrain is unreadable, and
+      // a stroke outline on pixel art looks like a sticker.
+      ctx.globalAlpha = 0.82;
+      ctx.fillStyle = '#100e0c';
+      ctx.fillRect(cx - textWidth / 2 - 4, ty - 2, textWidth + 8, 15);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = mark.color;
+      ctx.fillText(mark.label, cx, ty);
+    }
+
+    ctx.restore();
   }
 
   /**

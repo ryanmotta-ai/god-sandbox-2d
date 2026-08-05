@@ -1,95 +1,66 @@
-import { el, clear, formatNumber } from '../core/Dom';
-import { OverlayMode } from '../../renderer/Overlays';
-import { WorldEra } from '../../world/WeatherEras';
+/**
+ * The in-game interface, assembled.
+ *
+ * UI-1 turned this file from a builder into a composition root. It used to
+ * construct a top bar, a time cockpit and a ten-button dock inline — some 250
+ * lines of DOM plus its own update logic — which is why those three surfaces
+ * drifted apart and why none of them could be changed without touching the
+ * others. Each is now its own module, and this class does three things: owns
+ * them, routes between them, and runs one update per frame.
+ *
+ * The permanent furniture is deliberately short: a top bar, a small tool dock,
+ * and the minimap. Everything else — selection card, alerts, event feed, powers
+ * palette, inspector — appears because something happened, and leaves when it is
+ * done. That is the whole "map first, information on demand" principle, expressed
+ * as a list of children.
+ */
+import { el, clear } from '../core/Dom';
 import { settings } from '../core/Settings';
 import { sound } from '../../core/SoundSynth';
 import { DisasterSystem } from '../../powers/Disasters';
 import { Toolbar } from './Toolbar';
 import { Inspector } from './Inspector';
 import { Minimap } from './Minimap';
-import { icon, setIcon, withTooltip, TooltipContent, formatFull } from '../kit';
-import type { ScreenId } from '../core/ScreenManager';
+import { TopBar } from './TopBar';
+import { ToolDock } from './ToolDock';
+import { SelectionCard } from './SelectionCard';
+import { AlertFeed, EventFeed } from './Feeds';
+import { alerts } from '../core/Alerts';
+import { TICKS_PER_DAY } from '../../ai/EntityAI';
+import { icon } from '../kit';
+import type { SelectionView } from './Selection';
+import type { OverlayMode } from '../../renderer/Overlays';
 import type { GameContext } from '../core/GameContext';
 
-interface OverlayInfo {
-  id: OverlayMode;
-  label: string;
-  icon: string;
-  hint: string;
-}
-
-const OVERLAYS: OverlayInfo[] = [
-  { id: 'none', label: 'Natural', icon: 'map', hint: 'Visão padrão do mundo' },
-  { id: 'political', label: 'Político', icon: 'kingdom', hint: 'Fronteiras e reinos' },
-  { id: 'population', label: 'População', icon: 'population', hint: 'Densidade populacional' },
-  { id: 'biome', label: 'Biomas', icon: 'biome', hint: 'Classificação de biomas' },
-  { id: 'temperature', label: 'Clima', icon: 'climate', hint: 'Mapa de calor e temperatura' },
-  { id: 'resources', label: 'Recursos', icon: 'gem', hint: 'Minérios, madeira e ouro' }
+/** Overlay cycle order for the V shortcut. */
+const OVERLAY_CYCLE: { id: OverlayMode; label: string }[] = [
+  { id: 'none', label: 'Natural' },
+  { id: 'political', label: 'Político' },
+  { id: 'population', label: 'População' },
+  { id: 'biome', label: 'Biomas' },
+  { id: 'temperature', label: 'Clima' },
+  { id: 'resources', label: 'Recursos' }
 ];
 
-/**
- * The speed ladder.
- *
- * Multipliers stay as text — they *are* numbers, and a number is the clearest
- * possible label for itself. Only pause gets artwork, because "stopped" has no
- * numeral.
- */
-const SPEEDS: { value: number; label?: string; icon?: string; title: string }[] = [
-  { value: 0, icon: 'pause', title: 'Pausa a simulação. O mundo congela; a câmera continua livre.' },
-  { value: 0.25, label: '0.25×', title: 'Super câmera lenta — 1 segundo real vale 15 minutos no mundo.' },
-  { value: 0.5, label: '0.5×', title: 'Câmera lenta — 1 segundo real vale 30 minutos no mundo.' },
-  { value: 1, label: '1×', title: 'Velocidade calibrada — 1 segundo real vale 1 hora no mundo.' },
-  { value: 2, label: '2×', title: 'Rápido — 2 horas por segundo.' },
-  { value: 5, label: '5×', title: 'Muito rápido — 5 horas por segundo.' },
-  { value: 10, label: '10×', title: 'Ultra rápido — 10 horas por segundo.' },
-  { value: 20, label: '20×', title: 'Hiper avanço — 20 horas por segundo.' },
-  { value: 60, label: '60×', title: 'Supersônico — 60 horas por segundo, cerca de 2,5 dias a cada segundo.' }
-];
-
-const ERA_STYLE: Record<string, { color: string; icon: string }> = {
-  [WorldEra.GOLDEN_AGE]: { color: '#c9a153', icon: 'sun' },
-  [WorldEra.ABUNDANCE]: { color: '#8fb069', icon: 'farm' },
-  [WorldEra.AGE_OF_ASHES]: { color: '#d98324', icon: 'fire' },
-  [WorldEra.DARK_AGE]: { color: '#9b7fa8', icon: 'moon' },
-  [WorldEra.FROZEN_AGE]: { color: '#7fa8b8', icon: 'snow' }
-};
-
-/**
- * The strategic dock.
- *
- * Ten destinations, each one lens on the same world. Declared as data so the
- * dock, its tooltips and its shortcut hints cannot drift apart — before UI-0 the
- * icon, the label and the key were three separate literals per button.
- */
-const DOCK: { screen: ScreenId; icon: string; label: string; key: string; description: string }[] = [
-  { screen: 'politics', icon: 'politics', label: 'Política', key: 'P', description: 'Facções, leis e a legitimidade de cada governo.' },
-  { screen: 'economy', icon: 'economy', label: 'Economia', key: 'E', description: 'Preços, produção, escassez e o tesouro dos reinos.' },
-  { screen: 'warfare', icon: 'war', label: 'Guerra', key: 'W', description: 'Exércitos em campo, cercos e o custo das campanhas.' },
-  { screen: 'dynasty', icon: 'dynasty', label: 'Dinastias', key: 'Y', description: 'Linhagens, sucessões e as casas que governam.' },
-  { screen: 'ecosystem', icon: 'ecosystem', label: 'Ecossistema', key: 'M', description: 'Biomas, fauna e a pressão que a civilização exerce sobre eles.' },
-  { screen: 'techtree', icon: 'technology', label: 'Ciência', key: 'T', description: 'O que cada reino descobriu e o que persegue agora.' },
-  { screen: 'diplomacy', icon: 'diplomacy', label: 'Diplomacia', key: 'D', description: 'Tratados, rivalidades e a opinião de cada corte.' },
-  { screen: 'chronicle', icon: 'chronicle', label: 'Crônica', key: 'C', description: 'A história do mundo, registrada conforme acontece.' },
-  { screen: 'saveload', icon: 'save', label: 'Salvar', key: 'F5', description: 'Salvar, carregar ou exportar este mundo.' },
-  { screen: 'pause', icon: 'menu', label: 'Menu', key: 'Esc', description: 'Pausa e abre o menu principal.' }
-];
+/** How often a live selection re-reads the world. Years, not frames. */
+const SELECTION_REFRESH_MS = 600;
 
 export class HUD {
   public readonly root: HTMLElement;
   public readonly toolbar: Toolbar;
   public readonly inspector: Inspector;
   public readonly minimap: Minimap;
+  public readonly topBar: TopBar;
+  public readonly toolDock: ToolDock;
+  public readonly selectionCard: SelectionCard;
 
   private ctx: GameContext;
-  private eraEl!: HTMLElement;
-  private eraIconEl!: HTMLImageElement;
-  private timeClockEl!: HTMLElement;
-  private statEls: Record<string, HTMLElement> = {};
-  private speedButtons: Map<number, HTMLButtonElement> = new Map();
-  private overlayButtons: Map<OverlayMode, HTMLButtonElement> = new Map();
+  private alertFeed: AlertFeed;
+  private eventFeed: EventFeed;
   private debugPanel!: HTMLElement;
   private debugEls: Record<string, HTMLElement> = {};
   private hiddenByPlayer = false;
+  private lastSelectionRefresh = 0;
 
   constructor(ctx: GameContext, root: HTMLElement) {
     this.ctx = ctx;
@@ -100,227 +71,197 @@ export class HUD {
     this.minimap = new Minimap();
     this.minimap.attach(ctx);
 
+    this.topBar = new TopBar(ctx, () => ctx.screens.open('pause'));
+    this.toolDock = new ToolDock(ctx, () => this.toolbar.toggle());
+
+    this.selectionCard = new SelectionCard({
+      onInspect: view => this.openInspector(view),
+      onFocus: view => ctx.focusOn(view.worldPos.x, view.worldPos.y),
+      onClose: () => ctx.selection.clear()
+    });
+
+    const goTo = (target: { focus?: { x: number; y: number }; ref?: any }) => this.goTo(target);
+    this.alertFeed = new AlertFeed(alerts, {
+      onGoTo: goTo,
+      onDismiss: id => alerts.dismiss(id),
+      onDismissAll: () => alerts.dismissAll()
+    });
+    this.eventFeed = new EventFeed(alerts, goTo);
+
     clear(root);
-    root.appendChild(this.buildTopBar());
-    root.appendChild(this.buildTimeCockpit());
-    root.appendChild(this.buildStrategicFloatingDock());
+    root.appendChild(this.topBar.root);
+    root.appendChild(this.toolDock.root);
+    root.appendChild(this.selectionCard.root);
+    root.appendChild(this.alertFeed.root);
+    root.appendChild(this.eventFeed.root);
     root.appendChild(this.buildDebugPanel());
     root.appendChild(this.minimap.root);
     root.appendChild(this.toolbar.root);
     root.appendChild(this.inspector.root);
 
+    // The card follows the selection rather than polling it.
+    ctx.selection.onChange(view => this.selectionCard.show(view));
+    // Feeds redraw on change, not on a timer.
+    alerts.onChange(() => { this.alertFeed.sync(); this.eventFeed.sync(); });
+
     this.applySettings();
     settings.onChange(() => this.applySettings());
   }
 
-  // ============================ BUILD ============================
+  // ============================ ROUTING ============================
 
-  private buildTopBar(): HTMLElement {
-    this.eraIconEl = icon('sun', { size: 16, class: 'era-icon-hero' });
-    this.eraEl = el('span', { class: 'era-name-hero', text: 'Era da Abundância' });
-
-    const logo = el('div', { class: 'brand-hero' }, [
-      icon('sun', { size: 16, class: 'brand-mark-gold' }),
-      el('div', { class: 'brand-text-hero' }, [
-        el('span', { class: 'brand-name-gold', text: 'AETHORIA' }),
-        el('span', { class: 'brand-tag-sub', text: 'GOD SANDBOX 2D' })
-      ])
-    ]);
-
-    const eraChip = withTooltip(
-      el('div', {
-        class: 'era-chip-hero',
-        on: { click: () => { sound.playClick(); this.ctx.eras.cycleNextEra(); } }
-      }, [this.eraIconEl, this.eraEl]),
-      () => ({
-        title: this.ctx.eras.getCurrentEra(),
-        icon: ERA_STYLE[this.ctx.eras.getCurrentEra()]?.icon ?? 'sun',
-        accent: ERA_STYLE[this.ctx.eras.getCurrentEra()]?.color,
-        description: 'A era climática vigente. Ela altera colheitas, doenças e a velocidade com que os reinos crescem.',
-        footnote: 'Clique para avançar para a próxima era'
-      })
-    );
-
-    const godPowersBtn = withTooltip(
-      el('button', {
-        class: 'god-powers-trigger-hero',
-        on: { click: () => { sound.playClick(); this.toolbar.toggle(); } }
-      }, [
-        icon('power', { size: 16, class: 'btn-icon-pulse' }),
-        el('span', { class: 'btn-text-bold', text: 'Poderes Divinos' })
-      ]),
-      {
-        title: 'Poderes Divinos',
-        description: 'Abre a paleta de terraformação e intervenção — erguer terra, atear fogo, semear vida.',
-        shortcut: 'Tab'
+  /**
+   * Follows an alert or event to its subject.
+   *
+   * Uses the camera and the selection the game already has — the brief is
+   * explicit that alerts must not grow a navigation system of their own. Focus
+   * and selection are independent: an alert may know where to look without
+   * knowing what to select, and vice versa.
+   */
+  private goTo(target: { focus?: { x: number; y: number }; ref?: any }): void {
+    if (target.focus) {
+      this.ctx.focusOn(target.focus.x, target.focus.y);
+    }
+    if (target.ref) {
+      switch (target.ref.kind) {
+        case 'city': this.ctx.selection.select({ kind: 'city', id: target.ref.id }); return;
+        case 'kingdom': this.ctx.selection.select({ kind: 'kingdom', id: target.ref.id }); return;
+        case 'citizen': this.ctx.selection.select({ kind: 'citizen', id: target.ref.id }); return;
+        default: break;
       }
-    );
-
-    const stats = el('div', { class: 'stat-pills-hero' }, [
-      this.statPill('year', 'year', 'Ano', '1', () => ({
-        title: 'Ano corrente',
-        value: `${this.ctx.sim.currentYear}`,
-        icon: 'year',
-        description: 'Quanto tempo se passou desde a fundação deste mundo.'
-      })),
-      this.statPill('pop', 'population', 'População', '0', () => ({
-        title: 'População',
-        value: formatFull(this.ctx.sim.entities.length),
-        icon: 'population',
-        description: 'Todos os seres vivos simulados neste momento, incluindo fauna selvagem.'
-      })),
-      this.statPill('cities', 'city', 'Cidades', '0', () => ({
-        title: 'Assentamentos',
-        value: `${this.ctx.sim.cities.size}`,
-        icon: 'city',
-        description: 'Cidades fundadas e ainda habitadas.'
-      })),
-      this.statPill('kingdoms', 'kingdom', 'Reinos', '0', () => ({
-        title: 'Reinos',
-        value: `${this.ctx.sim.kingdoms.size}`,
-        icon: 'kingdom',
-        description: 'Estados soberanos existentes. Reinos conquistados deixam de contar.'
-      })),
-      this.statPill('wars', 'war', 'Guerras', '0', () => {
-        const wars = this.ctx.sim.diplomacy.activeWars.size;
-        return {
-          title: 'Guerras ativas',
-          value: `${wars}`,
-          icon: 'war',
-          valueStatus: wars > 0 ? 'critical' : 'positive',
-          description: wars > 0
-            ? 'Conflitos em curso neste momento.'
-            : 'Nenhum conflito em curso. O mundo está em paz.'
-        };
-      })
-    ]);
-
-    const settingsBtn = withTooltip(
-      el('button', {
-        class: 'topbar-icon-btn',
-        attrs: { 'aria-label': 'Ajustes' },
-        on: { click: () => { sound.playClick(); this.ctx.screens.open('settings'); } }
-      }, [icon('settings', { size: 16 })]),
-      { title: 'Ajustes', description: 'Vídeo, áudio, escala da interface e acessibilidade.' }
-    );
-
-    return el('header', { class: 'topbar-gameawards' }, [
-      el('div', { class: 'topbar-hero-left' }, [logo, godPowersBtn]),
-      el('div', { class: 'topbar-hero-center' }, [eraChip]),
-      el('div', { class: 'topbar-hero-right' }, [stats, settingsBtn])
-    ]);
-  }
-
-  private buildTimeCockpit(): HTMLElement {
-    this.timeClockEl = el('div', { class: 'cockpit-clock-display' });
-
-    const speedBtns = SPEEDS.map(s => {
-      const btn = withTooltip(
-        el('button', {
-          class: 'cockpit-speed-btn',
-          attrs: { 'aria-label': s.label ?? 'Pausar' },
-          on: { click: () => { sound.playClick(); this.ctx.setSpeed(s.value); } }
-        }, [
-          s.icon ? icon(s.icon, { size: 16 }) : el('span', { text: s.label! })
-        ]),
-        {
-          title: s.label ?? 'Pausar',
-          description: s.title,
-          shortcut: s.value === 0 ? 'Espaço' : undefined
-        }
-      ) as HTMLButtonElement;
-      this.speedButtons.set(s.value, btn);
-      return btn;
-    });
-
-    const action = (
-      iconName: string,
-      label: string,
-      tip: TooltipContent,
-      onClick: () => void,
-      extraClass = ''
-    ) => withTooltip(
-      el('button', {
-        class: `cockpit-action-btn${extraClass ? ' ' + extraClass : ''}`,
-        on: { click: () => { sound.playClick(); onClick(); } }
-      }, [icon(iconName, { size: 16 }), el('span', { text: label })]),
-      tip
-    );
-
-    const stepYearBtn = action('forward', '+1 Ano', {
-      title: 'Avançar um ano',
-      description: 'Executa a simulação por um ano completo de uma vez e devolve o controle.'
-    }, () => {
-      for (let i = 0; i < 60; i++) {
-        this.ctx.sim.tickAI(this.ctx.tileMap, this.ctx.particles);
-      }
-      this.ctx.toast('Simulação avançada em +1 Ano', 'info');
-    });
-
-    const stepTickBtn = action('step', '1 Tick', {
-      title: 'Avançar um tick',
-      description: 'Um único passo da simulação, para observar uma decisão isolada.'
-    }, () => {
-      this.ctx.sim.tickAI(this.ctx.tileMap, this.ctx.particles);
-    });
-
-    const cycleEraBtn = action('map', 'Mudar Era', {
-      title: 'Alternar era climática',
-      description: 'Força a próxima era. Colheitas, doenças e crescimento respondem imediatamente.'
-    }, () => {
-      this.ctx.eras.cycleNextEra();
-      this.ctx.toast(`Nova Era: ${this.ctx.eras.getCurrentEra()}`, 'divine');
-    }, 'era-btn');
-
-    return el('div', { class: 'time-cockpit-dock' }, [
-      this.timeClockEl,
-      el('div', { class: 'cockpit-controls-row' }, speedBtns),
-      el('div', { class: 'cockpit-actions-row' }, [stepYearBtn, stepTickBtn, cycleEraBtn])
-    ]);
-  }
-
-  private buildStrategicFloatingDock(): HTMLElement {
-    return el('div', { class: 'strategic-floating-dock' }, DOCK.map(entry =>
-      withTooltip(
-        el('button', {
-          class: 'floating-dock-btn',
-          attrs: { 'aria-label': entry.label },
-          on: { click: () => { sound.playClick(); this.ctx.screens.open(entry.screen); } }
-        }, [
-          icon(entry.icon, { size: 16, class: 'dock-btn-icon' }),
-          el('span', { class: 'dock-btn-label', text: entry.label }),
-          el('kbd', { class: 'dock-btn-key', text: entry.key })
-        ]),
-        { title: entry.label, description: entry.description, icon: entry.icon, shortcut: entry.key }
-      )
-    ));
+    }
+    // No selectable subject, but a place to look: select the ground, so the ring
+    // still shows the player where they were sent.
+    if (target.focus && !target.ref) {
+      this.ctx.selection.select({
+        kind: 'tile',
+        x: Math.floor(target.focus.x),
+        y: Math.floor(target.focus.y)
+      });
+    }
   }
 
   /**
-   * A live figure in the top bar.
+   * Opens the inspector for whatever is selected. Bound to `I`.
    *
-   * The tooltip is a callback so it reads the simulation at hover time. Building
-   * five tooltips' worth of content on every frame — for panels the player is
-   * usually not looking at — is exactly the kind of standing cost the UI is
-   * meant to avoid.
+   * With nothing selected the key falls back to toggling the drawer, which is what
+   * it did before UI-1 — so the shortcut never becomes a no-op.
    */
-  private statPill(
-    key: string,
-    iconName: string,
-    label: string,
-    initial: string,
-    tip: () => TooltipContent
-  ): HTMLElement {
-    const value = el('span', { class: 'pill-val-hero', text: initial });
-    this.statEls[key] = value;
-    return withTooltip(
-      el('div', { class: `stat-card-hero card-${key}` }, [
-        icon(iconName, { size: 16, class: 'card-icon-hero' }),
-        el('div', { class: 'card-text-hero' }, [value, el('span', { class: 'card-lbl-hero', text: label })])
-      ]),
-      tip
-    );
+  public openInspectorForSelection(): void {
+    const view = this.ctx.selection.resolve();
+    if (view) this.openInspector(view);
+    else this.inspector.toggle();
   }
+
+  /** Hands a selection to the existing inspector. UI-2 replaces the drawer itself. */
+  private openInspector(view: SelectionView): void {
+    const target = this.ctx.selection.current;
+    if (!target) return;
+    switch (target.kind) {
+      case 'citizen': {
+        const entity = this.ctx.sim.entities.find(e => e.id === target.id);
+        if (entity) this.inspector.inspectEntity(entity);
+        return;
+      }
+      case 'city': {
+        const city = this.ctx.sim.cities.get(target.id);
+        if (city) this.inspector.inspectCity(city);
+        return;
+      }
+      case 'kingdom':
+        this.inspector.inspectKingdom(target.id);
+        return;
+      case 'tile': {
+        const tile = this.ctx.tileMap.getTile(target.x, target.y);
+        if (tile) this.inspector.inspectTile(tile);
+        return;
+      }
+      default:
+        // Buildings have no inspector view yet; the card said so by hiding the
+        // button, and this is the belt-and-braces case.
+        this.ctx.toast(`${view.name} — painel detalhado chega na próxima fase`, 'info');
+    }
+  }
+
+  // ============================ UPDATE ============================
+
+  /**
+   * One update per frame, and as little work as possible inside it.
+   *
+   * The snapshot is rebuilt on its own cadence, the top bar diffs every value
+   * before writing it, the feeds only rebuild when their contents change, and the
+   * selection re-reads the world twice a second. Nothing here walks the world.
+   */
+  public update(now: number): void {
+    const snapshot = this.ctx.refreshSnapshot(now);
+    this.topBar.sync(snapshot);
+
+    // Condition-based alerts, evaluated once per simulated year inside `evaluate`.
+    alerts.evaluate(snapshot);
+    if (alerts.expire(now)) {
+      this.alertFeed.sync();
+      this.eventFeed.sync();
+    }
+
+    this.toolDock.syncActiveTool();
+    this.toolbar.syncActiveTool();
+    this.minimap.tick(now);
+    this.inspector.tick(now);
+
+    if (now - this.lastSelectionRefresh >= SELECTION_REFRESH_MS) {
+      this.lastSelectionRefresh = now;
+      this.ctx.selection.refresh();
+    }
+
+    if (!this.debugPanel.classList.contains('hidden')) this.syncDebug();
+  }
+
+  // ============================ INPUT HOOKS ============================
+
+  /**
+   * The HUD's share of the ESC chain, most transient thing first.
+   *
+   * Returns true once it has consumed the key. The ordering is the point: ESC
+   * should undo the smallest thing outstanding, so a player with a menu open, a
+   * tool armed and a city selected presses it three times and gets three
+   * different, predictable results.
+   */
+  public handleEscape(): boolean {
+    if (this.toolDock.closeMenu()) return true;
+    if (this.toolbar.isOpen) { this.toolbar.setVisible(false); return true; }
+    if (!this.ctx.brush.isInspecting) {
+      this.ctx.brush.resetToInspect();
+      this.toolDock.syncActiveTool();
+      this.toolbar.syncActiveTool();
+      return true;
+    }
+    if (this.inspector.isOpen) { this.inspector.hide(); return true; }
+    if (this.ctx.selection.isActive) { this.ctx.selection.clear(); return true; }
+    return false;
+  }
+
+  public cycleOverlay(): void {
+    const idx = OVERLAY_CYCLE.findIndex(o => o.id === this.ctx.overlays.activeMode);
+    const next = OVERLAY_CYCLE[(idx + 1) % OVERLAY_CYCLE.length];
+    this.ctx.overlays.setMode(next.id);
+    this.ctx.toast(`Visão: ${next.label}`, 'info');
+  }
+
+  public applySettings(): void {
+    this.minimap.setVisible(settings.get('showMinimap'));
+    document.documentElement.style.setProperty('--ui-scale', `${settings.get('uiScale')}`);
+  }
+
+  public toggleDebug(): void {
+    this.debugPanel.classList.toggle('hidden');
+  }
+
+  public toggleVisibility(): void {
+    this.hiddenByPlayer = !this.hiddenByPlayer;
+    this.root.classList.toggle('ui-hidden', this.hiddenByPlayer);
+  }
+
+  // ============================ DEBUG ============================
 
   private buildDebugPanel(): HTMLElement {
     const row = (key: string, label: string) => {
@@ -345,94 +286,30 @@ export class HUD {
       row('kingdoms', 'Kingdoms'),
       row('fires', 'Active fires'),
       row('speed', 'Sim speed'),
+      row('alerts', 'Alerts'),
       el('div', { class: 'debug-actions' }, [
         el('button', { text: 'Spawn 50', on: { click: () => this.debugSpawn() } }),
         el('button', { text: 'Force war', on: { click: () => this.debugWar() } }),
         el('button', { text: 'Meteor', on: { click: () => this.debugMeteor() } }),
-        el('button', { text: 'Next era', on: { click: () => { this.ctx.eras.cycleNextEra(); this.ctx.toast(`Era shifted to ${this.ctx.eras.getCurrentEra()}`, 'divine'); } } }),
+        el('button', { text: 'Next era', on: { click: () => { this.ctx.eras.cycleNextEra(); } } }),
+        el('button', { text: '+1 day', on: { click: () => this.debugAdvanceDay() } }),
         el('button', { text: 'UI kit', on: { click: () => this.ctx.screens.open('ui-kit') } })
       ])
     ]);
     return this.debugPanel;
   }
 
-  // ============================ UPDATE ============================
-
-  public update(now: number): void {
-    const { sim, eras } = this.ctx;
-
-    const era = eras.getCurrentEra();
-    const style = ERA_STYLE[era] ?? { color: 'var(--ae-accent)', icon: 'sun' };
-    this.eraEl.textContent = era;
-    // `setIcon` bails out when the artwork has not changed, which is almost
-    // every frame — the era shifts a handful of times per world.
-    setIcon(this.eraIconEl, style.icon);
-    (this.eraEl.parentElement as HTMLElement).style.setProperty('--era-color', style.color);
-
-    if (this.timeClockEl) {
-      const clock = sim.get24HourTime();
-      const date = sim.getCalendarDate();
-      this.timeClockEl.textContent =
-        `Ano ${date.year} · Mês ${date.month}, Dia ${date.day} · ${clock.timeString} (${clock.periodLabel})`;
-    }
-
-    this.statEls.year.textContent = `${sim.currentYear}`;
-    this.statEls.pop.textContent = formatNumber(sim.entities.length);
-    this.statEls.cities.textContent = `${sim.cities.size}`;
-    this.statEls.kingdoms.textContent = `${sim.kingdoms.size}`;
-
-    const wars = sim.diplomacy.activeWars.size;
-    this.statEls.wars.textContent = `${wars}`;
-    this.statEls.wars.parentElement!.parentElement!.classList.toggle('alert', wars > 0);
-
-    for (const [value, btn] of this.speedButtons) {
-      btn.classList.toggle('active', this.ctx.simSpeed === value);
-    }
-
-    this.toolbar.syncActiveTool();
-    this.minimap.tick(now);
-    this.inspector.tick(now);
-
-    if (!this.debugPanel.classList.contains('hidden')) {
-      this.debugEls.fps.textContent = `${this.ctx.fps}`;
-      this.debugEls.entities.textContent = `${sim.entities.length}`;
-      this.debugEls.particles.textContent = `${this.ctx.particles.activeParticles.length}`;
-      this.debugEls.cities.textContent = `${sim.cities.size}`;
-      this.debugEls.kingdoms.textContent = `${sim.kingdoms.size}`;
-      this.debugEls.fires.textContent = `${this.ctx.activeFires}`;
-      this.debugEls.speed.textContent = `${this.ctx.simSpeed}×`;
-    }
+  private syncDebug(): void {
+    const { sim } = this.ctx;
+    this.debugEls.fps.textContent = `${this.ctx.fps}`;
+    this.debugEls.entities.textContent = `${sim.entities.length}`;
+    this.debugEls.particles.textContent = `${this.ctx.particles.activeParticles.length}`;
+    this.debugEls.cities.textContent = `${sim.cities.size}`;
+    this.debugEls.kingdoms.textContent = `${sim.kingdoms.size}`;
+    this.debugEls.fires.textContent = `${this.ctx.activeFires}`;
+    this.debugEls.speed.textContent = `${this.ctx.simSpeed}×`;
+    this.debugEls.alerts.textContent = `${alerts.active.length}`;
   }
-
-  private syncOverlayButtons(): void {
-    for (const [mode, btn] of this.overlayButtons) {
-      btn.classList.toggle('active', this.ctx.overlays.activeMode === mode);
-    }
-  }
-
-  public cycleOverlay(): void {
-    const idx = OVERLAYS.findIndex(o => o.id === this.ctx.overlays.activeMode);
-    const next = OVERLAYS[(idx + 1) % OVERLAYS.length];
-    this.ctx.overlays.setMode(next.id);
-    this.syncOverlayButtons();
-    this.ctx.toast(`Visão: ${next.label}`, 'info');
-  }
-
-  public applySettings(): void {
-    this.minimap.setVisible(settings.get('showMinimap'));
-    document.documentElement.style.setProperty('--ui-scale', `${settings.get('uiScale')}`);
-  }
-
-  public toggleDebug(): void {
-    this.debugPanel.classList.toggle('hidden');
-  }
-
-  public toggleVisibility(): void {
-    this.hiddenByPlayer = !this.hiddenByPlayer;
-    this.root.classList.toggle('ui-hidden', this.hiddenByPlayer);
-  }
-
-  // ============================ DEBUG ACTIONS ============================
 
   private debugSpawn(): void {
     const { tileMap, sim } = this.ctx;
@@ -463,5 +340,20 @@ export class HUD {
     if (!tile) return;
     DisasterSystem.triggerMeteorite(Math.floor(wx), Math.floor(wy), tileMap, this.ctx.sim.spatialHash, this.ctx.particles, camera);
     this.ctx.toast('A meteor falls from the heavens', 'disaster');
+  }
+
+  /**
+   * Steps the simulation forward by one day.
+   *
+   * The old time cockpit offered this as "+1 Ano" while running 60 ticks — and a
+   * year is `TICKS_PER_YEAR` = 7200 ticks, so the button advanced about two hours
+   * and reported a year. A day (`TICKS_PER_DAY`) is the largest step that stays
+   * responsive, and it is now labelled as what it does.
+   */
+  private debugAdvanceDay(): void {
+    for (let i = 0; i < TICKS_PER_DAY; i++) {
+      this.ctx.sim.tickAI(this.ctx.tileMap, this.ctx.particles);
+    }
+    this.ctx.toast(`Dia avançado · Ano ${this.ctx.sim.currentYear}`, 'info');
   }
 }

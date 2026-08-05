@@ -1,4 +1,5 @@
 import { el, clear } from '../core/Dom';
+import { icon, withTooltip } from '../kit';
 import { ALL_POWERS } from '../../powers/GodPowers';
 import { BrushCategory, PowerDefinition } from '../../powers/BrushManager';
 import { settings } from '../core/Settings';
@@ -14,13 +15,13 @@ interface CategoryInfo {
 }
 
 export const CATEGORIES: CategoryInfo[] = [
-  { id: 'terrain', label: 'Terreno', icon: '⛰️', hotkey: '1', accent: '#a3a3a3' },
-  { id: 'nature', label: 'Natureza', icon: '🌿', hotkey: '2', accent: '#34d399' },
-  { id: 'biomes', label: 'Biomas', icon: '🏝️', hotkey: '3', accent: '#22d3ee' },
-  { id: 'life', label: 'Vida & Espécies', icon: '👥', hotkey: '4', accent: '#fbbf24' },
-  { id: 'divine', label: 'Milagres', icon: '⚡', hotkey: '5', accent: '#a855f7' },
-  { id: 'destruction', label: 'Desastres', icon: '💥', hotkey: '6', accent: '#ef4444' },
-  { id: 'inspect', label: 'Inspecionar', icon: '🔍', hotkey: '7', accent: '#38bdf8' }
+  { id: 'terrain', label: 'Terreno', icon: 'pickaxe', hotkey: '1', accent: '#8a7860' },
+  { id: 'nature', label: 'Natureza', icon: 'ecosystem', hotkey: '2', accent: '#7ba05b' },
+  { id: 'biomes', label: 'Biomas', icon: 'climate', hotkey: '3', accent: '#7fa8b8' },
+  { id: 'life', label: 'Vida & Espécies', icon: 'population', hotkey: '4', accent: '#c9a153' },
+  { id: 'divine', label: 'Milagres', icon: 'power', hotkey: '5', accent: '#9b7fa8' },
+  { id: 'destruction', label: 'Desastres', icon: 'disaster', hotkey: '6', accent: '#b8453c' },
+  { id: 'inspect', label: 'Inspecionar', icon: 'search', hotkey: '7', accent: '#6f8fa8' }
 ];
 
 const BRUSH_SIZES = [1, 2, 3, 5, 9, 14];
@@ -36,6 +37,8 @@ export class Toolbar {
   private searchInput: HTMLInputElement;
   private searchQuery = '';
   private isVisible = false;
+  /** Guards the per-frame active-tool sync. */
+  private lastSyncedPowerId = '';
 
   constructor(ctx: GameContext) {
     this.ctx = ctx;
@@ -66,15 +69,19 @@ export class Toolbar {
       }
     }) as HTMLInputElement;
 
-    const closeBtn = el('button', {
-      class: 'god-panel-close-btn',
-      text: '✕',
-      on: { click: () => this.toggle() }
-    });
+    const closeBtn = withTooltip(
+      el('button', {
+        class: 'god-panel-close-btn',
+        attrs: { 'aria-label': 'Fechar paleta' },
+        on: { click: () => this.toggle() }
+      }, [icon('close', { size: 16 })]),
+      { title: 'Fechar', description: 'Fecha a paleta. A ferramenta ativa continua armada.', shortcut: 'Tab' }
+    );
 
     const header = el('div', { class: 'god-panel-header' }, [
       el('div', { class: 'god-panel-title' }, [
-        el('span', { text: '⚡ Paleta de Poderes Divinos & Edição' })
+        icon('power', { size: 16 }),
+        el('span', { text: 'Poderes Divinos & Edição' })
       ]),
       closeBtn
     ]);
@@ -107,10 +114,25 @@ export class Toolbar {
     settings.onChange(() => this.applyCompact());
   }
 
+  /** Whether the palette is showing. Read by the HUD's ESC chain. */
+  public get isOpen(): boolean {
+    return this.isVisible;
+  }
+
   public toggle(): void {
     this.isVisible = !this.isVisible;
     this.root.classList.toggle('hidden', !this.isVisible);
-    if (this.isVisible) sound.playClick();
+    if (this.isVisible) {
+      sound.playClick();
+      // Inspection is now the resting category, and it contains exactly one
+      // entry — which is not what a player opening a powers palette came to see.
+      // Land them on terrain instead, where the powers actually are.
+      if (this.ctx.brush.activeCategory === 'inspect') {
+        this.ctx.brush.setCategory('terrain');
+        this.renderTabs();
+        this.renderGrid();
+      }
+    }
   }
 
   public setVisible(visible: boolean): void {
@@ -153,19 +175,21 @@ export class Toolbar {
     for (const cat of CATEGORIES) {
       const isActive = this.ctx.brush.activeCategory === cat.id;
       this.tabsEl.appendChild(
-        el(
-          'button',
-          {
-            class: `dock-tab${isActive ? ' active' : ''}`,
-            title: `${cat.label}  (${cat.hotkey})`,
-            style: isActive ? { '--tab-accent': cat.accent } as any : undefined,
-            on: { click: () => { sound.playClick(); this.selectCategory(cat.id); } }
-          },
-          [
-            el('span', { class: 'tab-icon', text: cat.icon }),
-            el('span', { class: 'tab-label', text: cat.label }),
-            el('kbd', { class: 'tab-key', text: cat.hotkey })
-          ]
+        withTooltip(
+          el(
+            'button',
+            {
+              class: `dock-tab${isActive ? ' active' : ''}`,
+              style: { '--tab-accent': cat.accent },
+              on: { click: () => { sound.playClick(); this.selectCategory(cat.id); } }
+            },
+            [
+              icon(cat.icon, { size: 16, class: 'tab-icon' }),
+              el('span', { class: 'tab-label', text: cat.label }),
+              el('kbd', { class: 'tab-key', text: cat.hotkey })
+            ]
+          ),
+          { title: cat.label, icon: cat.icon, accent: cat.accent, shortcut: `Shift+${cat.hotkey}` }
         )
       );
     }
@@ -213,23 +237,26 @@ export class Toolbar {
 
     for (const power of powers) {
       const isActive = power.id === this.ctx.brush.activePowerId;
-      const accent = CATEGORIES.find(c => c.id === power.category)?.accent ?? '#94a3b8';
+      const accent = CATEGORIES.find(c => c.id === power.category)?.accent ?? 'var(--ae-accent)';
 
-      this.gridEl.appendChild(
-        el(
-          'button',
-          {
-            class: `power${isActive ? ' active' : ''}`,
-            title: settings.get('showTooltips') ? `${power.name} — ${power.description}` : power.name,
-            style: { '--power-accent': accent } as any,
-            on: { click: () => this.selectPower(power) }
-          },
-          [
-            el('span', { class: 'power-icon', text: power.icon }),
-            el('span', { class: 'power-name', text: power.name })
-          ]
-        )
+      const node = el(
+        'button',
+        {
+          class: `power${isActive ? ' active' : ''}`,
+          style: { '--power-accent': accent },
+          on: { click: () => this.selectPower(power) }
+        },
+        [
+          icon(power.icon, { size: 16, class: 'power-icon' }),
+          el('span', { class: 'power-name', text: power.name })
+        ]
       );
+      // The palette is the one place the player is reading descriptions, so the
+      // tooltip is worth having even when the setting suppresses them elsewhere.
+      if (settings.get('showTooltips')) {
+        withTooltip(node, { title: power.name, description: power.description, icon: power.icon, accent });
+      }
+      this.gridEl.appendChild(node);
     }
   }
 
@@ -244,10 +271,17 @@ export class Toolbar {
     this.renderGrid();
   }
 
+  /**
+   * Updates the active-tool line. Called every frame, so it returns immediately
+   * when the tool has not changed rather than re-scanning the power list and
+   * rewriting text that is already correct.
+   */
   public syncActiveTool(): void {
+    if (this.ctx.brush.activePowerId === this.lastSyncedPowerId) return;
+    this.lastSyncedPowerId = this.ctx.brush.activePowerId;
     const power = ALL_POWERS.find(p => p.id === this.ctx.brush.activePowerId);
     if (!power) return;
-    this.activeNameEl.textContent = `${power.icon} ${power.name}`;
+    this.activeNameEl.textContent = power.name;
     this.activeDescEl.textContent = power.description;
   }
 }

@@ -152,6 +152,9 @@
   --ae-screen-max: 1180px;
   --ae-screen-max-narrow: 780px;
   --ae-tooltip-max: 260px;
+  /* Vertical space the bottom-right minimap occupies, so anything else anchored
+     to that corner can stay clear of it. */
+  --ae-minimap-clearance: 232px;
 
   /* ======================= LAYERS =======================
      Every fixed/absolute element in the UI picks its z-index from this list.

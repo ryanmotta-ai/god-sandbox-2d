@@ -3171,284 +3171,6 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
 .toast-icon { font-size: 0.9375rem; flex: 0 0 auto; }
 .toast-text { line-height: 1.4; }
 
-/* ============================ 21. FLOATING STRATEGIC DOCK & TIME COCKPIT ============================ */
-
-.time-cockpit-dock {
-  position: fixed;
-  bottom: 18px;
-  left: 18px;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 16px;
-  background: var(--ae-panel-veil);
-  border: 1px solid rgba(201, 161, 83, 0.3);
-  border-radius: var(--r-lg);
-  box-shadow: 0 0 35px rgba(0, 0, 0, 0.8);
-}
-
-.cockpit-clock-display {
-  font-size: 0.875rem;
-  font-weight: 800;
-  color: var(--gold);
-  text-align: center;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(201, 161, 83, 0.2);
-  border-radius: 6px;
-  padding: 6px 10px;
-  letter-spacing: -0.2px;
-}
-
-.cockpit-controls-row {
-  display: flex;
-  gap: 4px;
-}
-
-.cockpit-speed-btn {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 10px;
-  color: var(--text-dim);
-  font-weight: 700;
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.cockpit-speed-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
-.cockpit-speed-btn.active {
-  background: rgba(201, 161, 83, 0.25);
-  border-color: var(--gold);
-  color: #fff;
-  box-shadow: var(--ae-edge-accent);
-}
-
-.cockpit-actions-row {
-  display: flex;
-  gap: 6px;
-}
-
-.cockpit-action-btn {
-  flex: 1;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 8px;
-  color: var(--text);
-  font-weight: 700;
-  font-size: 0.6875rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.cockpit-action-btn:hover { background: rgba(59, 130, 246, 0.2); border-color: #6f8fa8; }
-.cockpit-action-btn.era-btn:hover { background: rgba(16, 185, 129, 0.2); border-color: #7ba05b; }
-
-.strategic-floating-dock {
-  position: fixed;
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: var(--ae-panel-veil);
-  border: 1px solid rgba(201, 161, 83, 0.35);
-  border-radius: 99px;
-  box-shadow: 0 0 40px rgba(0, 0, 0, 0.85);
-}
-
-.floating-dock-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 99px;
-  padding: 8px 14px;
-  color: var(--text);
-  font-weight: 700;
-  font-size: 0.8125rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-.floating-dock-btn:hover {
-  background: rgba(201, 161, 83, 0.2);
-  border-color: var(--gold);
-  color: #ffffff;
-  transform: translateY(-3px);
-  box-shadow: var(--ae-shadow-md);
-}
-
-.dock-btn-icon { font-size: 1.1rem; }
-.dock-btn-label { font-size: 0.8125rem; font-weight: 700; }
-.dock-btn-key {
-  font-family: var(--font-pixel);
-  font-size: 0.5625rem;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  padding: 1px 5px;
-  border-radius: 4px;
-  color: var(--text-dim);
-}
-
-/* ============================ 22. GAME AWARDS TOPBAR ============================ */
-
-.topbar-gameawards {
-  position: fixed;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(1350px, 96vw);
-  z-index: 110;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 18px;
-  background: rgba(10, 15, 26, 0.86);
-  border: 1px solid rgba(201, 161, 83, 0.35);
-  border-radius: 99px;
-  box-shadow: 0 4px 35px rgba(0, 0, 0, 0.85);
-}
-
-.topbar-hero-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.brand-hero {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.brand-mark-gold {
-  font-size: 1.4rem;
-  color: var(--gold);
-  text-shadow: 0 0 12px rgba(201, 161, 83, 0.8);
-  animation: pulse 3s infinite alternate;
-}
-
-.brand-text-hero {
-  display: flex;
-  flex-direction: column;
-}
-
-.brand-name-gold {
-  background: linear-gradient(135deg, #fffbeb 0%, #c9a153 50%, #8a6a2f 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 900;
-  font-size: 1rem;
-  letter-spacing: 1.5px;
-  line-height: 1;
-}
-
-.brand-tag-sub {
-  font-size: 0.5rem;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: var(--text-dim);
-}
-
-.god-powers-trigger-hero {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: linear-gradient(135deg, rgba(201, 161, 83, 0.22), rgba(168, 85, 247, 0.22));
-  border: 1px solid var(--gold);
-  border-radius: 99px;
-  padding: 6px 14px;
-  color: var(--gold);
-  font-weight: 800;
-  font-size: 0.8125rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: var(--ae-edge-accent);
-}
-.god-powers-trigger-hero:hover {
-  background: linear-gradient(135deg, rgba(201, 161, 83, 0.4), rgba(168, 85, 247, 0.4));
-  transform: scale(1.04);
-  box-shadow: var(--ae-edge-accent);
-}
-
-.btn-icon-pulse { font-size: 1rem; animation: pulse 2s infinite; }
-
-.topbar-hero-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.era-chip-hero {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(201, 161, 83, 0.3);
-  border-radius: 99px;
-  padding: 6px 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.era-chip-hero:hover {
-  background: rgba(201, 161, 83, 0.15);
-  border-color: var(--gold);
-  transform: scale(1.03);
-}
-
-.era-icon-hero { font-size: 1.1rem; }
-.era-name-hero { font-weight: 800; font-size: 0.8125rem; color: var(--gold); }
-
-.topbar-hero-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.stat-pills-hero {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.stat-card-hero {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 4px 10px;
-}
-.stat-card-hero.alert {
-  border-color: #b8453c;
-  background: rgba(239, 68, 68, 0.15);
-}
-
-.card-icon-hero { font-size: 0.9375rem; }
-.card-text-hero { display: flex; align-items: baseline; gap: 4px; }
-.pill-val-hero { font-weight: 800; font-size: 0.8125rem; color: #fff; }
-.card-lbl-hero { font-size: 0.6875rem; color: var(--text-dim); }
-
-.topbar-icon-btn {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.topbar-icon-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
-
 /* ============================ FINANCIAL CONSOLE & STOCK MARKET ============================ */
 .econ-tab-bar {
   display: flex;
@@ -3628,24 +3350,20 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
 }
 
 /* ==========================================================================
-   UI-0 MIGRATION BRIDGE
+   UI-0/UI-1 MIGRATION BRIDGE
 
-   The legacy slots above were written to hold a text glyph — sized with
-   `font-size`, positioned on the text baseline. They now hold a 16px pixel-art
-   `<img>`, so each needs to become a centred box instead.
+   Legacy icon slots were written to hold a text glyph — sized with `font-size`,
+   positioned on the text baseline. They now hold a 16px pixel-art `<img>`, so
+   each has to become a centred box instead.
 
    These rules live at the end of the file on purpose: `components.css` is
-   `@import`ed, which CSS hoists to the top, so the bridge has to sit here to
-   win against the legacy declarations it is correcting. The section disappears
-   as each screen is migrated to the `ae-` kit.
+   `@import`ed, which CSS hoists to the top, so the bridge has to sit here to win
+   against the legacy declarations it corrects. It shrinks as screens migrate to
+   the `ae-` kit — UI-1 already removed the entries for the old top bar, time
+   cockpit and strategic dock along with the markup that used them.
    ========================================================================== */
 
-/* Any icon slot that used to be a glyph. */
-.era-icon-hero,
-.brand-mark-gold,
-.card-icon-hero,
-.dock-btn-icon,
-.btn-icon-pulse,
+/* Icon slots that used to be a glyph. */
 .empty-icon,
 .btn .btn-icon-pixel {
   display: block;
@@ -3653,11 +3371,6 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
   image-rendering: pixelated;
   font-size: 0;
 }
-.era-icon-hero,
-.brand-mark-gold,
-.card-icon-hero,
-.dock-btn-icon,
-.btn-icon-pulse { width: 16px; height: 16px; }
 .btn .btn-icon-pixel { width: 16px; height: 16px; }
 .btn-menu .btn-icon-pixel { width: 32px; height: 32px; }
 
@@ -3673,59 +3386,33 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
 
 /* Buttons that became icon-only need to centre their contents as a box. */
 .icon-close,
-.topbar-icon-btn,
-.cockpit-speed-btn,
-.cockpit-action-btn,
-.floating-dock-btn {
+.god-panel-close-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
 }
-.cockpit-action-btn { gap: 5px; }
-.floating-dock-btn { flex-direction: column; gap: 3px; }
 .icon-close img,
-.topbar-icon-btn img,
-.cockpit-speed-btn img { image-rendering: pixelated; }
+.god-panel-close-btn img { image-rendering: pixelated; }
 
-/* The docks are stone slabs laid over the map, not frosted glass. The blur and
-   the gold halo are gone; what is left is a border and an honest shadow. */
-.time-cockpit-dock,
-.strategic-floating-dock {
-  background: var(--ae-panel-veil);
-  border: 1px solid var(--ae-border-strong);
-  border-radius: var(--ae-radius-3);
-  box-shadow: var(--ae-shadow-md);
+/* The powers palette is the one pre-UI-1 HUD surface still in use. Its category
+   tabs and power buttons now carry sprites rather than glyphs. */
+.dock-tab .tab-icon,
+.power .power-icon,
+.god-panel-title img {
+  image-rendering: pixelated;
+  font-size: 0;
+  flex: 0 0 auto;
 }
-/* A pill-shaped dock reads as a web app toolbar. Square it off. */
-.strategic-floating-dock { border-radius: var(--ae-radius-3); }
 
 /* The inspector drawer flexes between a floor and a ceiling rather than pinning
-   340px, so it holds together from a laptop to an ultrawide. */
+   340px, so it holds together from a laptop to an ultrawide. UI-2 replaces it. */
 .drawer {
   width: var(--ae-side-w);
   background: var(--ae-panel-veil);
   border-radius: var(--ae-radius-3);
 }
 
-/* Native tooltips are suppressed wherever a real one is attached, so the two
-   can never both appear. */
+/* Native tooltips are suppressed wherever a real one is attached, so the two can
+   never both appear. */
 [data-ae-tip] { -webkit-touch-callout: none; }
-
-/* Pill-shaped controls read as a web app. Aethoria's chrome is cut stone, so the
-   HUD's radii come down to the token scale. Part of the same bridge as above. */
-.floating-dock-btn,
-.god-powers-trigger-hero,
-.era-chip-hero,
-.cockpit-speed-btn,
-.cockpit-action-btn,
-.stat-card-hero,
-.topbar-icon-btn {
-  border-radius: var(--ae-radius-2);
-}
-
-/* Hover feedback on the cockpit inherited a blue and a green from the old
-   palette, which were the only cool colours left in the HUD. */
-.cockpit-action-btn:hover { background: var(--ae-accent-fill); border-color: var(--ae-accent-line); }
-.cockpit-action-btn.era-btn:hover { background: var(--ae-positive-fill); border-color: var(--ae-positive-line); }
-.cockpit-speed-btn:hover { background: rgba(214, 197, 168, 0.1); color: var(--ae-text); }

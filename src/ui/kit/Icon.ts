@@ -172,6 +172,18 @@ const EMOJI_ALIASES: Record<string, string> = {
   '⚠️': 'warning', '⛔': 'warning', '🔍': 'search', '🖱': 'gear', '🖥': 'gear',
   '🎨': 'feather', '🎵': 'feather', '🔊': 'feather', '🔇': 'feather',
   '🔄': 'route', '🎥': 'gem', '📍': 'city', '🏅': 'crown', '🧠': 'book',
+
+  // The divine-powers palette. These are the last glyph-authored icons in the
+  // interface; sharing sprites here is deliberate — the power's own label
+  // distinguishes "raise" from "lower", and a lozenge next to a label reads as a
+  // missing asset in a way a reused pickaxe does not. Dedicated power artwork is
+  // a later-phase job.
+  '⛰️': 'pickaxe', '🏔️': 'pickaxe', '🕳️': 'pickaxe', '⚪': 'pickaxe',
+  '🌋': 'fire', '☄️': 'fire', '🔴': 'fire', '🧊': 'snow', '🌧️': 'world',
+  '🏜️': 'sun', '☘️': 'leaf', '🟢': 'leaf',
+  '🐊': 'dragon', '🐗': 'lion', '🦣': 'lion',
+  '☣️': 'warning', '💪': 'shield', '👁️': 'gem', '🔮': 'gem',
+  '🛣️': 'route', '🧹': 'close',
   '↩': 'menu', '⬆': 'chart', '⬇': 'chart', '⬜': 'crate', '➖': 'menu',
   '🟡': 'coin', '🟤': 'crate', '🔺': 'chart', '🔻': 'chart', '🚧': 'warning',
   '☭': 'hammer_sickle'

@@ -49,6 +49,10 @@ import { EcosystemScreen } from './ui/screens/EcosystemScreen';
 import { TechTreeScreen } from './ui/screens/TechTreeScreen';
 import { InfrastructureScreen } from './ui/screens/InfrastructureScreen';
 import { UIKitScreen } from './ui/screens/UIKitScreen';
+import { SelectionManager } from './ui/hud/Selection';
+import { WorldSnapshotProvider } from './ui/core/WorldSnapshot';
+import { alerts } from './ui/core/Alerts';
+import { objectNav } from './ui/kit';
 
 type AppState = 'menu' | 'loading' | 'playing';
 
@@ -84,7 +88,11 @@ class AethoriaGame implements GameContext {
   public overlays = new OverlayManager();
   public stats = new StatsTracker();
   public screens: ScreenManager;
+  public selection = new SelectionManager();
   public worldConfig: WorldConfig = { ...DEFAULT_WORLD_CONFIG };
+
+  /** Cached world aggregates the HUD reads instead of walking the simulation. */
+  private snapshots = new WorldSnapshotProvider();
 
   // ---- UI ----
   private toasts: ToastManager;
@@ -134,6 +142,7 @@ class AethoriaGame implements GameContext {
 
     this.setupInput();
     this.setupSimulationEvents();
+    this.registerObjectNavigation();
     this.applySettings();
 
     this.screens.replace('main-menu');
@@ -193,6 +202,13 @@ class AethoriaGame implements GameContext {
     this.eras.setEra(config.era);
     this.stats.reset();
     this.renderer.setDiplomacy(this.sim.diplomacy);
+
+    // Every UI-1 surface that holds world state is re-pointed here, in one place,
+    // so a new world cannot leave one of them showing the previous one.
+    this.selection.attach(this.sim, this.tileMap);
+    this.snapshots.reset();
+    this.renderer.setSelection(null);
+    alerts.attach(this.sim);
 
     this.camera.centerOn(config.size / 2, config.size / 2, 1);
     this.lastYearSeen = 1;
@@ -406,6 +422,9 @@ class AethoriaGame implements GameContext {
     this.screens.closeAll();
     this.setSpeed(settings.get('defaultSpeed'));
     this.hadCivilisation = this.countCivilised() > 0;
+    // News is only accepted once there is a player watching. The menu backdrop is
+    // a live world too, and its wars are not this game's business.
+    alerts.setEnabled(true);
     this.toast(`Year ${this.sim.currentYear} · ${this.eras.getCurrentEra()}`, 'success');
   }
 
@@ -413,6 +432,8 @@ class AethoriaGame implements GameContext {
     this.state = 'menu';
     this.simSpeed = 0;
     this.hud.inspector.hide();
+    this.selection.clear();
+    alerts.setEnabled(false);
     this.toasts.clear();
     this.buildWorld({ ...DEFAULT_WORLD_CONFIG, seed: Math.floor(Math.random() * 2147483647) }, false);
     this.screens.replace('main-menu');
@@ -446,6 +467,44 @@ class AethoriaGame implements GameContext {
     this.toasts.show(message, type);
   }
 
+  public get snapshot() {
+    return this.snapshots.current;
+  }
+
+  public refreshSnapshot(now: number) {
+    return this.snapshots.refresh(this.sim, now);
+  }
+
+  /**
+   * Teaches object links how to open each kind of thing.
+   *
+   * UI-0 built the registry and deliberately left it empty; this is where it gets
+   * filled in. Registered once at startup rather than per world, because the
+   * handlers close over `this` and read the live `sim` through it.
+   */
+  private registerObjectNavigation(): void {
+    objectNav.registerOpener('city', ref => {
+      const city = this.sim.cities.get(ref.id);
+      if (!city) return;
+      this.selection.select({ kind: 'city', id: ref.id });
+      this.focusOn(city.x, city.y);
+    });
+
+    objectNav.registerOpener('kingdom', ref => {
+      this.selection.select({ kind: 'kingdom', id: ref.id });
+      const kingdom = this.sim.kingdoms.get(ref.id);
+      const capital = kingdom ? this.sim.cities.get(kingdom.capitalCityId) : undefined;
+      if (capital) this.focusOn(capital.x, capital.y);
+    });
+
+    objectNav.registerOpener('citizen', ref => {
+      const entity = this.sim.entities.find(e => e.id === ref.id);
+      if (!entity) return;
+      this.selection.select({ kind: 'citizen', id: ref.id });
+      this.focusOn(entity.x, entity.y);
+    });
+  }
+
   public applySettings(): void {
     const s = settings.values;
 
@@ -468,68 +527,49 @@ class AethoriaGame implements GameContext {
 
   // ============================ SIMULATION EVENTS ============================
 
+  /**
+   * The non-visual consequences of world events: sound, screen shake, chronicle.
+   *
+   * The *text* of these events used to be toasted from here as well. It is not
+   * any more — every one of them now reaches the player through the alert centre
+   * or the event feed, and emitting both meant a war declaration appeared twice,
+   * once as a transient toast and once as a clickable alert. Toasts are reserved
+   * for feedback on something the player themselves just did.
+   *
+   * What stays here is what the alert system has no business doing: an alert
+   * cannot shake the camera, and the Chronicle is the simulation's record rather
+   * than the HUD's.
+   */
   private setupSimulationEvents(): void {
-    events.on('warStarted', (d: any) => {
+    events.on('warStarted', () => {
       if (!this.inGame) return;
-      const k1 = this.sim.kingdoms.get(d.k1);
-      const k2 = this.sim.kingdoms.get(d.k2);
-      this.toast(`${k1?.name ?? 'A realm'} declares war on ${k2?.name ?? 'another realm'}`, 'war');
       sound.playThunder();
-    });
-
-    events.on('siegeBegan', (d: any) => {
-      if (!this.inGame) return;
-      this.toast(`${d.besieger.name} besieges ${d.city.name}`, 'war');
     });
 
     events.on('cityCaptured', (d: any) => {
       if (!this.inGame) return;
-      this.toast(
-        d.wasCapital
-          ? `${d.to.name} storms the capital of ${d.from.name}!`
-          : `${d.to.name} captured ${d.city.name}`,
-        'war'
-      );
       sound.playExplosion();
       // Shake the world when a capital falls.
       if (d.wasCapital) this.camera.triggerShake(10, 0.5);
-    });
-
-    events.on('cityCeded', (d: any) => {
-      if (!this.inGame) return;
-      this.toast(`${d.from.name} cedes ${d.city.name} to ${d.to.name}`, 'kingdom');
     });
 
     events.on('warEnded', (d: any) => {
       if (!this.inGame) return;
       const k1 = this.sim.kingdoms.get(d.k1);
       const k2 = this.sim.kingdoms.get(d.k2);
-      this.toast(`Peace between ${k1?.name ?? 'a realm'} and ${k2?.name ?? 'another'}`, 'success');
       chronicle.log(this.sim.currentYear, 'peace', `${k1?.name ?? 'A realm'} and ${k2?.name ?? 'another realm'} signed a peace treaty.`);
-    });
-
-    events.on('allianceFormed', (d: any) => {
-      if (!this.inGame) return;
-      this.toast(`An alliance is forged: ${d.alliance?.name ?? 'a new pact'}`, 'kingdom');
     });
 
     events.on('eraChanged', (era: WorldEra) => {
       if (!this.inGame) return;
-      this.toast(`A new era begins: ${era}`, 'divine');
       chronicle.log(this.sim.currentYear, 'kingdom', `The world enters the ${era}.`);
     });
 
-    events.on('greatBridgeOpened', (d: any) => {
+    events.on('greatBridgeOpened', () => {
       if (!this.inGame) return;
-      // A celebration, not an emergency: no shake, and the camera stays where
-      // the player put it. `playMagic` is the closest thing to a fanfare.
-      this.toast(`${d.city.name} opens ${d.name} — ${d.span} spans of open water`, 'divine');
+      // A celebration, not an emergency: no shake, and the camera stays where the
+      // player put it. `playMagic` is the closest thing to a fanfare.
       sound.playMagic();
-    });
-
-    events.on('techUnlocked', (d: any) => {
-      if (!this.inGame) return;
-      this.toast(`${d.culture} discovers ${String(d.perk).replace('_', ' ')}`, 'success');
     });
   }
 
@@ -588,14 +628,18 @@ class AethoriaGame implements GameContext {
     const target = e.target as HTMLElement | null;
     if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
 
-    // ESC is routed to the screen stack first.
+    /**
+     * ESC unwinds one thing at a time, smallest first.
+     *
+     * Screens have first claim, then the HUD's own chain (open menu → powers
+     * palette → armed tool → inspector → selection), and only when there is
+     * nothing left to dismiss does it open the pause menu. Pressing ESC should
+     * never skip past something the player can see and go straight to a menu.
+     */
     if (e.key === 'Escape') {
       e.preventDefault();
       if (this.screens.handleEscape()) return;
-      if (this.hud.inspector.isOpen) {
-        this.hud.inspector.hide();
-        return;
-      }
+      if (this.inGame && this.hud.handleEscape()) return;
       if (this.inGame) this.screens.open('pause');
       return;
     }
@@ -618,8 +662,10 @@ class AethoriaGame implements GameContext {
       case ' ':
         e.preventDefault();
         this.togglePause();
-        this.toast(this.simSpeed === 0 ? 'Simulation paused' : 'Simulation resumed', 'info');
+        // No toast: the top bar's speed control already shows the state, and a
+        // notification for something the player just did themselves is noise.
         return;
+      // The number keys mirror the five buttons in the top bar, in order.
       case '1': this.setSpeed(1); return;
       case '2': this.setSpeed(2); return;
       case '3': this.setSpeed(5); return;
@@ -634,10 +680,18 @@ class AethoriaGame implements GameContext {
       case 'g': this.screens.open('stats'); return;
       case 'b': this.screens.open('bestiary'); return;
       case 'n': this.screens.open('infrastructure'); return;
+      // The old dock drew key caps for P, E, W and T on its buttons, but nothing
+      // ever bound them — the hints were decoration. UI-1 shows shortcuts in
+      // tooltips, and a tooltip that names a key that does nothing is worse than
+      // no tooltip, so these are now real.
+      case 'p': this.screens.open('politics'); return;
+      case 'e': this.screens.open('economy'); return;
+      case 'w': this.screens.open('warfare'); return;
+      case 't': this.screens.open('techtree'); return;
       case 'm':
         this.hud.minimap.toggle();
         return;
-      case 'i': this.hud.inspector.toggle(); return;
+      case 'i': this.hud.openInspectorForSelection(); return;
       case 'home':
         this.focusOn(this.tileMap.width / 2, this.tileMap.height / 2, 1);
         return;
@@ -657,8 +711,10 @@ class AethoriaGame implements GameContext {
     const tx = Math.floor(world.x);
     const ty = Math.floor(world.y);
 
-    if (this.brush.activePowerId === 'inspect_select') {
-      this.inspectAt(tx, ty);
+    if (this.brush.isInspecting) {
+      // Selecting, not inspecting. The selection card answers most clicks on its
+      // own; the drawer only opens if the player asks for it.
+      this.selection.selectAt(tx, ty);
       return;
     }
 
@@ -674,31 +730,6 @@ class AethoriaGame implements GameContext {
       this.particles,
       this.camera
     );
-  }
-
-  /** Inspection priority: creature > city > tile. */
-  private inspectAt(tx: number, ty: number): void {
-    const hits = this.sim.spatialHash.queryRadius(tx, ty, 2);
-    if (hits.length > 0) {
-      this.hud.inspector.inspectEntity(hits[0]);
-      return;
-    }
-
-    const tile = this.tileMap.getTile(tx, ty);
-    if (tile?.cityId && this.sim.cities.has(tile.cityId)) {
-      this.hud.inspector.inspectCity(this.sim.cities.get(tile.cityId)!);
-      return;
-    }
-
-    // Fall back to the nearest city whose territory covers this tile.
-    for (const city of this.sim.cities.values()) {
-      if (city.territory.has(`${tx},${ty}`)) {
-        this.hud.inspector.inspectCity(city);
-        return;
-      }
-    }
-
-    if (tile) this.hud.inspector.inspectTile(tile);
   }
 
   private handleResize(): void {
@@ -750,6 +781,12 @@ class AethoriaGame implements GameContext {
     }
     this.screens.tick();
 
+    // The selection ring is set from the cached mark, so this costs a field read
+    // rather than a resolve. See `SelectionManager.mark`.
+    this.renderer.setSelection(this.state === 'playing' ? this.selection.mark() : null);
+
+    const showBrush = this.state === 'playing' && !this.screens.isOpen() && !this.brush.isInspecting;
+
     this.renderer.render(
       this.camera,
       this.tileMap,
@@ -759,8 +796,12 @@ class AethoriaGame implements GameContext {
       this.particles,
       this.overlays.activeMode,
       this.eras.getCurrentEra(),
-      this.state === 'playing' && !this.screens.isOpen() ? this.hoverWorldPos?.x ?? null : null,
-      this.state === 'playing' && !this.screens.isOpen() ? this.hoverWorldPos?.y ?? null : null,
+      // The brush cursor is a radius of effect, so it is only drawn when a power
+      // is actually armed. Showing it in inspection mode implied a brush size
+      // that does not apply, and put a dashed ring next to the selection ring
+      // where the two could be mistaken for each other.
+      showBrush ? this.hoverWorldPos?.x ?? null : null,
+      showBrush ? this.hoverWorldPos?.y ?? null : null,
       this.brush.brushSize,
       this.sim.naval.activeShips.values(),
       this.sim.caravans.activeCaravans.values(),
@@ -888,4 +929,7 @@ const game = new AethoriaGame();
 // the console. Stripped from production builds by the bundler.
 if (import.meta.env.DEV) {
   (window as any).aethoria = game;
+  // The event bus, so the alert layer can be driven with real payloads without
+  // waiting years of simulated time for a war to break out on its own.
+  (window as any).aethoriaEvents = events;
 }

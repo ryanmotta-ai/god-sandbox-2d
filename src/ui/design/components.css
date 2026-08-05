@@ -959,3 +959,572 @@
   color: var(--ae-text-secondary);
   max-width: 78ch;
 }
+
+/* ==========================================================================
+   UI-1 — THE IN-GAME HUD
+
+   Everything below is furniture over a live map, which changes the rules from
+   the screen components above: nothing is opaque enough to feel like a wall,
+   nothing spans an edge it does not have to, and every surface states its own
+   z-index from the token scale rather than inheriting a stacking accident.
+   ========================================================================== */
+
+/* Root: the HUD is a transparent overlay. Only its children take pointer events,
+   so the map underneath stays clickable everywhere they are not. */
+.hud {
+  position: absolute;
+  inset: 0;
+  z-index: var(--ae-z-hud);
+  pointer-events: none;
+  font-family: var(--ae-font);
+  font-size: calc(1rem * var(--ui-scale));
+}
+.hud > * { pointer-events: auto; }
+.hud.ui-hidden > * { display: none !important; }
+
+/* ============================ TOP BAR ============================
+   The only permanently visible bar. Centred and shrink-to-fit rather than
+   full-width: a bar spanning the viewport reads as a wall between the player and
+   the world even when most of it is empty. */
+.ae-topbar {
+  position: absolute;
+  top: var(--ae-space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: stretch;
+  gap: var(--ae-space-2);
+  max-width: calc(100vw - var(--ae-space-8));
+  padding: var(--ae-space-2);
+  background: var(--ae-panel-veil);
+  border: 1px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-3);
+  box-shadow: var(--ae-shadow-md);
+}
+
+/* Paused is a state of the world, so it is marked on the bar as a whole rather
+   than only on the button that caused it. */
+.ae-topbar-paused { border-color: var(--ae-accent-line); }
+
+/* Time */
+.ae-topbar-time {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  padding: 0 var(--ae-space-4);
+  min-width: 0;
+}
+.ae-topbar-time-icon { opacity: 0.6; }
+.ae-topbar-time-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.ae-topbar-date {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ae-topbar-clock {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Speed */
+.ae-speed {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-1);
+  padding: 0 var(--ae-space-2);
+  border-left: 1px solid var(--ae-border-inset);
+  border-right: 1px solid var(--ae-border-inset);
+}
+.ae-speed-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: var(--ae-control-h);
+  padding: 0 var(--ae-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--ae-fast), color var(--ae-fast);
+}
+.ae-speed-btn:hover { background: rgba(214, 197, 168, 0.07); color: var(--ae-text); }
+.ae-speed-active,
+.ae-speed-active:hover {
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+  color: var(--ae-accent-bright);
+}
+.ae-speed-label { line-height: 1; }
+
+/* World status */
+.ae-world-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  padding: 0 var(--ae-space-2);
+}
+.ae-world-stat {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  height: var(--ae-control-h);
+  padding: 0 var(--ae-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-2);
+}
+.ae-world-stat-icon { opacity: 0.65; }
+.ae-world-stat-value {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+}
+/* A non-zero war count is the one status that changes colour. Everything else
+   is a number the player reads; this is a number that means something. */
+.ae-world-stat-alarm {
+  background: var(--ae-critical-fill);
+  border-color: var(--ae-critical-line);
+}
+.ae-world-stat-alarm .ae-world-stat-value { color: var(--ae-critical); }
+.ae-world-stat-warn { background: var(--ae-warning-fill); border-color: var(--ae-warning-line); }
+.ae-world-stat-warn .ae-world-stat-value { color: var(--ae-warning); }
+
+/* Trailing controls */
+.ae-topbar-trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  padding-left: var(--ae-space-2);
+  border-left: 1px solid var(--ae-border-inset);
+}
+.ae-era-chip,
+.ae-topbar-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ae-control-h);
+  height: var(--ae-control-h);
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-era-chip { border-color: var(--ae-border); background: var(--ae-realm-fill); }
+.ae-era-chip:hover { border-color: var(--ae-realm); }
+.ae-topbar-menu:hover { background: rgba(214, 197, 168, 0.07); border-color: var(--ae-border); }
+
+/* ============================ TOOL DOCK ============================
+   Bottom-left, four groups, no permanent labels beyond the group names. Replaces
+   a ten-button strip that ran across the bottom of the world. */
+.ae-tool-dock {
+  position: absolute;
+  bottom: var(--ae-space-4);
+  left: var(--ae-space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ae-space-3);
+  z-index: var(--ae-z-dock);
+}
+.ae-dock-row {
+  display: flex;
+  gap: var(--ae-space-1);
+  padding: var(--ae-space-2);
+  background: var(--ae-panel-veil);
+  border: 1px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-3);
+  box-shadow: var(--ae-shadow-md);
+}
+.ae-dock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  height: var(--ae-control-h);
+  padding: 0 var(--ae-space-4);
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--ae-fast), color var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-dock-btn:hover { background: rgba(214, 197, 168, 0.07); color: var(--ae-text); }
+.ae-dock-btn-open,
+.ae-dock-btn-open:hover {
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+  color: var(--ae-accent-bright);
+}
+.ae-dock-btn-powers { color: var(--ae-accent); }
+/* Powers stays lit while a tool is armed, so the dock itself shows the state. */
+.ae-dock-btn-active {
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+  color: var(--ae-accent-bright);
+}
+
+/* Group menus open upward: the dock sits at the bottom of the screen. */
+.ae-dock-menu {
+  position: absolute;
+  bottom: calc(var(--ae-control-h) + var(--ae-space-6));
+  left: 0;
+  min-width: 210px;
+  padding: var(--ae-space-2);
+  background: var(--ae-panel-raised);
+  border: 1px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-3);
+  box-shadow: var(--ae-shadow-lg);
+  animation: aeMenuIn 0.1s var(--ae-ease) both;
+}
+@keyframes aeMenuIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ae-dock-menu-head {
+  padding: var(--ae-space-2) var(--ae-space-3) var(--ae-space-3);
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-section);
+  color: var(--ae-text-muted);
+  border-bottom: 1px solid var(--ae-border-inset);
+  margin-bottom: var(--ae-space-2);
+}
+.ae-dock-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  width: 100%;
+  height: var(--ae-row-h);
+  padding: 0 var(--ae-space-3);
+  border: none;
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-secondary-size);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ae-fast);
+}
+.ae-dock-menu-item:hover { background: var(--ae-accent-fill); }
+.ae-dock-menu-item-active { color: var(--ae-accent-bright); box-shadow: inset 2px 0 0 var(--ae-accent); }
+.ae-dock-menu-label { flex: 1 1 auto; }
+.ae-dock-menu-key {
+  flex: 0 0 auto;
+  padding: 0 var(--ae-space-2);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-1);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text-muted);
+  font-family: var(--ae-font-pixel);
+  font-size: 0.5625rem;
+}
+
+/* Active tool. Present only while a power is armed — see ToolDock.syncActiveTool.
+   A permanent "nothing selected" badge is the chrome UI-1 is removing. */
+.ae-active-tool {
+  display: none;
+  align-items: center;
+  gap: var(--ae-space-3);
+  padding: var(--ae-space-2) var(--ae-space-4);
+  background: var(--ae-panel-veil);
+  border: 1px solid var(--ae-accent-line);
+  border-left: 2px solid var(--ae-accent);
+  border-radius: var(--ae-radius-2);
+  box-shadow: var(--ae-shadow-sm);
+  cursor: pointer;
+  font-family: var(--ae-font);
+  text-align: left;
+}
+.ae-tool-dock-armed .ae-active-tool { display: inline-flex; }
+.ae-active-tool-text { display: flex; flex-direction: column; line-height: 1.2; }
+.ae-active-tool-kicker {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: var(--ae-tracking-section);
+  color: var(--ae-text-muted);
+}
+.ae-active-tool-name {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-accent-bright);
+}
+
+/* ============================ SELECTION CARD ============================
+   Bottom-centre, above the dock's row. Capped at three facts by the component;
+   the width is capped here for the same reason. */
+.ae-selcard {
+  position: absolute;
+  bottom: var(--ae-space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(260px, 26vw, 340px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-5);
+  background: var(--ae-panel-veil);
+  border: 1px solid var(--ae-border-strong);
+  border-top: 2px solid var(--ae-realm);
+  border-radius: var(--ae-radius-3);
+  box-shadow: var(--ae-shadow-lg);
+  z-index: var(--ae-z-drawer);
+}
+.ae-selcard.hidden { display: none; }
+.ae-selcard-in { animation: aeCardIn 0.14s var(--ae-ease) both; }
+@keyframes aeCardIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.ae-selcard-head { display: flex; align-items: center; gap: var(--ae-space-4); min-width: 0; }
+.ae-selcard-icon { flex: 0 0 auto; }
+.ae-selcard-heading { min-width: 0; }
+.ae-selcard-name {
+  font-size: var(--ae-text-object-name);
+  font-weight: 700;
+  color: var(--ae-text);
+  letter-spacing: -0.2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-selcard-kind {
+  display: block;
+  font-size: var(--ae-text-meta);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-realm);
+}
+
+.ae-selcard-facts { display: flex; flex-direction: column; }
+.ae-selcard-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ae-space-4);
+  min-height: var(--ae-row-h-sm);
+  border-bottom: 1px solid var(--ae-border-inset);
+  font-size: var(--ae-text-secondary-size);
+}
+.ae-selcard-fact:last-child { border-bottom: none; }
+.ae-selcard-fact-label { color: var(--ae-text-secondary); }
+.ae-selcard-fact-value {
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ae-selcard-actions { display: flex; align-items: center; gap: var(--ae-space-3); }
+.ae-selcard-actions .ae-btn { flex: 1 1 auto; }
+.ae-selcard-actions .hidden { display: none; }
+.ae-selcard-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--ae-control-h);
+  height: var(--ae-control-h);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-selcard-icon-btn:hover { background: rgba(214, 197, 168, 0.07); border-color: var(--ae-border-strong); }
+
+/* ============================ ALERTS ============================
+   Top-right. Left-edge severity, clickable body, dismiss on the end. Capped at
+   four visible; the rest are counted, not stacked. */
+.ae-alerts {
+  position: absolute;
+  top: calc(var(--ae-control-h) + var(--ae-space-8));
+  right: var(--ae-space-4);
+  width: clamp(240px, 22vw, 300px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-3);
+  z-index: var(--ae-z-drawer);
+}
+.ae-alerts.hidden { display: none; }
+.ae-alert-list { display: flex; flex-direction: column; gap: var(--ae-space-3); }
+
+.ae-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  width: 100%;
+  padding: var(--ae-space-3) var(--ae-space-4);
+  background: var(--ae-panel-veil);
+  border: 1px solid var(--ae-border-strong);
+  border-left: 2px solid var(--ae-neutral);
+  border-radius: var(--ae-radius-2);
+  box-shadow: var(--ae-shadow-md);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+  animation: aeAlertIn 0.16s var(--ae-ease) both;
+}
+@keyframes aeAlertIn {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.ae-alert-info { border-left-color: var(--ae-neutral); }
+.ae-alert-warning { border-left-color: var(--ae-warning); }
+.ae-alert-critical { border-left-color: var(--ae-critical); }
+.ae-alert-live { cursor: pointer; transition: background var(--ae-fast), border-color var(--ae-fast); }
+.ae-alert-live:hover { background: var(--ae-panel-raised); border-color: var(--ae-accent-line); }
+
+.ae-alert-icon { opacity: 0.85; }
+.ae-alert-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.ae-alert-title {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-alert-desc {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-alert-count {
+  flex: 0 0 auto;
+  min-width: 18px;
+  padding: 0 var(--ae-space-2);
+  border-radius: var(--ae-radius-1);
+  background: rgba(214, 197, 168, 0.12);
+  color: var(--ae-text);
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.ae-alert-critical .ae-alert-count { background: var(--ae-critical-fill); color: var(--ae-critical); }
+.ae-alert-warning .ae-alert-count { background: var(--ae-warning-fill); color: var(--ae-warning); }
+
+.ae-alert-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  opacity: 0.4;
+  cursor: pointer;
+  transition: opacity var(--ae-fast), background var(--ae-fast);
+}
+.ae-alert-dismiss:hover { opacity: 1; background: rgba(214, 197, 168, 0.1); }
+
+.ae-alert-overflow {
+  align-self: flex-end;
+  padding: var(--ae-space-2) var(--ae-space-4);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-veil-soft);
+  color: var(--ae-text-muted);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ae-alert-overflow:hover { color: var(--ae-text); border-color: var(--ae-border-strong); }
+.ae-alert-overflow.hidden { display: none; }
+
+/* ============================ EVENT FEED ============================
+   Bottom-right, above the minimap. Deliberately faint: this is ambience, and
+   anything that needs attention is an alert instead. */
+.ae-events {
+  position: absolute;
+  /* Clears the minimap, which is bottom-right at a fixed 184px wide and roughly
+     232px tall including its header. Declared as a token so the two cannot drift
+     apart silently the next time either moves. */
+  bottom: calc(var(--ae-minimap-clearance) + var(--ae-space-5));
+  right: var(--ae-space-4);
+  width: clamp(220px, 20vw, 280px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-1);
+  z-index: var(--ae-z-hud);
+}
+.ae-events.hidden { display: none; }
+.ae-event {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  width: 100%;
+  padding: var(--ae-space-2) var(--ae-space-3);
+  border: none;
+  border-left: 1px solid var(--ae-border-strong);
+  background: linear-gradient(90deg, transparent, var(--ae-panel-veil-soft));
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  text-align: left;
+  animation: aeEventIn 0.2s var(--ae-ease) both;
+}
+@keyframes aeEventIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+/* Older lines recede rather than being removed early, so the feed reads as a
+   fading trail instead of a list that jumps. */
+.ae-event:nth-child(4) { opacity: 0.7; }
+.ae-event:nth-child(5) { opacity: 0.45; }
+.ae-event:nth-child(n + 6) { opacity: 0.28; }
+.ae-event-icon { opacity: 0.6; }
+.ae-event-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-event-year {
+  flex: 0 0 auto;
+  color: var(--ae-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ae-event-live { cursor: pointer; transition: color var(--ae-fast), background var(--ae-fast); }
+.ae-event-live:hover { color: var(--ae-text); border-left-color: var(--ae-accent); }
+
+/* ============================ HUD RESPONSIVE ============================ */
+@media (max-width: 1180px) {
+  /* Group labels go first: the icons plus tooltips still identify them, and the
+     map gets the width back. */
+  .ae-dock-btn-label { display: none; }
+  .ae-dock-btn { padding: 0 var(--ae-space-3); }
+}
+@media (max-width: 900px) {
+  /* Population is the least actionable of the four readings, so it is the first
+     to go when the bar can no longer hold everything. */
+  .ae-world-stat-population { display: none; }
+  .ae-topbar-clock { display: none; }
+  .ae-alerts, .ae-events { width: clamp(200px, 40vw, 260px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ae-dock-menu, .ae-selcard-in, .ae-alert, .ae-event { animation: none; }
+}
