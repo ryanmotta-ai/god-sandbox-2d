@@ -47,6 +47,8 @@ export interface InspectorHost {
   openChronicle(): void;
   openEconomy(good?: GoodId, cityId?: string): void;
   openKingdoms(kingdomId?: string): void;
+  /** Opens the full realm dossier. */
+  openRealmDossier(kingdomId: string): void;
   /** Opens the full city dossier, optionally landing on one condition. */
   openCityDossier(cityId: string, highlightCondition?: string): void;
 }
@@ -303,6 +305,10 @@ export class Inspector implements InspectorHost {
     this.ctx.screens.open('kingdoms', { focusKingdom: kingdomId });
   }
 
+  public openRealmDossier(kingdomId: string): void {
+    this.ctx.screens.open('realm', { focusKingdom: kingdomId });
+  }
+
   public openCityDossier(cityId: string, highlightCondition?: string): void {
     this.ctx.screens.open('city', { cityId, highlightCondition });
   }
@@ -315,7 +321,7 @@ export class Inspector implements InspectorHost {
    * after UI-1's so these win — `registerOpener` replaces by kind.
    */
   public registerLinkNavigation(): void {
-    const goTo = (kind: 'citizen' | 'city' | 'kingdom') => (ref: { id: string }) => {
+    const goTo = (kind: 'citizen' | 'city') => (ref: { id: string }) => {
       switch (kind) {
         case 'citizen': {
           const entity = this.ctx.sim.entities.find(e => e.id === ref.id);
@@ -331,20 +337,16 @@ export class Inspector implements InspectorHost {
           this.ctx.focusOn(city.x, city.y);
           break;
         }
-        case 'kingdom': {
-          this.ctx.selection.select({ kind: 'kingdom', id: ref.id });
-          const kingdom = this.ctx.sim.kingdoms.get(ref.id);
-          const capital = kingdom ? this.ctx.sim.cities.get(kingdom.capitalCityId) : undefined;
-          if (capital) this.ctx.focusOn(capital.x, capital.y);
-          break;
-        }
       }
       this.show();
     };
 
     objectNav.registerOpener('citizen', goTo('citizen'));
     objectNav.registerOpener('city', goTo('city'));
-    objectNav.registerOpener('kingdom', goTo('kingdom'));
+    // `kingdom` is deliberately *not* re-registered here. UI-4 owns it: a realm
+    // reference opens the realm dossier, which is a better answer to "who are
+    // they?" than the compact preview this panel can offer. The opener registered
+    // in `main.ts` stands.
 
     // Buildings become navigable for the first time here: UI-1 could select them
     // from the map but had nothing to open, so no opener was registered.

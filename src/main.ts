@@ -50,6 +50,7 @@ import { TechTreeScreen } from './ui/screens/TechTreeScreen';
 import { InfrastructureScreen } from './ui/screens/InfrastructureScreen';
 import { UIKitScreen } from './ui/screens/UIKitScreen';
 import { CityScreen } from './ui/screens/CityScreen';
+import { RealmScreen } from './ui/screens/RealmScreen';
 import { SelectionManager } from './ui/hud/Selection';
 import { WorldSnapshotProvider } from './ui/core/WorldSnapshot';
 import { alerts } from './ui/core/Alerts';
@@ -185,6 +186,7 @@ class AethoriaGame implements GameContext {
     this.screens.register(new TechTreeScreen());
     this.screens.register(new InfrastructureScreen());
     this.screens.register(new CityScreen());
+    this.screens.register(new RealmScreen());
     // Development gallery for the UI kit. Not on any navigation path — opened
     // from the debug panel.
     this.screens.register(new UIKitScreen());
@@ -497,11 +499,13 @@ class AethoriaGame implements GameContext {
       this.focusOn(city.x, city.y);
     });
 
+    // A realm reference opens the UI-4 dossier. Before it existed the best a
+    // kingdom link could do was move the camera to the capital, which answered a
+    // different question than the one the player asked by clicking a realm's name.
     objectNav.registerOpener('kingdom', ref => {
+      if (!this.sim.kingdoms.has(ref.id)) return;
       this.selection.select({ kind: 'kingdom', id: ref.id });
-      const kingdom = this.sim.kingdoms.get(ref.id);
-      const capital = kingdom ? this.sim.cities.get(kingdom.capitalCityId) : undefined;
-      if (capital) this.focusOn(capital.x, capital.y);
+      this.screens.open('realm', { focusKingdom: ref.id });
     });
 
     objectNav.registerOpener('citizen', ref => {

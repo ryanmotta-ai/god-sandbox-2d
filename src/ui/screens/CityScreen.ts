@@ -200,9 +200,12 @@ export class CityScreen implements Screen, CityScreenHost {
       }),
 
       metrics.kingdom
-        ? button('Reino', () => this.ctx.screens.open('kingdoms', { focusKingdom: metrics.kingdom!.id }), {
+        ? button('Reino', () => this.ctx.screens.open('realm', { focusKingdom: metrics.kingdom!.id }), {
             variant: 'ghost', size: 'sm', icon: 'kingdom',
-            tooltip: { title: metrics.kingdom.name, description: 'Abre a tela de reinos focada neste.', shortcut: 'K' }
+            tooltip: {
+              title: metrics.kingdom.name,
+              description: 'Abre o dossiê do reino a que esta cidade pertence.'
+            }
           })
         : null
     ];

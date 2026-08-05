@@ -250,14 +250,23 @@ export function buildKingdomPanel(kingdom: Kingdom, host: InspectorHost): Child[
       ])
     ]),
     el('div', { class: 'ae-insp-actions' }, [
+      // The dossier is the primary action now that UI-4 exists: the preview says
+      // which realm this is, the dossier says how it works and why it is strong.
+      button('Dossiê', () => host.openRealmDossier(kingdom.id), {
+        variant: 'primary', size: 'sm', icon: 'kingdom',
+        tooltip: {
+          title: 'Dossiê do reino',
+          description: 'Economia, sociedade, política, diplomacia, exército, infraestrutura e tecnologia em uma tela.'
+        }
+      }),
       capital
         ? button('Capital', () => host.focusOn(capital.x, capital.y), {
             variant: 'secondary', size: 'sm', icon: 'map',
             tooltip: { title: 'Ir à capital', description: capital.name }
           })
         : null,
-      button('Reinos', () => host.openKingdoms(kingdom.id), {
-        variant: 'ghost', size: 'sm', icon: 'kingdom',
+      button('Comparar', () => host.openKingdoms(kingdom.id), {
+        variant: 'ghost', size: 'sm', icon: 'statistics',
         tooltip: { title: 'Comparar reinos', description: 'Abre a tela de reinos focada neste.', shortcut: 'K' }
       })
     ])
@@ -323,7 +332,7 @@ export function buildKingdomPanel(kingdom: Kingdom, host: InspectorHost): Child[
         ])
       : null,
 
-    el('p', { class: 'ae-insp-note', text: 'Prévia do reino. Política, diplomacia e dinastia em profundidade chegam na UI-4.' })
+    el('p', { class: 'ae-insp-note', text: 'Prévia do reino. Abra o dossiê para diagnóstico, economia, sociedade, política, diplomacia, exército, infraestrutura e tecnologia.' })
   ];
 }
 

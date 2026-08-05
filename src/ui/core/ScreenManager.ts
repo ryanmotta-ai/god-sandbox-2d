@@ -26,6 +26,7 @@ export type ScreenId =
   | 'techtree'
   | 'infrastructure'
   | 'city'
+  | 'realm'
   /** Development-only gallery of the design system. Reached from the debug panel. */
   | 'ui-kit';
 

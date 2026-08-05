@@ -2167,3 +2167,550 @@
   .ae-city-condition-flash { animation: none; box-shadow: 0 0 0 2px var(--ae-accent); }
   .ae-city-bar-fill { transition: none; }
 }
+
+/* ==========================================================================
+   UI-4 — REALM DOSSIER
+
+   The widest screen in the game, and the one most at risk of becoming a
+   spreadsheet. Three devices keep it from turning into one.
+
+   **Severity as a left edge.** Conditions, critical issues, bottlenecks and
+   idle capabilities all carry their verdict on a 2px border rather than in a
+   coloured background, so a page with nine panels does not read as an alarm.
+
+   **The realm's colour, narrowly.** The header edge, the banner and the bar
+   fills pick up `--ae-realm`; everything else stays stone. A dossier painted in
+   a saturated banner colour is a dossier nobody can read.
+
+   **Nested cards over nested panels.** Factions, wars and laws are cards inside
+   one panel, not a panel each. Nine bordered boxes down a page is noise; nine
+   rows inside one titled box is a list.
+   ========================================================================== */
+
+.ae-realm-screen .ae-screen-head { border-bottom-color: var(--ae-realm-line); }
+
+/* ============================ IDENTITY ============================ */
+.ae-realm-identity {
+  display: flex;
+  align-items: stretch;
+  gap: var(--ae-space-5);
+  flex: 0 0 auto;
+  padding: var(--ae-space-5);
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border);
+  border-left: 2px solid var(--ae-realm);
+  border-radius: var(--ae-radius-3);
+}
+.ae-realm-identity-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The banner: the realm's emblem over its two colours. Deliberately small — an
+   identity marker, not a heraldic display. */
+.ae-realm-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ae-space-2);
+  flex: 0 0 auto;
+  padding: var(--ae-space-3);
+  border: 1px solid var(--ae-border-inset);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel);
+}
+/* The emblem is a 16px sprite from `KINGDOM_EMBLEMS`, not a glyph. */
+.ae-realm-banner-emblem { opacity: 0.9; }
+.ae-realm-banner-bars { display: flex; gap: 2px; }
+.ae-realm-banner-bar {
+  display: block;
+  width: 12px;
+  height: 4px;
+  border-radius: 1px;
+}
+
+.ae-realm-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ae-space-7);
+}
+.ae-realm-headline-item { display: flex; align-items: center; gap: var(--ae-space-3); min-width: 0; }
+.ae-realm-headline-icon { opacity: 0.65; }
+.ae-realm-headline-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.ae-realm-headline-value {
+  font-size: var(--ae-text-value-primary);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+.ae-realm-headline-label {
+  font-size: var(--ae-text-meta);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-muted);
+}
+/* Ruler and capital sit apart from the figures: they are names, not numbers. */
+.ae-realm-headline-ruler {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  min-width: 0;
+  padding-left: var(--ae-space-5);
+  border-left: 1px solid var(--ae-border-inset);
+}
+
+/* Prev / next realm. */
+.ae-realm-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  padding: 0 var(--ae-space-2);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-realm-nav-btn {
+  width: var(--ae-control-h-sm);
+  height: var(--ae-control-h-sm);
+  border: none;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  color: var(--ae-text-secondary);
+  font-size: var(--ae-text-body);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--ae-fast), color var(--ae-fast);
+}
+.ae-realm-nav-btn:hover { background: rgba(214, 197, 168, 0.1); color: var(--ae-text); }
+.ae-realm-nav-count {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ============================ CONDITIONS & ISSUES ============================ */
+.ae-realm-urgent { border-color: var(--ae-warning-line); }
+.ae-realm-urgent > .ae-panel-head { background: var(--ae-warning-fill); }
+.ae-realm-critical { border-color: var(--ae-critical-line); }
+.ae-realm-critical > .ae-panel-head { background: var(--ae-critical-fill); }
+
+.ae-realm-condition {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  width: 100%;
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-neutral);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+}
+.ae-realm-condition-positive { border-left-color: var(--ae-positive); }
+.ae-realm-condition-neutral { border-left-color: var(--ae-neutral); }
+.ae-realm-condition-warning { border-left-color: var(--ae-warning); background: var(--ae-warning-fill); }
+.ae-realm-condition-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-realm-condition-live { cursor: pointer; transition: border-color var(--ae-fast); }
+.ae-realm-condition-live:hover { border-color: var(--ae-accent-line); }
+.ae-realm-condition-icon { opacity: 0.8; }
+.ae-realm-condition-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-realm-condition-label {
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-secondary);
+}
+.ae-realm-condition-finding {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 600;
+  color: var(--ae-text);
+  line-height: 1.35;
+}
+.ae-realm-condition-flash { animation: aeConditionFlash 2.4s var(--ae-ease) both; }
+
+.ae-realm-issue {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-warning);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-realm-issue-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-realm-issue-icon { opacity: 0.8; }
+.ae-realm-issue-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-realm-issue-label {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-realm-issue-detail {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  line-height: 1.4;
+}
+.ae-realm-issue-actions { display: flex; align-items: center; gap: var(--ae-space-2); flex: 0 0 auto; }
+
+/* ============================ BOTTLENECKS ============================ */
+.ae-realm-bottleneck {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-warning);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-realm-bottleneck-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-realm-bottleneck-icon { opacity: 0.8; }
+.ae-realm-bottleneck-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-realm-bottleneck-subject {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-realm-bottleneck-cause {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  line-height: 1.4;
+}
+.ae-realm-bottleneck-actions { display: flex; align-items: center; gap: var(--ae-space-2); flex: 0 0 auto; }
+
+/* Inline jump-to button, one per follow-up action. */
+.ae-realm-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--ae-fast), background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-realm-mini-btn:hover {
+  opacity: 1;
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+}
+
+/* ============================ DEPENDENCIES ============================
+   A bar for the share, and beneath it the suppliers by name. The names are the
+   point: a dependency with nobody attached is a statistic. */
+.ae-realm-dependency {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  padding: var(--ae-space-3) 0;
+  border-bottom: 1px solid var(--ae-border-inset);
+}
+.ae-realm-dependency:last-child { border-bottom: none; }
+.ae-realm-suppliers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ae-space-3);
+  font-size: var(--ae-text-meta);
+}
+.ae-realm-supplier-line,
+.ae-realm-supplier-extra {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+}
+.ae-realm-supplier-extra {
+  padding-left: var(--ae-space-3);
+  border-left: 1px solid var(--ae-border-inset);
+}
+
+.ae-realm-partner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  padding: var(--ae-space-3) 0;
+  border-bottom: 1px solid var(--ae-border-inset);
+}
+.ae-realm-partner:last-child { border-bottom: none; }
+
+/* ============================ FACTIONS ============================
+   One card per faction, with the simulation's own satisfaction deltas at the
+   bottom. The faction's colour marks the card's edge and nothing else. */
+.ae-realm-faction {
+  --ae-faction: var(--ae-border-strong);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-faction);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-realm-faction-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ae-space-3);
+}
+.ae-realm-faction-icon { opacity: 0.75; margin-top: 2px; }
+.ae-realm-faction-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-realm-faction-name {
+  font-size: var(--ae-text-object-name);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-realm-faction-desc {
+  font-size: var(--ae-text-meta);
+  line-height: 1.45;
+  color: var(--ae-text-secondary);
+}
+.ae-realm-faction-bars { display: flex; flex-direction: column; gap: var(--ae-space-2); }
+.ae-realm-faction-stance { display: flex; flex-wrap: wrap; gap: var(--ae-space-2); }
+
+/* The factors: two columns of named deltas, red-edged against and green for. */
+.ae-realm-factors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--ae-space-4);
+  padding-top: var(--ae-space-3);
+  border-top: 1px solid var(--ae-border-inset);
+}
+.ae-realm-factor-group { display: flex; flex-direction: column; gap: var(--ae-space-2); min-width: 0; }
+.ae-realm-factor-title {
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-muted);
+}
+.ae-realm-factor {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ae-space-3);
+  width: 100%;
+  padding: var(--ae-space-2) var(--ae-space-3);
+  border: 1px solid transparent;
+  border-left: 2px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-1);
+  background: var(--ae-panel);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+}
+.ae-realm-factor-critical { border-left-color: var(--ae-critical); }
+.ae-realm-factor-positive { border-left-color: var(--ae-positive); }
+button.ae-realm-factor { cursor: pointer; transition: border-color var(--ae-fast); }
+button.ae-realm-factor:hover { border-color: var(--ae-accent-line); }
+.ae-realm-factor-label {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-realm-factor-delta {
+  flex: 0 0 auto;
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================ CULTURE ============================
+   Eleven axes as compact bars. A number dump is what this replaces. */
+.ae-realm-culture-axes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--ae-space-2) var(--ae-space-6);
+}
+.ae-realm-culture-axis {
+  display: grid;
+  grid-template-columns: minmax(96px, 34%) 1fr auto;
+  align-items: center;
+  gap: var(--ae-space-3);
+}
+.ae-realm-culture-label {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-realm-culture-track {
+  height: 8px;
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border-inset);
+  border-radius: var(--ae-radius-1);
+  overflow: hidden;
+}
+.ae-realm-culture-fill {
+  height: 100%;
+  min-width: 2px;
+  background: var(--ae-realm);
+  border-radius: var(--ae-radius-1) 0 0 var(--ae-radius-1);
+  transition: width var(--ae-med);
+}
+.ae-realm-culture-value {
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+  min-width: 4ch;
+  text-align: right;
+}
+
+/* ============================ LAWS ============================ */
+.ae-realm-law {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  padding: var(--ae-space-3) 0;
+  border-bottom: 1px solid var(--ae-border-inset);
+}
+.ae-realm-law:last-child { border-bottom: none; }
+.ae-realm-law-head { display: flex; align-items: center; gap: var(--ae-space-3); flex-wrap: wrap; }
+.ae-realm-law-name {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-realm-law-effects,
+.ae-realm-law-factions { display: flex; flex-wrap: wrap; gap: var(--ae-space-2); }
+
+/* ============================ WAR & CAPABILITY CARDS ============================ */
+.ae-realm-war,
+.ae-realm-capability {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-critical);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-realm-capability { gap: var(--ae-space-3); }
+.ae-realm-capability-warning { border-left-color: var(--ae-warning); }
+.ae-realm-war-head { display: flex; align-items: flex-start; gap: var(--ae-space-3); }
+.ae-realm-war-icon { opacity: 0.8; margin-top: 2px; }
+.ae-realm-war-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-realm-war-name {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  flex-wrap: wrap;
+  font-size: var(--ae-text-object-name);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-realm-war-goal {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  line-height: 1.45;
+}
+.ae-realm-capability-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ae-space-3);
+}
+.ae-realm-capability-name {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-realm-capability-missing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ae-space-2);
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+}
+
+/* ============================ SECTORS & NOTES ============================ */
+.ae-realm-sector-figures { display: flex; flex-direction: column; gap: var(--ae-space-3); }
+.ae-realm-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ae-space-2);
+  font-size: var(--ae-text-meta);
+  line-height: 1.5;
+  color: var(--ae-text-muted);
+  font-style: italic;
+}
+
+/* ============================ TIMELINE ============================ */
+.ae-realm-timeline { display: flex; flex-direction: column; }
+.ae-realm-event {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-4) 0 var(--ae-space-4) var(--ae-space-4);
+  border-bottom: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-border-strong);
+}
+.ae-realm-event:last-child { border-bottom: none; }
+.ae-realm-event-major { border-left-color: var(--ae-accent-deep); }
+.ae-realm-event-legendary { border-left-color: var(--ae-accent); }
+.ae-realm-event-year {
+  flex: 0 0 auto;
+  min-width: 4ch;
+  font-family: var(--ae-font-pixel);
+  font-size: 0.625rem;
+  color: var(--ae-text-muted);
+  padding-top: 2px;
+}
+.ae-realm-event-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-realm-event-title {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-realm-event-text {
+  font-size: var(--ae-text-meta);
+  line-height: 1.5;
+  color: var(--ae-text-secondary);
+}
+
+/* ============================ RESPONSIVE ============================
+   Same rule as the city dossier: horizontal room goes first. Figures reflow, the
+   banner drops out of the row, and tables scroll inside their own box rather
+   than widening the page. */
+@media (max-width: 1100px) {
+  .ae-realm-headline { gap: var(--ae-space-5); }
+  .ae-realm-headline-ruler {
+    padding-left: 0;
+    border-left: none;
+  }
+}
+@media (max-width: 820px) {
+  .ae-realm-identity { flex-direction: column; }
+  .ae-realm-banner { flex-direction: row; align-self: flex-start; }
+  .ae-realm-headline-value { font-size: var(--ae-text-object-name); }
+  .ae-realm-culture-axis { grid-template-columns: minmax(80px, 40%) 1fr auto; }
+  /* A table narrower than its columns scrolls in place; the page never does. */
+  .ae-realm-screen .ae-table { overflow-x: auto; }
+  .ae-realm-screen .ae-table-head,
+  .ae-realm-screen .ae-table-row { min-width: 620px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ae-realm-condition-flash { animation: none; box-shadow: 0 0 0 2px var(--ae-accent); }
+  .ae-realm-culture-fill { transition: none; }
+}

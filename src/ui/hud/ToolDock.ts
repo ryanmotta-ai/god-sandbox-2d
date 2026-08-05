@@ -52,6 +52,31 @@ const OVERLAYS: { id: OverlayMode; label: string; icon: string; description: str
   { id: 'resources', label: 'Recursos', icon: 'good', description: 'Depósitos de minério, madeira e ouro.' }
 ];
 
+/**
+ * The realm the player is most plausibly asking about.
+ *
+ * A selected realm wins; a selected city or citizen means the realm they belong
+ * to; otherwise the biggest realm in the world, which is the one a player opening
+ * a dossier cold almost always wants.
+ */
+function focusedRealm(ctx: GameContext): string | undefined {
+  const selected = ctx.selection.current;
+  if (selected?.kind === 'kingdom') return selected.id;
+  if (selected?.kind === 'city') return ctx.sim.cities.get(selected.id)?.kingdomId ?? undefined;
+  if (selected?.kind === 'building') return ctx.sim.cities.get(selected.cityId)?.kingdomId ?? undefined;
+  if (selected?.kind === 'citizen') {
+    return ctx.sim.entities.find(e => e.id === selected.id)?.kingdomId ?? undefined;
+  }
+
+  let best: { id: string; population: number } | null = null;
+  for (const kingdom of ctx.sim.kingdoms.values()) {
+    if (!best || kingdom.totalPopulation > best.population) {
+      best = { id: kingdom.id, population: kingdom.totalPopulation };
+    }
+  }
+  return best?.id;
+}
+
 const GROUPS: DockGroup[] = [
   {
     id: 'world',
@@ -72,6 +97,13 @@ const GROUPS: DockGroup[] = [
     icon: 'politics',
     description: 'Os sistemas que movem os reinos.',
     entries: ctx => [
+      {
+        // Opens on whatever realm the player is looking at, falling back to the
+        // largest — the dossier then handles switching between realms itself.
+        label: 'Dossiê do reino', icon: 'kingdom',
+        description: 'O reino selecionado por dentro: economia, sociedade, política, exército e técnica.',
+        run: () => ctx.screens.open('realm', { focusKingdom: focusedRealm(ctx) })
+      },
       { label: 'Política', icon: 'politics', description: 'Facções, leis e legitimidade.', shortcut: 'P', run: () => ctx.screens.open('politics') },
       { label: 'Economia', icon: 'economy', description: 'Preços, produção, escassez e tesouro.', shortcut: 'E', run: () => ctx.screens.open('economy') },
       { label: 'Diplomacia', icon: 'diplomacy', description: 'Tratados, rivalidades e a opinião das cortes.', shortcut: 'L', run: () => ctx.screens.open('diplomacy') },
