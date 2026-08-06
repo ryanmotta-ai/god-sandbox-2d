@@ -39,12 +39,12 @@ export const SETTLEMENT_TIERS: TierInfo[] = [
   // realms stayed as specks on an empty continent forever. Territory is therefore
   // allowed to run well ahead of headcount: a small realm still rules a real region,
   // and neighbouring realms grow into contact and partition the land between them.
-  { id: 'camp', name: 'Camp', icon: '⛺', minPopulation: 0, buildingSlots: 5, territoryLimit: 60, storage: 250, color: '#a8a29e' },
-  { id: 'hamlet', name: 'Hamlet', icon: '🛖', minPopulation: 8, buildingSlots: 10, territoryLimit: 175, storage: 400, color: '#b45309' },
-  { id: 'village', name: 'Village', icon: '🏘️', minPopulation: 20, buildingSlots: 16, territoryLimit: 380, storage: 650, color: '#22c55e' },
-  { id: 'town', name: 'Town', icon: '🏙️', minPopulation: 45, buildingSlots: 18, territoryLimit: 700, storage: 950, color: '#38bdf8' },
-  { id: 'city', name: 'City', icon: '🏛️', minPopulation: 90, buildingSlots: 28, territoryLimit: 1200, storage: 1400, color: '#a855f7' },
-  { id: 'metropolis', name: 'Metropolis', icon: '🌆', minPopulation: 180, buildingSlots: 42, territoryLimit: 2000, storage: 2200, color: '#fbbf24' }
+  { id: 'camp', name: 'Camp', icon: '⛺', minPopulation: 0, buildingSlots: 8, territoryLimit: 60, storage: 250, color: '#a8a29e' },
+  { id: 'hamlet', name: 'Hamlet', icon: '🛖', minPopulation: 8, buildingSlots: 16, territoryLimit: 175, storage: 400, color: '#b45309' },
+  { id: 'village', name: 'Village', icon: '🏘️', minPopulation: 20, buildingSlots: 26, territoryLimit: 380, storage: 650, color: '#22c55e' },
+  { id: 'town', name: 'Town', icon: '🏙️', minPopulation: 45, buildingSlots: 36, territoryLimit: 700, storage: 950, color: '#38bdf8' },
+  { id: 'city', name: 'City', icon: '🏛️', minPopulation: 90, buildingSlots: 50, territoryLimit: 1200, storage: 1400, color: '#a855f7' },
+  { id: 'metropolis', name: 'Metropolis', icon: '🌆', minPopulation: 180, buildingSlots: 70, territoryLimit: 2000, storage: 2200, color: '#fbbf24' }
 ];
 
 export function tierForPopulation(population: number): TierInfo {
@@ -73,6 +73,15 @@ export class City {
   public buildings: Map<string, Building> = new Map();
 
   public tier: SettlementTier = 'camp';
+  /**
+   * Highest building-slot budget this settlement has ever earned. A famine or
+   * war can drop population (and therefore `tier`) below what it once was, but
+   * buildings already standing don't get bulldozed — without this floor, a
+   * settlement that dips even briefly would find its already-built count over
+   * the new, lower cap and lose the ability to ever construct again (including
+   * the farm it would need to recover), locking the decline in permanently.
+   */
+  private peakBuildingSlots: number = SETTLEMENT_TIERS[0].buildingSlots;
   /** Settlement this one was founded from, if any. */
   public parentCityId: string | null = null;
   /** 0..1 — how well fed and housed the population is. */
@@ -136,6 +145,7 @@ export class City {
   /** Recomputes the tier from population. Returns the new tier if it changed. */
   public updateTier(): TierInfo | null {
     const next = tierForPopulation(this.population);
+    this.peakBuildingSlots = Math.max(this.peakBuildingSlots, next.buildingSlots);
     if (next.id === this.tier) return null;
 
     const previous = this.tier;
@@ -159,11 +169,23 @@ export class City {
   // ============================ CAPACITY ============================
 
   public get buildingSlots(): number {
-    return this.tierInfo.buildingSlots;
+    return Math.max(this.tierInfo.buildingSlots, this.peakBuildingSlots);
   }
 
+  /**
+   * Unique civic buildings (granary, market, harbor, palace...) are already
+   * capped at one apiece by definition. Counting them against the same slot
+   * budget as houses, farms and mines means every tech unlock permanently
+   * shrinks the room left to actually scale with population — the more a
+   * kingdom researches, the fewer houses/farms it can ever add. Only
+   * repeatable buildings compete for the numeric slot cap.
+   */
   public hasFreeBuildingSlot(): boolean {
-    return this.buildings.size < this.buildingSlots;
+    let repeatable = 0;
+    for (const b of this.buildings.values()) {
+      if (!b.definition.unique) repeatable++;
+    }
+    return repeatable < this.buildingSlots;
   }
 
   /** Job slots this settlement offers, counting building levels. */
@@ -371,6 +393,7 @@ export class City {
       population: this.population,
       mayorId: this.mayorId,
       tier: this.tier,
+      peakBuildingSlots: this.peakBuildingSlots,
       parentCityId: this.parentCityId,
       prosperity: this.prosperity,
       famineYears: this.famineYears,
@@ -401,6 +424,10 @@ export class City {
     city.population = data.population ?? 0;
     city.mayorId = data.mayorId ?? null;
     city.tier = data.tier ?? 'camp';
+    // Older saves predate this field: fall back to the current tier's slots so
+    // an old save doesn't retroactively invent a lower cap than it was playing
+    // with (see `peakBuildingSlots` field comment for why this must never drop).
+    city.peakBuildingSlots = Math.max(data.peakBuildingSlots ?? 0, city.tierInfo.buildingSlots);
     city.parentCityId = data.parentCityId ?? null;
     city.prosperity = data.prosperity ?? 0.5;
     city.famineYears = data.famineYears ?? 0;

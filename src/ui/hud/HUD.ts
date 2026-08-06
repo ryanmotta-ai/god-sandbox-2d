@@ -27,6 +27,7 @@ import { SelectionCard } from './SelectionCard';
 import { AlertFeed, EventFeed } from './Feeds';
 import { alerts } from '../core/Alerts';
 import { TICKS_PER_DAY } from '../../ai/EntityAI';
+import { describeCity } from '../../civ/UrbanPlanner';
 import { icon } from '../kit';
 import type { OverlayMode } from '../../renderer/Overlays';
 import type { GameContext } from '../core/GameContext';
@@ -280,6 +281,7 @@ export class HUD {
         el('button', { text: 'Meteor', on: { click: () => this.debugMeteor() } }),
         el('button', { text: 'Next era', on: { click: () => { this.ctx.eras.cycleNextEra(); } } }),
         el('button', { text: '+1 day', on: { click: () => this.debugAdvanceDay() } }),
+        el('button', { text: 'Urban report', on: { click: () => this.debugUrbanReport() } }),
         el('button', { text: 'UI kit', on: { click: () => this.ctx.screens.open('ui-kit') } })
       ])
     ]);
@@ -342,5 +344,24 @@ export class HUD {
       this.ctx.sim.tickAI(this.ctx.tileMap, this.ctx.particles);
     }
     this.ctx.toast(`Dia avançado · Ano ${this.ctx.sim.currentYear}`, 'info');
+  }
+
+  /**
+   * CITY-V1 urban diagnostics for every settlement, to the console.
+   *
+   * Deliberately a console dump rather than a panel: these are numbers for
+   * balancing the planner, not information a player needs, and printing them
+   * costs nothing until somebody asks for it.
+   */
+  private debugUrbanReport(): void {
+    const cities = [...this.ctx.sim.cities.values()].sort((a, b) => b.population - a.population);
+    if (cities.length === 0) {
+      this.ctx.toast('Nenhuma cidade para analisar', 'info');
+      return;
+    }
+    console.groupCollapsed(`🏙️ Urban report · ano ${this.ctx.sim.currentYear} · ${cities.length} cidade(s)`);
+    for (const city of cities) console.log(describeCity(city, this.ctx.tileMap));
+    console.groupEnd();
+    this.ctx.toast(`Relatório urbano de ${cities.length} cidade(s) no console`, 'success');
   }
 }

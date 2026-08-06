@@ -28,6 +28,7 @@ import {
   avgEffectiveRoadLevel, repairInfrastructure
 } from './Infrastructure';
 import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadEngineering';
+import { UrbanPlanner } from './UrbanPlanner';
 
 /**
  * The yearly heartbeat of civilization.
@@ -91,6 +92,12 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export class CivilizationEngine {
+  /**
+   * CITY-V1 urban planner. Off only for A/B measurement against the legacy
+   * placement rule — see `findBuildingSiteLegacy`.
+   */
+  public static useUrbanPlanner: boolean = true;
+
   /** Set once a realm first mints money, so the chronicle only says it once. */
   private announcedCurrencies: Set<string> = new Set();
   /** Maritime routes currently blocked by ruined ports, so a collapse is chronicled once. */
@@ -128,10 +135,9 @@ export class CivilizationEngine {
 
     this.tickDiplomaticContact(world);
     this.tickStrategicDiplomacy(world);
-    this.tickTrade(world);
-    // Rail freight runs after trade settles so imports land in the same ledger
-    // year as the exports that paid for them; next year's smithy burns the coal.
+    // Rail freight runs before trade settles so imports land in the current ledger year
     world.sim?.railways.tickRailways(world);
+    this.tickTrade(world);
     this.tickVassalage(world);
     this.tickColonisation(world);
     this.tickRebellions(world);
@@ -511,8 +517,9 @@ export class CivilizationEngine {
 
     if (satisfaction < 0.85) {
       city.famineYears++;
-      // Starvation kills. The population falls until it matches the food supply.
-      const starved = Math.ceil(city.population * (1 - satisfaction) * 0.35);
+      // Starvation kills. Gradual mortality rate (15% in year 1, 25% in subsequent years) gives cities time to recover.
+      const mortalityRate = city.famineYears <= 1 ? 0.15 : 0.25;
+      const starved = Math.ceil(city.population * (1 - satisfaction) * mortalityRate);
       if (starved > 0) {
         this.killCitizens(city, world, starved, 'starvation');
       }
@@ -1013,13 +1020,17 @@ export class CivilizationEngine {
       if (type === 'factory' && city.stock.get('steel') < 5) score *= 0.4;
     }
 
+    // Harbor/Port are unique milestones — each can only ever be built once per
+    // city — so they should reliably win the yearly build slot once feasible
+    // instead of losing to another repeatable quarry/mine for decades. Their
+    // old base scores (20-95) were routinely beaten by extraction's 90-150+.
     if (type === 'harbor') {
-      score += population >= 18 ? 70 : 20;
+      score += population >= 18 ? 150 : 110;
       if (kingdom?.culture.mercantilism && kingdom.culture.mercantilism > 0.58) score += 28;
     }
     if (type === 'port') {
       if (!city.hasBuilding('harbor')) return 0;
-      score += population >= 45 ? 95 : 20;
+      score += population >= 45 ? 160 : 90;
       if (kingdom?.research.knows('engineering')) score += 35;
     }
 
@@ -1101,7 +1112,41 @@ export class CivilizationEngine {
     return score;
   }
 
+  /**
+   * Where a building goes.
+   *
+   * The urban planner owns this decision now (CITY-V1): it weighs street
+   * frontage, the quarter a building belongs to, spacing and open ground,
+   * rather than taking the first unbuilt tile that scored well on geometry
+   * alone. The signature is unchanged so every existing caller — and the
+   * legacy path below, kept for A/B measurement — still works.
+   */
   private findBuildingSite(
+    city: City,
+    tileMap: TileMap,
+    def: typeof BUILDINGS[BuildingType]
+  ): { x: number; y: number; resourceGood: GoodId | null; siteScore: number } | null {
+    if (!CivilizationEngine.useUrbanPlanner) {
+      return this.findBuildingSiteLegacy(city, tileMap, def);
+    }
+    const radius = this.citySurveyRadius(city);
+    const sites = UrbanPlanner.findBuildingSites(city, def, tileMap, radius, 4);
+    if (sites.length === 0) return null;
+
+    // Road-first growth: the planner has already scored street frontage into
+    // its choice and rejected sites needing more new road than a settlement
+    // this size would undertake, so whatever comes back is either on the
+    // network or worth extending to. `constructBuilding` runs the street out
+    // via `paveRoadBetween` immediately after placing.
+    const best = sites[0];
+    return { x: best.x, y: best.y, resourceGood: best.resourceGood, siteScore: best.totalScore };
+  }
+
+  /**
+   * The pre-CITY-V1 placement rule, kept so the urban planner can be measured
+   * against it on identical seeds. Not reachable in normal play.
+   */
+  private findBuildingSiteLegacy(
     city: City,
     tileMap: TileMap,
     def: typeof BUILDINGS[BuildingType]
@@ -1310,6 +1355,22 @@ export class CivilizationEngine {
     const upkeepCost = kingdom.economy.hasCurrency ? kingdom.economy.fromWorldValue(upkeep) : upkeep;
     kingdom.economy.treasury -= upkeepCost;
 
+    // Process War Reparations payments
+    if (kingdom.warReparations) {
+      if (world.year <= kingdom.warReparations.endYear) {
+        const creditor = world.kingdoms.get(kingdom.warReparations.creditorId);
+        if (creditor) {
+          const payment = Math.min(Math.max(0, kingdom.economy.treasury * 0.25), kingdom.warReparations.annualAmount);
+          if (payment > 0) {
+            kingdom.economy.treasury -= payment;
+            creditor.economy.treasury += payment;
+          }
+        }
+      } else {
+        kingdom.warReparations = null;
+      }
+    }
+
     // A bankrupt realm prints money, which its citizens will notice next year.
     if (kingdom.economy.treasury < 0) {
       if (kingdom.economy.hasCurrency) {
@@ -1369,7 +1430,7 @@ export class CivilizationEngine {
     }
 
     kingdom.research.progress += output;
-    if (kingdom.research.progress < techCost(tech)) return;
+    if (kingdom.research.progress < techCost(tech, kingdom.cityIds.size)) return;
 
     // Discovery.
     kingdom.research.complete(tech.id);
@@ -1467,7 +1528,7 @@ export class CivilizationEngine {
 
     for (const tech of available) {
       // Cheaper is better, all else being equal.
-      let score = 1000 / Math.max(1, techCost(tech));
+      let score = 1000 / Math.max(1, techCost(tech, kingdom.cityIds.size));
 
       const mods = tech.unlocks.modifiers;
       if (mods) {
