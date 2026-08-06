@@ -159,7 +159,7 @@ export class WarfareSystem {
     );
 
     // Even an ungarrisoned settlement resists a little — militia and walls.
-    const militia = city.population * 1.6;
+    const militia = city.population * 0.6;
     const garrisonStrength = this.armyStrength(garrison, owner);
 
     return (garrisonStrength + militia) * city.defenseMultiplier();
@@ -216,7 +216,7 @@ export class WarfareSystem {
     if (ratio < SIEGE_THRESHOLD && !starving) {
       // The walls hold. The besiegers grind themselves down instead.
       city.siegeProgress = Math.max(0, city.siegeProgress - 0.05);
-      besieger.warWeariness = Math.min(100, besieger.warWeariness + 3);
+      besieger.warWeariness = Math.min(100, besieger.warWeariness + 6);
       return;
     }
 
@@ -230,6 +230,21 @@ export class WarfareSystem {
     // A siege is miserable for everyone inside.
     city.prosperity = Math.max(0, city.prosperity - 0.08);
     city.ledger.recordConsumed('food', city.stock.take('food', city.population * 0.3));
+
+    // Refugees flee to nearest friendly city during prolonged siege
+    if (city.siegeYears >= 2) {
+      const friendlyCity = this.findNearestFriendlyCity(city, owner, world);
+      if (friendlyCity) {
+        const refugees = world.entities
+          .filter(e => e.cityId === city.id && e.hp > 0 && !e.isChild && e.profession !== 'king')
+          .slice(0, Math.ceil(city.population * 0.05));
+        for (const refugee of refugees) {
+          refugee.cityId = friendlyCity.id;
+          refugee.targetX = friendlyCity.x;
+          refugee.targetY = friendlyCity.y;
+        }
+      }
+    }
 
     if (city.siegeProgress >= 1) {
       this.captureCity(city, owner, besieger, world);
@@ -296,6 +311,19 @@ export class WarfareSystem {
       residents[i].hp = 0;
     }
 
+    // Refugees fleeing the fall of the city to nearest friendly territory
+    const safeHaven = this.findNearestFriendlyCity(city, from, world);
+    if (safeHaven) {
+      const survivors = world.entities.filter(e => e.cityId === city.id && e.hp > 0 && e.profession !== 'king');
+      const refugeeCount = Math.floor(survivors.length * 0.18);
+      for (let i = 0; i < refugeeCount; i++) {
+        survivors[i].cityId = safeHaven.id;
+        survivors[i].kingdomId = from.id;
+        survivors[i].targetX = safeHaven.x;
+        survivors[i].targetY = safeHaven.y;
+      }
+    }
+
     for (const good of ALL_GOODS) {
       const looted = city.stock.take(good, city.stock.get(good) * 0.4);
       // Plunder leaves the city's books as an outflow, not as nothing.
@@ -338,6 +366,52 @@ export class WarfareSystem {
       // The old ruler does not simply keep his crown in a captured city.
       if (resident.profession === 'king' && from.rulerId === resident.id) {
         resident.profession = 'none';
+      }
+    }
+
+    // Check ruler fate if this was the capital city
+    if (wasCapital && from.rulerId) {
+      const ruler = world.entities.find(e => e.id === from.rulerId && e.hp > 0);
+      if (ruler && ruler.cityId === city.id) {
+        const killedInBattle = rng.chance(0.5);
+        if (killedInBattle) {
+          ruler.hp = 0;
+          chronicle.log(
+            world.year,
+            'kingdom',
+            `Ruler ${ruler.name} fell in combat defending the capital of ${from.name}!`,
+            {
+              title: `Death of Ruler ${ruler.name}`,
+              importance: 'legendary',
+              scope: 'world',
+              refs: [
+                { kind: 'kingdom', id: from.id, name: from.name },
+                { kind: 'city', id: city.id, name: city.name }
+              ],
+              tags: ['ruler death', 'capital fall', 'legendary']
+            }
+          );
+        } else {
+          ruler.profession = 'none';
+          ruler.kingdomId = to.id;
+          chronicle.log(
+            world.year,
+            'kingdom',
+            `Ruler ${ruler.name} was captured when ${city.name} fell to ${to.name}.`,
+            {
+              title: `Ruler ${ruler.name} Captured`,
+              importance: 'legendary',
+              scope: 'world',
+              refs: [
+                { kind: 'kingdom', id: from.id, name: from.name },
+                { kind: 'kingdom', id: to.id, name: to.name },
+                { kind: 'city', id: city.id, name: city.name }
+              ],
+              tags: ['ruler captured', 'capital fall', 'legendary']
+            }
+          );
+        }
+        from.rulerId = null;
       }
     }
 
@@ -488,10 +562,51 @@ export class WarfareSystem {
       }
     }
 
+    // Impose war reparations on the defeated realm for 10 years
+    const reparationRate = Math.round(loser.economy.treasury * 0.15 + 20);
+    loser.warReparations = {
+      creditorId: dominant.id,
+      annualAmount: reparationRate,
+      endYear: world.year + 10
+    };
+
+    chronicle.log(
+      world.year,
+      'kingdom',
+      `As part of the peace treaty, ${loser.name} agreed to pay annual war reparations to ${dominant.name} for 10 years.`,
+      {
+        title: `War Reparations Imposed`,
+        importance: 'major',
+        scope: 'international',
+        refs: [
+          { kind: 'kingdom', id: loser.id, name: loser.name },
+          { kind: 'kingdom', id: dominant.id, name: dominant.name }
+        ],
+        tags: ['peace treaty', 'reparations', 'treasury']
+      }
+    );
+
     // Only land the winner can actually reach and hold.
     if (closestDistance > 60) return;
 
     this.cedeCity(closest, loser, dominant, world);
+  }
+
+  private findNearestFriendlyCity(city: City, kingdom: Kingdom, world: WarfareWorld): City | null {
+    let closest: City | null = null;
+    let minDistance = Infinity;
+
+    for (const cityId of kingdom.cityIds) {
+      if (cityId === city.id) continue;
+      const other = world.cities.get(cityId);
+      if (!other || other.besiegerId) continue;
+      const dist = Math.hypot(other.x - city.x, other.y - city.y);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closest = other;
+      }
+    }
+    return closest;
   }
 
   /** A settlement handed over by treaty rather than taken by storm. */

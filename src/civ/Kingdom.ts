@@ -52,6 +52,12 @@ export function getNextKingdomColor(): string {
   return color;
 }
 
+export interface WarReparations {
+  creditorId: string;
+  annualAmount: number;
+  endYear: number;
+}
+
 export class Kingdom {
   public id: string;
   public name: string;
@@ -61,6 +67,8 @@ export class Kingdom {
   public rulerId: string | null = null;
   public cityIds: Set<string> = new Set();
   public foundingYear: number;
+
+  public warReparations: WarReparations | null = null;
 
   public emblem: string;
   public secondaryColor: string;
