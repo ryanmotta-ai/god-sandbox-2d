@@ -272,6 +272,26 @@ export class TradeNetwork {
 }
 
 /** Human-readable summary of a route, used by the economy screen. */
+/**
+ * What it costs to haul one unit of a good along a route, in world units.
+ *
+ * Extracted from the route-opening decision so the economy screen can report the
+ * same figure the simulation charged rather than a second estimate of it. Sea
+ * freight is cheaper per tile than land, and a good road cuts the land cost by up
+ * to 30% — which is the whole reason infrastructure changes what trade is
+ * possible.
+ */
+export function transportCostPerUnit(
+  kind: RouteKind,
+  distance: number,
+  worldPrice: number,
+  avgRoadLevel: number
+): number {
+  return kind === 'maritime'
+    ? worldPrice * distance * 0.003
+    : worldPrice * distance * 0.004 * (1.5 - 0.3 * avgRoadLevel);
+}
+
 export function describeRoute(route: TradeRoute): string {
   const good = GOODS[route.good];
   return `${good.icon} ${good.name} ×${Math.round(route.volume)}/yr`;

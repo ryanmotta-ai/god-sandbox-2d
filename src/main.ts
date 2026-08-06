@@ -100,6 +100,7 @@ class AethoriaGame implements GameContext {
   private toasts: ToastManager;
   private hud!: HUD;
   private loadingScreen = new LoadingScreen();
+  private economyScreen = new EconomyScreen();
 
   // ---- Runtime ----
   private state: AppState = 'menu';
@@ -150,6 +151,9 @@ class AethoriaGame implements GameContext {
     // moving the camera. Registered after, because `registerOpener` replaces by
     // kind and the more capable handler must win.
     this.hud.inspector.registerLinkNavigation();
+    // `good` is the last object kind with no opener: UI-5 owns it, so every goods
+    // link in the game becomes navigable here rather than rendering inert.
+    this.economyScreen.registerLinkNavigation();
     this.applySettings();
 
     this.screens.replace('main-menu');
@@ -179,7 +183,7 @@ class AethoriaGame implements GameContext {
     this.screens.register(new GameOverScreen());
 
     this.screens.register(new PoliticsScreen());
-    this.screens.register(new EconomyScreen());
+    this.screens.register(this.economyScreen);
     this.screens.register(new WarfareScreen());
     this.screens.register(new DynastyScreen());
     this.screens.register(new EcosystemScreen());

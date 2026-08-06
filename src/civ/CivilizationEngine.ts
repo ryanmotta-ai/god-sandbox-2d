@@ -8,7 +8,7 @@ import {
 import { TECHNOLOGIES, TechDefinition, techCost, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
 import { GOVERNMENTS, chooseGovernment, isRevolution, GovernmentType } from './Government';
 import { WorldMarket, mintCurrency } from './Economy';
-import { TradeNetwork } from './Trade';
+import { TradeNetwork, transportCostPerUnit } from './Trade';
 import { DiplomacyManager, type PeaceSettlement } from './Diplomacy';
 import { culturalAffinity, rememberCulture, updateCulture } from './Culture';
 import { updateSociety } from './Society';
@@ -2760,9 +2760,7 @@ export class CivilizationEngine {
               ? portCapacityFactor(from, to)
               : roadCapacityFactor(landPath, world.tileMap);
             const avgRoad = kind === 'maritime' ? 1.5 : avgEffectiveRoadLevel(landPath, world.tileMap);
-            const transport = kind === 'maritime'
-              ? worldPrice * distance * 0.003
-              : worldPrice * distance * 0.004 * (1.5 - 0.3 * avgRoad);
+            const transport = transportCostPerUnit(kind, distance, worldPrice, avgRoad);
             const tariff = treaty ?? buyer.tariffRate();
             const marginPerUnit = buyPrice - sellPrice - transport - buyPrice * tariff;
             if (marginPerUnit <= 0) continue;

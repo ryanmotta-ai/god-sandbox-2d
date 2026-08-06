@@ -2714,3 +2714,366 @@ button.ae-realm-factor:hover { border-color: var(--ae-accent-line); }
   .ae-realm-condition-flash { animation: none; box-shadow: 0 0 0 2px var(--ae-accent); }
   .ae-realm-culture-fill { transition: none; }
 }
+
+/* ==========================================================================
+   UI-5 — ECONOMY COMMAND CENTER
+
+   The densest screen in the game, and the one closest to becoming a wall of
+   numbers. Three devices hold it together.
+
+   **Tables carry the data, panels carry the meaning.** Anything with more than
+   four columns is a table with tabular figures and a sortable head; panels are
+   reserved for the things that need a sentence next to them.
+
+   **Status as a left edge or a node fill, never as a background wash.** A page
+   with nine panels must not read as an alarm, so severity lives on a 2px border
+   or inside a small chip.
+
+   **One accent.** The chart, the chain and the network all draw with the same
+   bronze line and the same three status colours, so a red node means the same
+   thing in every one of them.
+   ========================================================================== */
+
+/* ============================ ALERTS ============================ */
+.ae-econ-critical { border-color: var(--ae-critical-line); }
+.ae-econ-critical > .ae-panel-head { background: var(--ae-critical-fill); }
+
+.ae-econ-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-warning);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-econ-alert-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-econ-alert-icon { opacity: 0.8; }
+.ae-econ-alert-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-econ-alert-label {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-econ-alert-detail {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  line-height: 1.4;
+}
+.ae-econ-alert-actions { display: flex; align-items: center; gap: var(--ae-space-2); flex: 0 0 auto; }
+
+.ae-econ-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--ae-fast), background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-econ-mini-btn:hover {
+  opacity: 1;
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+}
+
+/* ============================ LAYOUT ============================ */
+.ae-econ-two-up {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--ae-space-5);
+}
+.ae-econ-note {
+  font-size: var(--ae-text-meta);
+  line-height: 1.55;
+  color: var(--ae-text-muted);
+  font-style: italic;
+}
+.ae-econ-deficit {
+  color: var(--ae-critical);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* The position number in a ranked list. Quiet — the name is what matters. */
+.ae-econ-rank {
+  flex: 0 0 auto;
+  min-width: 2ch;
+  font-family: var(--ae-font-pixel);
+  font-size: 0.625rem;
+  color: var(--ae-text-muted);
+}
+.ae-econ-rankings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--ae-space-5);
+}
+
+/* ============================ FILTERS ============================ */
+.ae-econ-filters { display: flex; flex-wrap: wrap; gap: var(--ae-space-2); }
+.ae-econ-filter {
+  padding: 3px var(--ae-space-3);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ae-fast), border-color var(--ae-fast), color var(--ae-fast);
+}
+.ae-econ-filter:hover { color: var(--ae-text); border-color: var(--ae-border-strong); }
+.ae-econ-filter.is-active {
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+  color: var(--ae-accent);
+}
+
+/* ============================ INSPECTOR ============================ */
+.ae-econ-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ae-space-4);
+}
+
+/* ============================ PRICE CHART ============================
+   Inline SVG over the market's own series. No library, no interpolation: the
+   line has exactly as many points as the market recorded years. */
+.ae-econ-chart-wrap { display: flex; flex-direction: column; gap: var(--ae-space-3); }
+/* Fixed height with a stretched viewBox: a sparkline is read for its shape, not
+   its aspect ratio, and `height: auto` on a 600×140 box makes a full-width panel
+   350px tall. Strokes are non-scaling so the stretch does not thicken them. */
+.ae-econ-chart {
+  display: block;
+  width: 100%;
+  height: 150px;
+  overflow: visible;
+}
+.ae-econ-chart-line {
+  fill: none;
+  stroke: var(--ae-accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.ae-econ-chart-area { fill: var(--ae-accent-fill); stroke: none; }
+/* The base price, dashed, so "expensive by its own standards" is visible. */
+.ae-econ-chart-base {
+  stroke: var(--ae-text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.ae-econ-chart-dot { fill: var(--ae-accent); stroke: var(--ae-panel); stroke-width: 2; }
+.ae-econ-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ae-space-5);
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+}
+.ae-econ-legend-item { display: inline-flex; align-items: center; gap: var(--ae-space-2); }
+.ae-econ-legend-swatch { display: block; width: 14px; height: 2px; border-radius: 1px; }
+.ae-econ-legend-line { background: var(--ae-accent); }
+.ae-econ-legend-base {
+  background: repeating-linear-gradient(
+    to right, var(--ae-text-muted) 0 4px, transparent 4px 8px
+  );
+}
+.ae-econ-chart-range { margin-left: auto; color: var(--ae-text-muted); font-variant-numeric: tabular-nums; }
+
+/* ============================ PRICE FACTORS ============================ */
+.ae-econ-factor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ae-space-4);
+  width: 100%;
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+}
+.ae-econ-factor-live { cursor: pointer; transition: border-color var(--ae-fast); }
+.ae-econ-factor-live:hover { border-color: var(--ae-accent-line); }
+.ae-econ-factor-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-econ-factor-label {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-econ-factor-detail {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  line-height: 1.4;
+}
+
+/* ============================ CHAIN & NETWORK ============================
+   The same node in both, so a red box means the same thing in the chain around
+   one good and in the map of the whole economy. */
+.ae-econ-chain {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--ae-space-5);
+}
+.ae-econ-chain-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  min-width: 0;
+}
+.ae-econ-chain-title {
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-muted);
+}
+.ae-econ-chain-arrow {
+  align-self: center;
+  color: var(--ae-text-muted);
+  font-size: var(--ae-text-body);
+}
+
+.ae-econ-network { display: flex; flex-direction: column; gap: var(--ae-space-5); }
+.ae-econ-network-tier { display: flex; flex-direction: column; gap: var(--ae-space-2); }
+.ae-econ-network-nodes { display: flex; flex-wrap: wrap; gap: var(--ae-space-2); }
+
+.ae-econ-node {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 128px;
+  padding: var(--ae-space-2) var(--ae-space-3);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--ae-fast), background var(--ae-fast);
+}
+.ae-econ-node:hover { border-color: var(--ae-accent-line); background: var(--ae-panel); }
+.ae-econ-node-positive { border-left-color: var(--ae-positive); }
+.ae-econ-node-neutral { border-left-color: var(--ae-neutral); }
+.ae-econ-node-warning { border-left-color: var(--ae-warning); }
+.ae-econ-node-critical { border-left-color: var(--ae-critical); }
+.ae-econ-node-unknown { border-left-color: var(--ae-border-strong); }
+/* The good the inspector is open on, so it is findable in its own chain. */
+.ae-econ-node.is-focus {
+  border-color: var(--ae-accent-line);
+  background: var(--ae-accent-fill);
+}
+.ae-econ-node-name {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+}
+.ae-econ-node-caption,
+.ae-econ-node-figure {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================ SECTORS ============================ */
+.ae-econ-sector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-3);
+  padding: var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-econ-sector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ae-space-3);
+}
+.ae-econ-sector-name {
+  font-size: var(--ae-text-object-name);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-econ-sector-constraint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ae-space-2);
+  padding-top: var(--ae-space-2);
+  border-top: 1px solid var(--ae-border-inset);
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+}
+
+/* ============================ DEPENDENCY ============================ */
+.ae-econ-dependency {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  padding: var(--ae-space-3) 0;
+  border-bottom: 1px solid var(--ae-border-inset);
+}
+.ae-econ-dependency:last-child { border-bottom: none; }
+.ae-econ-dependency-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ae-space-3);
+}
+.ae-econ-dependency-goods { display: flex; flex-wrap: wrap; gap: var(--ae-space-2); }
+.ae-econ-dep-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ae-space-2);
+  padding: 2px var(--ae-space-3);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-neutral);
+  border-radius: var(--ae-radius-1);
+  background: var(--ae-panel);
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  cursor: pointer;
+  transition: border-color var(--ae-fast), color var(--ae-fast);
+}
+.ae-econ-dep-chip:hover { border-color: var(--ae-accent-line); color: var(--ae-text); }
+.ae-econ-dep-chip strong { color: var(--ae-text); font-variant-numeric: tabular-nums; }
+.ae-econ-dep-warning { border-left-color: var(--ae-warning); }
+.ae-econ-dep-critical { border-left-color: var(--ae-critical); }
+
+/* ============================ RESPONSIVE ============================
+   Same rule as the other dossiers: horizontal room goes first. Tables scroll
+   inside their own box rather than widening the page — and the goods table is
+   the widest thing in the game, so its floor is higher. */
+@media (max-width: 1100px) {
+  .ae-econ-chain { gap: var(--ae-space-4); }
+  .ae-econ-chain-arrow { display: none; }
+}
+@media (max-width: 820px) {
+  .ae-econ-screen .ae-table { overflow-x: auto; }
+  .ae-econ-screen .ae-table-head,
+  .ae-econ-screen .ae-table-row { min-width: 760px; }
+  .ae-econ-node { min-width: 104px; }
+  .ae-econ-chart-range { margin-left: 0; }
+}
