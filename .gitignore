@@ -1,0 +1,34 @@
+# ============================ DEPENDENCIES ============================
+# Restored from package-lock.json by `npm install`. Never versioned: it is the
+# single biggest cause of merge conflicts and unpullable working trees.
+node_modules/
+.pnpm-store/
+
+# ============================ BUILD OUTPUT ============================
+dist/
+.vite/
+*.tsbuildinfo
+
+# ============================ LOGS AND SCRATCH ============================
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Throwaway output from audits, typechecks and probes.
+out*.txt
+tsc_check*.txt
+*_diff.txt
+scratch/
+
+# ============================ EDITOR AND OS ============================
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ============================ LOCAL ENV ============================
+.env
+.env.local
+.env.*.local
