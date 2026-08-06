@@ -1499,9 +1499,7 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
 .matrix-cell.self { background: rgba(255, 255, 255, 0.03); color: var(--text-faint); }
 .matrix-legend { display: flex; flex-wrap: wrap; gap: 14px; }
 
-.intervention-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.intervention-row .select-input { flex: 1; min-width: 170px; }
-.intervention-arrow { font-size: 1.125rem; color: var(--text-faint); }
+
 
 .war-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
 .war-card {
@@ -1767,24 +1765,7 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
 
 /* ============================ 14. GAME AWARDS POLITICS SCREEN ============================ */
 
-.politics-gameawards-container {
-  max-width: 1350px !important;
-  width: 95vw;
-  height: 90vh;
-  display: flex;
-  flex-direction: column;
-  background: radial-gradient(circle at top right, rgba(201, 161, 83, 0.08), rgba(7, 9, 14, 0.95)) !important;
-  border: 1px solid rgba(201, 161, 83, 0.3) !important;
-  box-shadow: 0 0 50px rgba(0, 0, 0, 0.8) !important;
-}
 
-.politics-header-hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
 
 .header-hero-title {
   display: flex;
@@ -1822,41 +1803,9 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
 }
 .close-btn-hero:hover { background: rgba(239, 68, 68, 0.4); border-color: #b8453c; }
 
-.politics-hero-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px;
-  overflow-y: auto;
-  flex: 1;
-}
 
-.kingdom-hero-tabs {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
 
-.kingdom-hero-tab {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px 18px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text);
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.kingdom-hero-tab.active {
-  background: rgba(201, 161, 83, 0.18);
-  border-color: var(--gold);
-  color: #ffffff;
-  box-shadow: var(--ae-edge-accent);
-}
+
 
 .politics-grid-layout {
   display: grid;
@@ -1899,12 +1848,6 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
   border-radius: 8px;
 }
 
-.r-stat {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.75rem;
-  color: var(--text-dim);
-}
 
 .hero-divider {
   border: none;

@@ -3077,3 +3077,570 @@ button.ae-realm-factor:hover { border-color: var(--ae-accent-line); }
   .ae-econ-node { min-width: 104px; }
   .ae-econ-chart-range { margin-left: 0; }
 }
+
+/* ==========================================================================
+   UI-6 — POLITICS + DIPLOMACY COMMAND CENTRE
+
+   One screen, two areas, and the densest set of small figures in the game. The
+   rules that keep it readable:
+
+   **Severity on a left edge, never as a wash.** Conditions, pressures and wars
+   carry their verdict on a 2px border. A page with six panels must not read as
+   an alarm.
+
+   **Every symbol carries its arithmetic.** The +++ / --- coalition marks are
+   drawn next to the three figures they were built from, and the tooltip states
+   the rule. A mark on its own would be exactly the invented score this project
+   keeps refusing to ship.
+
+   **Bars inside table cells, not a chart library.** Six faction metrics across
+   nine rows is a table; a bar in the cell makes it scannable without turning it
+   into a dashboard.
+   ========================================================================== */
+
+.ae-pol-screen .ae-screen-head { border-bottom-color: var(--ae-realm-line); }
+
+/* ============================ AREA SWITCH ============================
+   The two doors, always visible, so the halves read as one place. */
+.ae-pol-areas {
+  display: flex;
+  gap: var(--ae-space-2);
+  flex: 0 0 auto;
+}
+.ae-pol-area {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  padding: var(--ae-space-3) var(--ae-space-5);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--ae-fast), border-color var(--ae-fast), color var(--ae-fast);
+}
+.ae-pol-area:hover { color: var(--ae-text); border-color: var(--ae-border-strong); }
+.ae-pol-area.is-active {
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+  color: var(--ae-accent);
+}
+.ae-pol-area-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--ae-critical-fill);
+  border: 1px solid var(--ae-critical-line);
+  color: var(--ae-critical);
+  font-size: var(--ae-text-meta);
+  text-align: center;
+}
+
+/* ============================ IDENTITY ============================ */
+.ae-pol-identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  flex: 0 0 auto;
+  padding: var(--ae-space-5);
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border);
+  border-left: 2px solid var(--ae-realm);
+  border-radius: var(--ae-radius-3);
+}
+.ae-pol-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ae-space-7);
+}
+.ae-pol-headline-item { display: flex; align-items: center; gap: var(--ae-space-3); min-width: 0; }
+.ae-pol-headline-icon { opacity: 0.65; }
+.ae-pol-headline-text { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+.ae-pol-headline-value {
+  font-size: var(--ae-text-value-primary);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+.ae-pol-value-positive { color: var(--ae-positive); }
+.ae-pol-value-neutral { color: var(--ae-text); }
+.ae-pol-value-warning { color: var(--ae-warning); }
+.ae-pol-value-critical { color: var(--ae-critical); }
+.ae-pol-headline-label {
+  font-size: var(--ae-text-meta);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-muted);
+}
+.ae-pol-headline-ruler {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  min-width: 0;
+  padding-left: var(--ae-space-5);
+  border-left: 1px solid var(--ae-border-inset);
+}
+
+/* Prev / next realm. */
+.ae-pol-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  padding: 0 var(--ae-space-2);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-pol-nav-btn {
+  width: var(--ae-control-h-sm);
+  height: var(--ae-control-h-sm);
+  border: none;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  color: var(--ae-text-secondary);
+  font-size: var(--ae-text-body);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--ae-fast), color var(--ae-fast);
+}
+.ae-pol-nav-btn:hover { background: rgba(214, 197, 168, 0.1); color: var(--ae-text); }
+.ae-pol-nav-count {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ============================ CONDITIONS ============================ */
+.ae-pol-urgent { border-color: var(--ae-warning-line); }
+.ae-pol-urgent > .ae-panel-head { background: var(--ae-warning-fill); }
+.ae-pol-critical { border-color: var(--ae-critical-line); }
+.ae-pol-critical > .ae-panel-head { background: var(--ae-critical-fill); }
+
+.ae-pol-condition {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-4);
+  width: 100%;
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-neutral);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+}
+.ae-pol-condition-positive { border-left-color: var(--ae-positive); }
+.ae-pol-condition-neutral { border-left-color: var(--ae-neutral); }
+.ae-pol-condition-warning { border-left-color: var(--ae-warning); background: var(--ae-warning-fill); }
+.ae-pol-condition-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-pol-condition-live { cursor: pointer; transition: border-color var(--ae-fast); }
+.ae-pol-condition-live:hover { border-color: var(--ae-accent-line); }
+.ae-pol-condition-icon { opacity: 0.8; }
+.ae-pol-condition-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-pol-condition-label {
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-secondary);
+}
+.ae-pol-condition-finding {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 600;
+  color: var(--ae-text);
+  line-height: 1.35;
+}
+.ae-pol-condition-flash { animation: aeConditionFlash 2.4s var(--ae-ease) both; }
+
+/* ============================ PRESSURES ============================
+   A pressure opens into the deltas the society tick actually applied. */
+.ae-pol-pressure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-3);
+  padding: var(--ae-space-3) var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-warning);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-pol-pressure-critical { border-left-color: var(--ae-critical); background: var(--ae-critical-fill); }
+.ae-pol-pressure-head { display: flex; align-items: center; gap: var(--ae-space-4); }
+.ae-pol-pressure-icon { opacity: 0.8; }
+.ae-pol-pressure-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-pol-pressure-label {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-pol-pressure-detail {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  line-height: 1.4;
+}
+.ae-pol-pressure-actions { display: flex; align-items: center; gap: var(--ae-space-2); flex: 0 0 auto; }
+
+.ae-pol-causes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--ae-space-2);
+  padding-top: var(--ae-space-2);
+  border-top: 1px solid var(--ae-border-inset);
+}
+.ae-pol-cause {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ae-space-3);
+  width: 100%;
+  padding: var(--ae-space-2) var(--ae-space-3);
+  border: 1px solid transparent;
+  border-left: 2px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-1);
+  background: var(--ae-panel);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+}
+.ae-pol-cause-live { cursor: pointer; transition: border-color var(--ae-fast); }
+.ae-pol-cause-live:hover { border-color: var(--ae-accent-line); }
+.ae-pol-cause-label {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ae-pol-cause-value {
+  flex: 0 0 auto;
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  color: var(--ae-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ae-pol-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--ae-radius-1);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--ae-fast), background var(--ae-fast), border-color var(--ae-fast);
+}
+.ae-pol-mini-btn:hover {
+  opacity: 1;
+  background: var(--ae-accent-fill);
+  border-color: var(--ae-accent-line);
+}
+
+/* ============================ COALITION ============================
+   The marks never appear without the three figures they were built from. */
+.ae-pol-coalition { display: flex; flex-direction: column; }
+.ae-pol-coalition-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 56px auto;
+  align-items: center;
+  gap: var(--ae-space-4);
+  width: 100%;
+  padding: var(--ae-space-3) var(--ae-space-2);
+  border: none;
+  border-bottom: 1px solid var(--ae-border-inset);
+  background: transparent;
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ae-fast);
+}
+.ae-pol-coalition-row:last-child { border-bottom: none; }
+.ae-pol-coalition-row:hover { background: var(--ae-panel-sunken); }
+.ae-pol-coalition-name { font-size: var(--ae-text-secondary-size); font-weight: 600; }
+.ae-pol-coalition-figures {
+  display: flex;
+  gap: var(--ae-space-4);
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ae-pol-marks {
+  font-family: var(--ae-font-pixel);
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  text-align: center;
+}
+.ae-pol-marks-positive { color: var(--ae-positive); }
+.ae-pol-marks-neutral { color: var(--ae-text-muted); }
+.ae-pol-marks-warning { color: var(--ae-warning); }
+.ae-pol-marks-critical { color: var(--ae-critical); }
+
+/* ============================ FACTION TABLE ============================ */
+.ae-pol-faction-cell { display: inline-flex; align-items: center; gap: var(--ae-space-2); flex-wrap: wrap; }
+.ae-pol-cell-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  justify-content: flex-end;
+}
+.ae-pol-cell-track {
+  flex: 1 1 auto;
+  min-width: 28px;
+  height: 6px;
+  background: var(--ae-panel-sunken);
+  border: 1px solid var(--ae-border-inset);
+  border-radius: var(--ae-radius-1);
+  overflow: hidden;
+}
+.ae-pol-cell-fill { display: block; height: 100%; min-width: 2px; }
+.ae-pol-fill-positive { background: var(--ae-positive); }
+.ae-pol-fill-neutral { background: var(--ae-neutral); }
+.ae-pol-fill-warning { background: var(--ae-warning); }
+.ae-pol-fill-critical { background: var(--ae-critical); }
+.ae-pol-cell-value {
+  flex: 0 0 auto;
+  min-width: 4ch;
+  font-size: var(--ae-text-meta);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ae-pol-faction-focus { border-color: var(--ae-accent-line); }
+.ae-pol-two-up {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--ae-space-5);
+}
+
+.ae-pol-law-chips { display: flex; flex-wrap: wrap; gap: var(--ae-space-2); }
+.ae-pol-law-chip {
+  padding: 2px var(--ae-space-3);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-border-strong);
+  border-radius: var(--ae-radius-1);
+  background: var(--ae-panel);
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  cursor: pointer;
+  transition: border-color var(--ae-fast), color var(--ae-fast);
+}
+.ae-pol-law-chip:hover { border-color: var(--ae-accent-line); color: var(--ae-text); }
+.ae-pol-law-positive { border-left-color: var(--ae-positive); }
+.ae-pol-law-critical { border-left-color: var(--ae-critical); }
+
+/* ============================ LAWS ============================ */
+.ae-pol-law {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  padding: var(--ae-space-3) 0;
+  border-bottom: 1px solid var(--ae-border-inset);
+}
+.ae-pol-law:last-child { border-bottom: none; }
+.ae-pol-law-head { display: flex; align-items: center; gap: var(--ae-space-3); flex-wrap: wrap; }
+.ae-pol-law-name {
+  font-size: var(--ae-text-secondary-size);
+  font-weight: 700;
+  color: var(--ae-text);
+  cursor: help;
+}
+.ae-pol-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ae-space-5);
+}
+.ae-pol-effect-group { display: flex; align-items: center; gap: var(--ae-space-2); flex-wrap: wrap; }
+.ae-pol-effect-title {
+  font-size: var(--ae-text-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--ae-tracking-meta);
+  color: var(--ae-text-muted);
+}
+.ae-pol-effect-chips { display: flex; flex-wrap: wrap; gap: var(--ae-space-2); }
+.ae-pol-law-factions { display: flex; flex-wrap: wrap; gap: var(--ae-space-2); }
+
+/* ============================ DIPLOMACY ============================ */
+.ae-pol-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ae-space-4);
+}
+
+.ae-pol-treaty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  padding: var(--ae-space-3) 0;
+  border-bottom: 1px solid var(--ae-border-inset);
+}
+.ae-pol-treaty:last-child { border-bottom: none; }
+.ae-pol-treaty-head { display: flex; align-items: center; gap: var(--ae-space-3); flex-wrap: wrap; }
+.ae-pol-treaty-name { font-size: var(--ae-text-secondary-size); font-weight: 700; color: var(--ae-text); }
+.ae-pol-treaty-members { display: flex; flex-wrap: wrap; gap: var(--ae-space-3); }
+
+.ae-pol-partner,
+.ae-pol-dependency {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-2);
+  padding: var(--ae-space-3) 0;
+  border-bottom: 1px solid var(--ae-border-inset);
+}
+.ae-pol-partner:last-child,
+.ae-pol-dependency:last-child { border-bottom: none; }
+.ae-pol-partner-goods,
+.ae-pol-suppliers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ae-space-3);
+  font-size: var(--ae-text-meta);
+}
+
+.ae-pol-good-chip,
+.ae-pol-supplier {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ae-space-2);
+  padding: 2px var(--ae-space-3);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-neutral);
+  border-radius: var(--ae-radius-1);
+  background: var(--ae-panel);
+  color: var(--ae-text-secondary);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-meta);
+  cursor: pointer;
+  transition: border-color var(--ae-fast), color var(--ae-fast);
+}
+.ae-pol-good-chip:hover,
+.ae-pol-supplier:hover { border-color: var(--ae-accent-line); color: var(--ae-text); }
+.ae-pol-good-chip strong,
+.ae-pol-supplier strong { color: var(--ae-text); font-variant-numeric: tabular-nums; }
+/* A supplier at war with the buyer is the whole point of the panel. */
+.ae-pol-supplier-hostile { border-left-color: var(--ae-critical); color: var(--ae-critical); }
+
+.ae-pol-warning-note {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-critical);
+  line-height: 1.5;
+}
+
+/* ============================ WARS ============================ */
+.ae-pol-war {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-4);
+  border: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-critical);
+  border-radius: var(--ae-radius-2);
+  background: var(--ae-panel-sunken);
+}
+.ae-pol-war-head { display: flex; align-items: flex-start; gap: var(--ae-space-3); }
+.ae-pol-war-icon { opacity: 0.8; margin-top: 2px; }
+.ae-pol-war-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-pol-war-name {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-2);
+  flex-wrap: wrap;
+  font-size: var(--ae-text-object-name);
+  font-weight: 700;
+  color: var(--ae-text);
+}
+.ae-pol-war-goal {
+  font-size: var(--ae-text-meta);
+  color: var(--ae-text-secondary);
+  line-height: 1.45;
+}
+.ae-pol-war-actions { display: flex; flex-wrap: wrap; gap: var(--ae-space-3); }
+
+/* ============================ DIVINE POWERS ============================
+   Quarantined on purpose: everything else on this screen is reading, and these
+   four change the world. */
+.ae-pol-divine { border-color: var(--ae-accent-line); }
+.ae-pol-divine > .ae-panel-head { background: var(--ae-accent-fill); }
+.ae-pol-divine-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ae-space-3);
+  flex-wrap: wrap;
+}
+.ae-pol-divine-actions { display: flex; flex-wrap: wrap; gap: var(--ae-space-3); }
+.ae-pol-select {
+  padding: var(--ae-space-2) var(--ae-space-3);
+  border: 1px solid var(--ae-border);
+  border-radius: var(--ae-radius-1);
+  background: var(--ae-panel-sunken);
+  color: var(--ae-text);
+  font-family: var(--ae-font);
+  font-size: var(--ae-text-secondary-size);
+}
+
+/* ============================ TIMELINE ============================ */
+.ae-pol-timeline { display: flex; flex-direction: column; }
+.ae-pol-event {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ae-space-4);
+  padding: var(--ae-space-4) 0 var(--ae-space-4) var(--ae-space-4);
+  border-bottom: 1px solid var(--ae-border-inset);
+  border-left: 2px solid var(--ae-border-strong);
+}
+.ae-pol-event:last-child { border-bottom: none; }
+.ae-pol-event-major { border-left-color: var(--ae-accent-deep); }
+.ae-pol-event-legendary { border-left-color: var(--ae-accent); }
+.ae-pol-event-year {
+  flex: 0 0 auto;
+  min-width: 4ch;
+  font-family: var(--ae-font-pixel);
+  font-size: 0.625rem;
+  color: var(--ae-text-muted);
+  padding-top: 2px;
+}
+.ae-pol-event-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--ae-space-1); }
+.ae-pol-event-title { font-size: var(--ae-text-secondary-size); font-weight: 700; color: var(--ae-text); }
+.ae-pol-event-text { font-size: var(--ae-text-meta); line-height: 1.5; color: var(--ae-text-secondary); }
+
+.ae-pol-note {
+  font-size: var(--ae-text-meta);
+  line-height: 1.55;
+  color: var(--ae-text-muted);
+  font-style: italic;
+}
+
+/* ============================ RESPONSIVE ============================ */
+@media (max-width: 1100px) {
+  .ae-pol-headline { gap: var(--ae-space-5); }
+  .ae-pol-headline-ruler { padding-left: 0; border-left: none; }
+  .ae-pol-effects { gap: var(--ae-space-3); flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 820px) {
+  .ae-pol-areas { flex-direction: column; }
+  .ae-pol-headline-value { font-size: var(--ae-text-object-name); }
+  .ae-pol-coalition-row { grid-template-columns: 1fr 44px; }
+  .ae-pol-coalition-figures { grid-column: 1 / -1; }
+  /* A table narrower than its columns scrolls in place; the page never does. */
+  .ae-pol-screen .ae-table { overflow-x: auto; }
+  .ae-pol-screen .ae-table-head,
+  .ae-pol-screen .ae-table-row { min-width: 820px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ae-pol-condition-flash { animation: none; box-shadow: 0 0 0 2px var(--ae-accent); }
+}
