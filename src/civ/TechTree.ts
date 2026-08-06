@@ -55,14 +55,15 @@ const ERA_COST_SCALE: Record<TechEra, number> = {
   stone: 1,
   bronze: 1.2,
   iron: 1.8,
-  classical: 2.6,
-  industrial: 3.8,
-  modern: 5.2
+  classical: 3.2,
+  industrial: 6.5,
+  modern: 11.0
 };
 
-/** The real research cost of a technology, after era scaling. */
-export function techCost(tech: TechDefinition): number {
-  return Math.round(tech.cost * ERA_COST_SCALE[tech.era]);
+/** The real research cost of a technology, after era scaling and optional realm expansion factor. */
+export function techCost(tech: TechDefinition, cityCount: number = 1): number {
+  const expansionFactor = 1 + Math.max(0, (cityCount - 1) * 0.04);
+  return Math.round(tech.cost * ERA_COST_SCALE[tech.era] * expansionFactor);
 }
 
 /**

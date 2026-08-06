@@ -685,6 +685,8 @@ class AethoriaGame implements GameContext {
       case '2': this.setSpeed(2); return;
       case '3': this.setSpeed(5); return;
       case '4': this.setSpeed(10); return;
+      case '5': this.setSpeed(20); return;
+      case '6': this.setSpeed(30); return;
       case '[': this.hud.toolbar.cycleBrushSize(-1); return;
       case ']': this.hud.toolbar.cycleBrushSize(1); return;
       case 'f': e.preventDefault(); this.hud.toolbar.focusSearch(); return;

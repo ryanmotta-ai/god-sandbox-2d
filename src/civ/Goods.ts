@@ -447,10 +447,10 @@ export const PRODUCTION_RECIPES: Partial<Record<GoodId, ProductionRecipe[]>> = {
     { inputs: { oil: 2 }, output: 1.8, requiresTech: 'industrialization', label: 'refined fuel' }
   ],
   gunpowder: [
-    { inputs: { saltpeter: 2, coal: 1 }, output: 1.6, requiresTech: 'gunpowder', label: 'black powder' }
+    { inputs: { saltpeter: 2, coal: 1 }, output: 1.8, requiresTech: 'gunpowder', label: 'black powder' }
   ],
   machinery: [
-    { inputs: { steel: 3, rubber: 1, fuel: 1 }, output: 3, requiresTech: 'industrialization', label: 'industrial machinery' }
+    { inputs: { steel: 3, rubber: 1, fuel: 1 }, output: 3.4, requiresTech: 'industrialization', label: 'industrial machinery' }
   ]
 };
 

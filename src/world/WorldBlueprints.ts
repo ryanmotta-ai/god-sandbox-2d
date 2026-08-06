@@ -215,11 +215,12 @@ export const WORLD_BLUEPRINTS: Record<WorldBlueprint['id'], WorldBlueprint> = {
     ],
     ranges: [
       // A single volcanic ridge on the central island, and nowhere else. It is
-      // the only source of stone and metal in the world, which is the point.
+      // the only source of stone and metal in the world, which is the point —
+      // and therefore it has to be big enough to actually quarry.
       {
-        path: [{ u: 0.46, v: 0.44 }, { u: 0.54, v: 0.55 }],
-        width: 0.035,
-        height: 0.46
+        path: [{ u: 0.44, v: 0.42 }, { u: 0.50, v: 0.49 }, { u: 0.56, v: 0.57 }],
+        width: 0.058,
+        height: 0.54
       }
     ],
     forests: [

@@ -30,7 +30,9 @@ const SPEEDS: { value: number; label: string; icon?: string; shortcut: string; d
   { value: 1,  label: '1×',  shortcut: '1', description: 'Velocidade calibrada — 1 segundo real vale 1 hora no mundo.' },
   { value: 2,  label: '2×',  shortcut: '2', description: 'Duas horas por segundo.' },
   { value: 5,  label: '5×',  shortcut: '3', description: 'Cinco horas por segundo.' },
-  { value: 10, label: '10×', shortcut: '4', description: 'Dez horas por segundo. Décadas passam enquanto você observa.' }
+  { value: 10, label: '10×', shortcut: '4', description: 'Dez horas por segundo.' },
+  { value: 20, label: '20×', shortcut: '5', description: 'Vinte horas por segundo.' },
+  { value: 30, label: '30×', shortcut: '6', description: 'Trinta horas por segundo. Velocidade hiper-acelerada!' }
 ];
 
 const ERA_STYLE: Record<string, { color: string; icon: string }> = {

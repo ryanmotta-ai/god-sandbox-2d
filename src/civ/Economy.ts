@@ -136,13 +136,14 @@ export class WorldMarket {
       const entry = this.entries.get(good)!;
       const base = GOODS[good].basePrice;
 
-      // Ratio above 1 means scarcity. Clamped so a single year cannot dominate.
+      // Ratio above 1 means scarcity. Strategic goods can reach higher price spikes (up to 5.5x).
       const ratio = (entry.demand + 1) / (entry.supply + 1);
-      const target = base * Math.max(0.35, Math.min(3.2, Math.pow(ratio, 0.6)));
+      const ceiling = GOODS[good].strategic ? 5.5 : 3.5;
+      const target = base * Math.max(0.35, Math.min(ceiling, Math.pow(ratio, 0.6)));
 
       // Prices are sticky — they drift toward the clearing price rather than jumping.
       entry.price += (target - entry.price) * 0.25;
-      entry.price = Math.max(base * 0.3, Math.min(base * 4, entry.price));
+      entry.price = Math.max(base * 0.3, Math.min(base * ceiling, entry.price));
 
       entry.history.push(Math.round(entry.price * 100) / 100);
       if (entry.history.length > MAX_PRICE_HISTORY) entry.history.shift();
@@ -420,13 +421,14 @@ export class LocalMarket {
    */
   public settle(good: GoodId, worldPrice: number, available: number, wanted: number): void {
     const ratio = (wanted + 1) / (available + 1);
-    const pressure = Math.max(LOCAL_PRICE_FLOOR, Math.min(LOCAL_PRICE_CEILING, Math.pow(ratio, 0.6)));
+    const ceiling = GOODS[good]?.strategic ? 5.5 : LOCAL_PRICE_CEILING;
+    const pressure = Math.max(LOCAL_PRICE_FLOOR, Math.min(ceiling, Math.pow(ratio, 0.6)));
     const target = worldPrice * pressure;
 
     const current = this.prices.get(good) ?? worldPrice;
     // Sticky, like the world market: a local price drifts, it does not jump.
     const next = current + (target - current) * 0.3;
-    this.prices.set(good, Math.max(worldPrice * LOCAL_PRICE_FLOOR, Math.min(worldPrice * LOCAL_PRICE_CEILING, next)));
+    this.prices.set(good, Math.max(worldPrice * LOCAL_PRICE_FLOOR, Math.min(worldPrice * ceiling, next)));
   }
 
   public serialize(): Record<string, number> {

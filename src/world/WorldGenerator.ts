@@ -64,8 +64,13 @@ export class WorldGenerator {
         const ridgeNoise = 1 - Math.abs(noiseRidge.octave2D(x, y, 3, 0.5, 0.09) * 2 - 1);
         ridgeAmount *= 0.75 + ridgeNoise * 0.35;
 
-        let nH = 0.3 + land * 0.42 + detail * 0.09;
-        if (land > 0.15) nH += ridgeAmount * 0.34;
+        // The blob falloff is smooth, which means a straight mapping spends most
+        // of each landmass in the shallow band and drowns the design in shelf.
+        // Raising the field to a fractional power pushes the interior up so the
+        // coastline sits near the rim where it was drawn.
+        const shaped = Math.pow(Math.max(0, Math.min(1.2, land)), 0.55);
+        let nH = 0.255 + shaped * 0.44 + detail * 0.075;
+        if (land > 0.12) nH += ridgeAmount * 0.36;
         nH = Math.max(0, Math.min(1, nH));
 
         // Climate. Latitude first, then altitude, then the designed dry regions.
@@ -101,8 +106,9 @@ export class WorldGenerator {
     // Step 3: Cellular Biome Smoothing Pass to eliminate isolated single-pixel noise
     this.smoothBiomes(grid, width, height);
 
-    // Step 3b: Escolhe 2-4 núcleos de magia/corrupção coesos
-    this.carveMagicRegions(grid, width, height, rng, noiseMagic);
+    // Arcane and corrupted ground are land cover types of their own, so they
+    // stay off while the world is limited to two biomes.
+    void this.carveMagicRegions; void noiseMagic;
 
     // Step 4: Generate Clustered Natural Resources & Deposits
     generateDeposits(grid, width, height, actualSeed);
@@ -119,48 +125,30 @@ export class WorldGenerator {
    */
   private static classify(
     nH: number,
-    tempC: number,
+    _tempC: number,
     moisture: number,
     forest: number,
-    wetland: number,
+    _wetland: number,
     ridge: number,
-    land: number
+    _land: number
   ): TerrainType {
-    if (nH < 0.30) return TerrainType.DEEP_OCEAN;
-    if (nH < 0.375) return TerrainType.SHALLOW_WATER;
-    // The beach: a thin strip wherever land meets water.
-    if (nH < 0.405) return TerrainType.SAND;
+    // Water and rock are relief, not land cover: the sea has to exist for ports
+    // and the ranges have to exist for stone, ore and river sources.
+    if (nH < 0.285) return TerrainType.DEEP_OCEAN;
+    if (nH < 0.335) return TerrainType.SHALLOW_WATER;
+    if (ridge > 0.38 || nH > 0.76) return TerrainType.MOUNTAIN;
 
-    // Rock above the treeline, or anywhere a designed range peaks.
-    if (ridge > 0.42 || nH > 0.74) return TerrainType.MOUNTAIN;
-
-    if (tempC <= -8) return TerrainType.SNOW;
-    if (tempC <= 2) return TerrainType.TUNDRA;
-
-    // Standing water on flat, saturated ground.
-    if (wetland > 0.45 && nH < 0.5) return TerrainType.SWAMP;
-
-    if (tempC >= 27 && moisture < 0.34) return TerrainType.SAND;
-    if (tempC >= 22 && moisture < 0.46) return TerrainType.SAVANNA;
-
-    if (forest > 0.4 && moisture > 0.4) return TerrainType.FOREST;
-    // Deep interior with good rainfall turns to worked soil.
-    if (moisture > 0.62 && land > 0.5) return TerrainType.SOIL;
-
+    // The two biomes. Where the blueprint drew woodland and the ground is damp
+    // enough to hold it, the land is forest; everywhere else is open country.
+    if (forest > 0.34 && moisture > 0.36) return TerrainType.FOREST;
     return TerrainType.GRASS;
   }
 
   /** Fertility follows the biome and how wet it is, not a flat constant. */
   private static fertilityFor(type: TerrainType, moisture: number): number {
     const base: Partial<Record<TerrainType, number>> = {
-      [TerrainType.SOIL]: 0.95,
-      [TerrainType.GRASS]: 0.8,
+      [TerrainType.GRASS]: 0.85,
       [TerrainType.FOREST]: 0.6,
-      [TerrainType.SWAMP]: 0.5,
-      [TerrainType.SAVANNA]: 0.45,
-      [TerrainType.TUNDRA]: 0.16,
-      [TerrainType.SAND]: 0.1,
-      [TerrainType.SNOW]: 0.04,
       [TerrainType.MOUNTAIN]: 0.05,
       [TerrainType.SHALLOW_WATER]: 0.1,
       [TerrainType.DEEP_OCEAN]: 0
@@ -351,13 +339,8 @@ export class WorldGenerator {
         const ny = cy + dy;
         if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
         const b = grid[nx][ny];
-        if (
-          b.type === TerrainType.SOIL ||
-          b.type === TerrainType.SAVANNA ||
-          b.type === TerrainType.GRASS ||
-          b.type === TerrainType.SWAMP
-        ) {
-          if (b.type !== TerrainType.SWAMP) b.type = TerrainType.GRASS;
+        // River banks are the best farmland there is, in either biome.
+        if (b.type === TerrainType.GRASS || b.type === TerrainType.FOREST) {
           b.moisture = Math.min(1, b.moisture + 0.3);
           b.fertility = Math.min(1, b.fertility + 0.35);
         }
