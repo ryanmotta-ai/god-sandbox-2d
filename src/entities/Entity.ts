@@ -4,7 +4,7 @@ import { Profession, PersonalityType, AIState, EntityNeeds, createNeeds } from '
 import { SocialClass, deriveSocialClass, startingWealthFor } from './Identity';
 import type { GoodId } from '../civ/Goods';
 import { HasPosition } from '../core/SpatialHash';
-import { rng } from '../core/Random';
+import { rng, hashString, hashToUnit } from '../core/Random';
 
 /**
  * Given names for citizens. Deliberately plain and human — the chronicle reads
@@ -41,6 +41,18 @@ export class Entity implements HasPosition {
   public facing: number = 1; // 1 = right, -1 = left
   public facingAngle: number = 0; // Movement direction angle in radians
   public stuckTicks: number = 0;
+
+  /**
+   * Fixed per-citizen sideways bias, in tiles, applied when walking toward a
+   * destination. Deterministic from `id` so it never flickers frame to frame —
+   * it's why two neighbours walking the same errand take slightly different
+   * lines instead of sharing one pixel-perfect path.
+   */
+  public laneOffset: number = 0;
+  /** Eased ground speed (tiles/tick), ramping toward the requested speed instead of snapping to it. */
+  public currentSpeed: number = 0;
+  /** Ticks remaining on a brief "checking the way" pause before setting off on a new errand. */
+  public hesitationTicks: number = 0;
 
   public hp: number;
   public maxHp: number;
@@ -138,6 +150,7 @@ export class Entity implements HasPosition {
     this.species = species;
     this.x = x;
     this.y = y;
+    this.laneOffset = (hashToUnit(hashString(id)) - 0.5) * 0.7;
 
     const config = SPECIES_DEFINITIONS[species];
     this.name = name ?? this.generateName(species);

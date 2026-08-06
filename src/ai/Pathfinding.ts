@@ -1,4 +1,4 @@
-import { rng } from '../core/Random';
+import { rng, hashToUnit } from '../core/Random';
 import { TileMap } from '../world/TileMap';
 import { TERRAINS, TerrainType } from '../world/Biomes';
 import { crossingSpan, gradePenalty, groundworkFactor, roadGrade } from '../world/RoadTerrain';
@@ -326,7 +326,16 @@ export class SimplePathfinder {
     targetX: number, targetY: number,
     tileMap: TileMap,
     mode: 'land' | 'sea' | 'road',
-    maxNodes: number = 3000
+    maxNodes: number = 3000,
+    /**
+     * Stable per-traveller seed (e.g. a hashed route id). Nudges the cost of
+     * each tile by up to 15%, deterministically, so two routes of otherwise
+     * identical cost — parallel roads, either bank of a river — don't all
+     * converge on the exact same tiles every time. 0 (the default) reproduces
+     * the old, unjittered behaviour exactly, so callers with no traveller
+     * identity (road surveys, economic what-ifs) are unaffected.
+     */
+    agentSeed: number = 0
   ): { x: number; y: number }[] {
     const sx = Math.floor(startX);
     const sy = Math.floor(startY);
@@ -498,7 +507,12 @@ export class SimplePathfinder {
         const turn = current.dx === 0 && current.dy === 0
           ? 0
           : 1 - (current.dx * dx + current.dy * dy) / (Math.hypot(current.dx, current.dy) * baseDist);
-        const gScore = current.g + baseDist * moveCost * (1 + TURN_PENALTY * turn);
+        // Personal variance: a traveller with a seed leans away from tiles
+        // other travellers with different seeds would prefer, so routes of
+        // equal real cost still diversify instead of all locking onto the
+        // one path A* happened to visit first.
+        const personality = agentSeed !== 0 ? 1 + hashToUnit(agentSeed, nx, ny) * 0.15 : 1;
+        const gScore = current.g + baseDist * moveCost * (1 + TURN_PENALTY * turn) * personality;
         const known = bestCost.get(nKey);
         if (known !== undefined && gScore >= known) continue;
         bestCost.set(nKey, gScore);

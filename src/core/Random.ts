@@ -66,3 +66,26 @@ export function nextId(prefix: string): string {
 export function resetIds(): void {
   idCounter = 0;
 }
+
+/** Deterministic string→integer hash (Java-style), for a stable per-entity seed. */
+export function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+/**
+ * Mixes one or more integers into a float in [0, 1). Same mixing core as
+ * Mulberry32 above, but pure and stateless — so a stable seed (an entity id,
+ * a route id) always maps to the same value instead of consuming the shared
+ * RNG stream. Used for cosmetic per-agent variety (lane choice, ring
+ * position, path tie-breaking) that must stay identical between renders of
+ * the same tick rather than reroll every frame.
+ */
+export function hashToUnit(...values: number[]): number {
+  let t = 0;
+  for (const v of values) t = (t + v + 0x6d2b79f5) | 0;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}

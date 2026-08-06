@@ -14,7 +14,7 @@ import { SimplePathfinder } from './Pathfinding';
 import { ParticleManager } from '../renderer/Particles';
 import { chronicle } from '../civ/Chronicle';
 import { sound } from '../core/SoundSynth';
-import { rng, nextId } from '../core/Random';
+import { rng, nextId, hashString, hashToUnit } from '../core/Random';
 import { WorldMarket } from '../civ/Economy';
 import { TradeNetwork } from '../civ/Trade';
 import { GoodId, MINEABLE_GOODS } from '../civ/Goods';
@@ -65,6 +65,16 @@ export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_YEAR;
  * home, and the whole settlement looks like it is sleepwalking.
  */
 const MOVE_PER_TICK = 0.055;
+
+/** Cap on how fast a body's visual facing can turn, in rad/tick (12 rad/s at the fixed 60 ticks/s rate above). */
+const MAX_TURN_PER_TICK = 12 / 60;
+/** How long a "checking the way" pause holds a citizen still when it triggers, in ticks (~0.3s at 1x). */
+const HESITATION_TICKS = 18;
+/** States calm enough for a citizen to pause and look both ways — combat, flight and siege never hesitate. */
+const CALM_STATES = new Set<AIState>([
+  'idle', 'wander', 'patrol', 'gather_wood', 'gather_food', 'gather_ore',
+  'craft', 'eat', 'deliver', 'explore', 'return_home', 'go_to_work'
+]);
 
 const ATTACK_COOLDOWN = 8; // Ticks between attacks
 const COMBAT_RANGE = 1.8;
@@ -161,6 +171,12 @@ export class SimulationEngine {
       e.prevX = e.x;
       e.prevY = e.y;
 
+      // Ease-out: an entity that doesn't actively step this tick (idle, fighting,
+      // resting) settles back toward a standstill instead of holding whatever
+      // cruising speed it last had. `moveEntityToward` eases it back up again
+      // the moment it actually walks somewhere.
+      if (e.currentSpeed > 0.0001) e.currentSpeed *= 0.86; else e.currentSpeed = 0;
+
       // Anti-water safety check: Units MUST NOT walk on water or be inside water
       const currentTile = tileMap.getTile(Math.floor(e.x), Math.floor(e.y));
       if (currentTile && TERRAINS[currentTile.type].isWater) {
@@ -218,7 +234,12 @@ export class SimulationEngine {
       const distMoved = Math.hypot(movedX, movedY);
 
       if (distMoved > 0.001) {
-        e.facingAngle = Math.atan2(movedY, movedX);
+        // Angular inertia: turn toward the new heading at a bounded rate instead
+        // of snapping to face it, so a step backward doesn't spin the body 180°
+        // in a single frame.
+        const desiredAngle = Math.atan2(movedY, movedX);
+        const angleDiff = Math.atan2(Math.sin(desiredAngle - e.facingAngle), Math.cos(desiredAngle - e.facingAngle));
+        e.facingAngle += Math.max(-MAX_TURN_PER_TICK, Math.min(MAX_TURN_PER_TICK, angleDiff));
         if (Math.abs(movedX) > 0.003) {
           e.facing = movedX > 0 ? 1 : -1;
         }
@@ -231,15 +252,37 @@ export class SimulationEngine {
         // Flocking Separation: gentle push so characters walk alongside each other instead of stacking
         if (isHumanoid) {
           const neighbors = this.spatialHash.queryRadius(e.x, e.y, 0.4);
+          const myFx = Math.cos(e.facingAngle);
+          const myFy = Math.sin(e.facingAngle);
           for (const other of neighbors) {
             if (other.id !== e.id && other.species === e.species && other.hp > 0) {
               const sepDx = e.x - other.x;
               const sepDy = e.y - other.y;
               const sepDist = Math.hypot(sepDx, sepDy);
               if (sepDist > 0.01 && sepDist < 0.38) {
+                let pushX = sepDx / sepDist;
+                let pushY = sepDy / sepDist;
+
+                // Meeting someone face-to-face: rather than flinch straight
+                // backward, step toward our own right, same as real foot
+                // traffic resolves a head-on encounter without either side
+                // stopping.
+                const otherFx = Math.cos(other.facingAngle);
+                const otherFy = Math.sin(other.facingAngle);
+                const headOn = myFx * otherFx + myFy * otherFy < -0.3;
+                if (headOn) {
+                  const rightX = -myFy;
+                  const rightY = myFx;
+                  pushX = pushX * 0.35 + rightX * 0.65;
+                  pushY = pushY * 0.35 + rightY * 0.65;
+                  const norm = Math.hypot(pushX, pushY) || 1;
+                  pushX /= norm;
+                  pushY /= norm;
+                }
+
                 const push = (0.38 - sepDist) * 0.025;
-                const nx = e.x + (sepDx / sepDist) * push;
-                const ny = e.y + (sepDy / sepDist) * push;
+                const nx = e.x + pushX * push;
+                const ny = e.y + pushY * push;
                 const nTile = tileMap.getTile(Math.floor(nx), Math.floor(ny));
                 if (nTile && !TERRAINS[nTile.type].isWater && TERRAINS[nTile.type].isWalkable) {
                   e.x = nx;
@@ -915,7 +958,14 @@ export class SimulationEngine {
 
     // 2. Decide AI state if cooldown expired
     if (e.aiCooldown <= 0) {
+      const prevState = e.aiState;
       this.decideHumanoidState(e, tileMap, particles);
+      // Micro-hesitation: a citizen who just picked a new errand sometimes
+      // pauses half a beat first, as if checking the way, rather than
+      // launching into a perfectly instant departure every single time.
+      if (e.aiState !== prevState && CALM_STATES.has(e.aiState) && rng.chance(0.05)) {
+        e.hesitationTicks = HESITATION_TICKS;
+      }
     }
 
     // 3. Execute current AI state
@@ -1014,29 +1064,13 @@ if (e.kingdomId) {
       return;
     }
 
-    // ===== PRIORITY 7: Time-of-day routine (dawn/dusk/night overrides profession) =====
-    // Night: sleep. Dawn: go to work. Dusk: return home.
+    // ===== PRIORITY 7: Local energy recovery (no map-wide commute) =====
     if (e.cityId) {
-      switch (this.timeOfDay) {
-        case 'night':
-          e.aiState = 'idle';
-          e.energy = Math.min(e.maxEnergy, e.energy + 2);
-          e.aiCooldown = rng.rangeInt(15, 30);
-          return;
-        case 'dawn':
-          if (e.workplaceId) {
-            e.aiState = 'go_to_work';
-            e.aiCooldown = rng.rangeInt(20, 40);
-            return;
-          }
-          break;
-        case 'dusk':
-          if (e.workplaceId || e.homeX != null) {
-            e.aiState = 'return_home';
-            e.aiCooldown = rng.rangeInt(20, 40);
-            return;
-          }
-          break;
+      if (this.timeOfDay === 'night' && e.energy < e.maxEnergy * 0.4) {
+        e.energy = Math.min(e.maxEnergy, e.energy + 6);
+        e.aiState = 'idle';
+        e.aiCooldown = rng.rangeInt(10, 20);
+        return;
       }
     }
 
@@ -1133,7 +1167,19 @@ if (e.kingdomId) {
     return this.nearestDepositOf(e, city, 'food');
   }
 
-  /** As above, for any good the settlement has surveyed. */
+  /** Generates a discrete interaction slot in a ring around a target for an entity to prevent 1-pixel stacking. */
+  private getBuildingInteractionSlot(bx: number, by: number, entityId: string): { x: number; y: number } {
+    let hash = 0;
+    for (let i = 0; i < entityId.length; i++) {
+      hash = (hash * 31 + entityId.charCodeAt(i)) & 0xffffffff;
+    }
+    const angle = ((Math.abs(hash) % 360) * Math.PI) / 180;
+    const dist = 0.8 + ((Math.abs(hash >> 5) % 100) / 100) * 0.7;
+    return {
+      x: bx + 0.5 + Math.cos(angle) * dist,
+      y: by + 0.5 + Math.sin(angle) * dist
+    };
+  }
   private nearestDepositOf(e: Entity, city: City, good: GoodId): { x: number; y: number } | null {
     const patches = city.resourcesByGood.get(good);
     if (!patches || patches.length === 0) return null;
@@ -1448,8 +1494,7 @@ if (e.kingdomId) {
           if (this.pickUpLoad(e, tileMap, e.targetX!, e.targetY!, 'wood')) e.aiState = 'deliver';
           e.targetX = null; e.targetY = null;
         } else {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, e.targetX!, e.targetY!, tileMap, speed);
-          e.x = pos.x; e.y = pos.y;
+          const pos = this.moveEntityToward(e, e.targetX!, e.targetY!, tileMap, speed);
           if (pos.blocked) { e.targetX = null; e.targetY = null; }
         }
         break;
@@ -1464,9 +1509,13 @@ if (e.kingdomId) {
 
         let fx: number;
         let fy: number;
+        let slotX: number;
+        let slotY: number;
         if (bld) {
           fx = bld.x + 0.5;
           fy = bld.y + 0.5;
+          const slot = this.buildingSlot(e.id, bld.id, fx, fy);
+          slotX = slot.x; slotY = slot.y;
         } else {
           // Foraging without a farm: walk to real wild food on the ground rather
           // than milling around the town centre pretending to harvest nothing.
@@ -1478,6 +1527,7 @@ if (e.kingdomId) {
           }
           fx = e.targetX!;
           fy = e.targetY!;
+          slotX = fx; slotY = fy;
         }
 
         const fDist = Math.hypot(fx - e.x, fy - e.y);
@@ -1491,8 +1541,7 @@ if (e.kingdomId) {
             e.targetX = null; e.targetY = null;
           }
         } else {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, fx, fy, tileMap, speed);
-          e.x = pos.x; e.y = pos.y;
+          const pos = this.moveEntityToward(e, slotX, slotY, tileMap, speed);
           if (pos.blocked) { e.targetX = null; e.targetY = null; }
         }
         break;
@@ -1504,8 +1553,7 @@ if (e.kingdomId) {
         const hx = e.homeX ?? e.x;
         const hy = e.homeY ?? e.y;
         if (Math.hypot(hx - e.x, hy - e.y) >= 0.9) {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, hx, hy, tileMap, speed);
-          e.x = pos.x; e.y = pos.y;
+          this.moveEntityToward(e, hx, hy, tileMap, speed);
           break;
         }
 
@@ -1533,8 +1581,8 @@ if (e.kingdomId) {
         }
         const dCity = this.cities.get(e.cityId)!;
         if (Math.hypot(dCity.x - e.x, dCity.y - e.y) >= 1.2) {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, dCity.x, dCity.y, tileMap, speed);
-          e.x = pos.x; e.y = pos.y;
+          const slot = this.buildingSlot(e.id, `cityhall_${dCity.id}`, dCity.x, dCity.y);
+          const pos = this.moveEntityToward(e, slot.x, slot.y, tileMap, speed);
           if (pos.blocked) { e.targetX = null; e.targetY = null; }
           break;
         }
@@ -1575,8 +1623,8 @@ if (e.kingdomId) {
           e.energy = Math.max(0, e.energy - 0.25);
           e.gainXp(1);
         } else {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, bx, by, tileMap, speed);
-          e.x = pos.x; e.y = pos.y;
+          const slot = this.buildingSlot(e.id, bench.id, bx, by);
+          this.moveEntityToward(e, slot.x, slot.y, tileMap, speed);
         }
         break;
       }
@@ -1602,8 +1650,7 @@ if (e.kingdomId) {
           }
           e.targetX = null; e.targetY = null;
         } else {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, e.targetX!, e.targetY!, tileMap, speed);
-          e.x = pos.x; e.y = pos.y;
+          const pos = this.moveEntityToward(e, e.targetX!, e.targetY!, tileMap, speed);
           if (pos.blocked) { e.targetX = null; e.targetY = null; }
         }
         break;
@@ -1688,8 +1735,8 @@ if (e.kingdomId) {
           e.targetX = wx;
           e.targetY = wy;
         } else {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, wx, wy, tileMap, speed);
-          e.x = pos.x; e.y = pos.y;
+          const slot = this.buildingSlot(e.id, bld.id, wx, wy);
+          this.moveEntityToward(e, slot.x, slot.y, tileMap, speed);
         }
         break;
       }
@@ -1703,8 +1750,7 @@ if (e.kingdomId) {
           e.aiState = 'idle';
           e.targetX = null; e.targetY = null;
         } else {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, hx, hy, tileMap, speed);
-          e.x = pos.x; e.y = pos.y;
+          const pos = this.moveEntityToward(e, hx, hy, tileMap, speed);
           if (pos.blocked) { e.x = hx; e.y = hy; } // snap home if stuck
         }
         break;
@@ -1714,6 +1760,60 @@ if (e.kingdomId) {
 
   // ===================== MOVEMENT HELPERS =====================
 
+  /**
+   * The one place ordinary citizens (as opposed to combatants and fauna) step
+   * toward a destination. Layers three cosmetic behaviours onto the raw
+   * `getStepTowards` primitive, all of which fall away to nothing as an
+   * entity actually arrives, so none of it changes whether or when a citizen
+   * reaches their real target:
+   *
+   * - A brief hold if a "checking the way" pause just triggered.
+   * - Ease-in: eased ground speed ramps toward the requested pace instead of
+   *   snapping to it from a standstill.
+   * - Lane offset: aims a little to the citizen's own fixed side of the direct
+   *   line, so a crowd walking the same errand doesn't share one pixel-exact
+   *   path. Shrinks to zero on final approach so everyone still lands on the
+   *   actual destination.
+   */
+  private moveEntityToward(e: Entity, targetX: number, targetY: number, tileMap: TileMap, speed: number): { x: number; y: number; blocked?: boolean } {
+    if (e.hesitationTicks > 0) {
+      e.hesitationTicks--;
+      return { x: e.x, y: e.y, blocked: false };
+    }
+
+    e.currentSpeed += (speed - e.currentSpeed) * 0.22;
+    const eased = Math.max(0, e.currentSpeed);
+
+    let aimX = targetX;
+    let aimY = targetY;
+    const dx = targetX - e.x;
+    const dy = targetY - e.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 0.2 && SPECIES_DEFINITIONS[e.species].isHumanoid) {
+      const laneShrink = Math.min(1, dist / 1.4);
+      aimX += (-dy / dist) * e.laneOffset * laneShrink;
+      aimY += (dx / dist) * e.laneOffset * laneShrink;
+    }
+
+    const pos = SimplePathfinder.getStepTowards(e.x, e.y, aimX, aimY, tileMap, eased);
+    e.x = pos.x; e.y = pos.y;
+    return pos;
+  }
+
+  /**
+   * A stable point on a ring around a building, keyed to one specific
+   * visitor. Several citizens converging on the same workbench or town
+   * square used to walk to its exact center and stack on one tile; this
+   * spreads them around it instead, without any reservation table to keep in
+   * sync as citizens arrive, leave or die.
+   */
+  private buildingSlot(entityId: string, anchorId: string, bx: number, by: number): { x: number; y: number } {
+    const seed = hashString(entityId) ^ hashString(anchorId);
+    const angle = hashToUnit(seed, 1) * Math.PI * 2;
+    const radius = 0.8 + hashToUnit(seed, 2) * 0.7;
+    return { x: bx + Math.cos(angle) * radius, y: by + Math.sin(angle) * radius };
+  }
+
   private doWander(e: Entity, tileMap: TileMap, speed: number, radius: number): void {
     if (e.targetX === null || e.targetY === null ||
         SimplePathfinder.distance(e.x, e.y, e.targetX, e.targetY) < 0.3) {
@@ -1721,8 +1821,7 @@ if (e.kingdomId) {
       if (target) { e.targetX = target.x; e.targetY = target.y; }
       else { e.targetX = null; e.targetY = null; return; }
     }
-    const pos = SimplePathfinder.getStepTowards(e.x, e.y, e.targetX!, e.targetY!, tileMap, speed);
-    e.x = pos.x; e.y = pos.y;
+    const pos = this.moveEntityToward(e, e.targetX!, e.targetY!, tileMap, speed);
     if (pos.blocked) { e.targetX = null; e.targetY = null; }
   }
 
@@ -1733,8 +1832,7 @@ if (e.kingdomId) {
       if (target) { e.targetX = target.x; e.targetY = target.y; }
       else { e.targetX = null; e.targetY = null; return; }
     }
-    const pos = SimplePathfinder.getStepTowards(e.x, e.y, e.targetX!, e.targetY!, tileMap, speed);
-    e.x = pos.x; e.y = pos.y;
+    const pos = this.moveEntityToward(e, e.targetX!, e.targetY!, tileMap, speed);
     if (pos.blocked) { e.targetX = null; e.targetY = null; }
   }
 

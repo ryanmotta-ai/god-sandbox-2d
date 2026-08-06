@@ -1385,6 +1385,50 @@ export class PixelRenderer {
     }
   }
 
+  private renderOceanHorizon(
+    tileMap: TileMap,
+    camera: Camera,
+    width: number,
+    height: number,
+    baseSX: number,
+    baseSY: number,
+    tileSize: number
+  ): void {
+    // Fill background with deep ocean base color
+    this.ctx.fillStyle = '#0a2138';
+    this.ctx.fillRect(0, 0, width, height);
+
+    const topLeft = camera.screenToWorld(0, 0, width, height);
+    const bottomRight = camera.screenToWorld(width, height, width, height);
+
+    const screenMinX = Math.floor(topLeft.x);
+    const screenMaxX = Math.ceil(bottomRight.x);
+    const screenMinY = Math.floor(topLeft.y);
+    const screenMaxY = Math.ceil(bottomRight.y);
+
+    const oceanPadding = 40;
+    const renderMinX = Math.max(-oceanPadding, screenMinX);
+    const renderMaxX = Math.min(tileMap.width + oceanPadding - 1, screenMaxX);
+    const renderMinY = Math.max(-oceanPadding, screenMinY);
+    const renderMaxY = Math.min(tileMap.height + oceanPadding - 1, screenMaxY);
+
+    for (let x = renderMinX; x <= renderMaxX; x++) {
+      for (let y = renderMinY; y <= renderMaxY; y++) {
+        if (x >= 0 && x < tileMap.width && y >= 0 && y < tileMap.height) continue;
+
+        const sx = x * tileSize + baseSX;
+        const sy = y * tileSize + baseSY;
+
+        // Animated ocean horizon surface wave effect
+        const wave = Math.sin((x * 0.35 + y * 0.35) + this.animTimer * 1.1);
+        const color = wave > 0.45 ? '#18456c' : wave < -0.45 ? '#081a2d' : '#0e2b47';
+
+        this.ctx.fillStyle = color;
+        this.ctx.fillRect(sx, sy, tileSize + 0.5, tileSize + 0.5);
+      }
+    }
+  }
+
   public render(
     camera: Camera,
     tileMap: TileMap,
@@ -1403,9 +1447,14 @@ export class PixelRenderer {
   ): void {
     const width = this.canvas.width;
     const height = this.canvas.height;
-    this.ctx.fillStyle = '#090d16';
-    this.ctx.fillRect(0, 0, width, height);
     this.animTimer = (this.animTimer + 0.04) % 628.318;
+
+    const tileSize = camera.tileSize * camera.zoom;
+    const baseSX = width / 2 + camera.frameShakeX - camera.x * camera.zoom;
+    const baseSY = height / 2 + camera.frameShakeY - camera.y * camera.zoom;
+
+    // Render Infinite Deep Ocean Horizon background (eliminates black bars like WorldBox)
+    this.renderOceanHorizon(tileMap, camera, width, height, baseSX, baseSY, tileSize);
 
     // Determine visible tile bounds
     const topLeft = camera.screenToWorld(0, 0, width, height);
@@ -1415,10 +1464,6 @@ export class PixelRenderer {
     const maxX = Math.min(tileMap.width - 1, Math.ceil(bottomRight.x));
     const minY = Math.max(0, Math.floor(topLeft.y));
     const maxY = Math.min(tileMap.height - 1, Math.ceil(bottomRight.y));
-
-    const tileSize = camera.tileSize * camera.zoom;
-    const baseSX = width / 2 + camera.frameShakeX - camera.x * camera.zoom;
-    const baseSY = height / 2 + camera.frameShakeY - camera.y * camera.zoom;
 
     // ========== 1. RENDER TERRAIN TILES ==========
     // Static (non-animated) terrain is baked into an offscreen canvas once and only
@@ -1681,9 +1726,13 @@ export class PixelRenderer {
         const animation = this.getEntityAnimation(e, isMoving);
         const frame = this.getAnimationFrame(e, animation, safeHash);
         // The body's bob rides the same stride as the feet, so a citizen
-        // bounces once per step instead of at a rate of its own.
+        // bounces once per step instead of at a rate of its own. Amplitude
+        // scales with how fast they're actually covering ground this frame —
+        // easing to a stop at the doorway shouldn't still bounce at a full
+        // sprint's height.
+        const bobScale = Math.max(0.4, Math.min(1.6, movement / 0.05));
         const bob = (animation === 'walk' || animation === 'flee' || animation === 'carry')
-          ? Math.sin((e.renderWalked / PixelRenderer.STRIDE_TILES) * Math.PI * 2 + safeHash) * 1.2
+          ? Math.sin((e.renderWalked / PixelRenderer.STRIDE_TILES) * Math.PI * 2 + safeHash) * 1.2 * bobScale
           : 0;
         const breathe = animation === 'idle' ? Math.sin(this.animTimer * 2.2 + safeHash * 0.01) * 0.45 : 0;
         const entitySize = tileSize;
@@ -1726,6 +1775,9 @@ export class PixelRenderer {
         }
 
         const sprite = SpriteGenerator.getEntitySprite(e.species, direction, animation, frame, {
+          // The id never changes, so a person keeps the same face and clothes
+          // for their whole life — and across every replay of the same seed.
+          appearanceSeed: e.id,
           profession: e.profession,
           weaponName: e.equipment.weapon?.name,
           weaponCategory: e.equipment.weapon?.category,

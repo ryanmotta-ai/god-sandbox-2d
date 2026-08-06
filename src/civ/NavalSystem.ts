@@ -6,6 +6,7 @@ import { TileMap } from '../world/TileMap';
 import { TERRAINS, TerrainType } from '../world/Biomes';
 import { ParticleManager } from '../renderer/Particles';
 import { SimplePathfinder } from '../ai/Pathfinding';
+import { hashString } from '../core/Random';
 import { events } from '../core/EventBus';
 import { chronicle } from './Chronicle';
 
@@ -174,7 +175,7 @@ export class NavalSystem {
 
         if (!startPos || !endPos) continue;
 
-        const seaPath = SimplePathfinder.findPath(startPos.x, startPos.y, endPos.x, endPos.y, tileMap, 'sea');
+        const seaPath = SimplePathfinder.findPath(startPos.x, startPos.y, endPos.x, endPos.y, tileMap, 'sea', 3000, hashString(route.id));
 
         if (seaPath.length === 0) continue;
         ship = {
@@ -211,7 +212,7 @@ export class NavalSystem {
           const startPos = this.findPortWaterTile(fromCity, tileMap);
           const endPos = this.findPortWaterTile(toCity, tileMap);
           if (startPos && endPos) {
-            const newPath = SimplePathfinder.findPath(startPos.x, startPos.y, endPos.x, endPos.y, tileMap, 'sea');
+            const newPath = SimplePathfinder.findPath(startPos.x, startPos.y, endPos.x, endPos.y, tileMap, 'sea', 3000, hashString(route.id));
             if (newPath.length > 0) ship.path = newPath;
           }
 

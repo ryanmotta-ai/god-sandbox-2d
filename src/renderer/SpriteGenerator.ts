@@ -113,33 +113,29 @@ const HUMAN_OUTFITS: { cloth: string; clothShade: string; trim: string; boot: st
   { cloth: '#e2e8f0', clothShade: '#cbd5e1', trim: '#fbbf24', boot: '#4a3524' }  // Algodão Nobre
 ];
 
-const HUMAN_SKINS: HumanoidSpritePalette[] = HUMAN_SKIN_TONES.map((tone, i) => {
-  const outfit = HUMAN_OUTFITS[i % HUMAN_OUTFITS.length];
-  return {
-    ...tone,
-    hair: HUMAN_HAIR[i % HUMAN_HAIR.length],
-    ...outfit,
-    metal: '#cbd5e1',
-    accent: '#fbbf24',
-    eye: '#1b1b1b'
-  };
-});
+/**
+ * The finished set of looks.
+ *
+ * Deliberately a fixed, small number. Every sprite is cached per look, per
+ * direction, per animation and per frame, so letting each citizen mix their own
+ * combination would multiply the cache into thousands of canvases for a variety
+ * nobody can see at map zoom. Twelve is enough that a street looks populated.
+ */
+const HUMAN_SKINS: HumanoidSpritePalette[] = Array.from({ length: 12 }, (_, i) => ({
+  ...HUMAN_SKIN_TONES[i % HUMAN_SKIN_TONES.length],
+  hair: HUMAN_HAIR[(i * 3) % HUMAN_HAIR.length],
+  ...HUMAN_OUTFITS[(i * 5) % HUMAN_OUTFITS.length],
+  metal: '#cbd5e1',
+  accent: '#fbbf24',
+  eye: '#1b1b1b'
+}));
 
-/** Picks the same appearance for the same person every time. */
-export function humanAppearance(seedText: string): HumanoidSpritePalette {
+/** Assigns a person their look — the same one for life, and on every replay. */
+export function humanSkinIndex(seedText: string | undefined): number {
+  if (!seedText) return 0;
   let hash = 0;
   for (let i = 0; i < seedText.length; i++) hash = (hash * 31 + seedText.charCodeAt(i)) | 0;
-  const h = Math.abs(hash);
-  const tone = HUMAN_SKIN_TONES[h % HUMAN_SKIN_TONES.length];
-  const outfit = HUMAN_OUTFITS[Math.floor(h / 7) % HUMAN_OUTFITS.length];
-  return {
-    ...tone,
-    hair: HUMAN_HAIR[Math.floor(h / 53) % HUMAN_HAIR.length],
-    ...outfit,
-    metal: '#cbd5e1',
-    accent: '#fbbf24',
-    eye: '#1b1b1b'
-  };
+  return Math.abs(hash) % HUMAN_SKINS.length;
 }
 
 export class SpriteGenerator {
@@ -211,8 +207,9 @@ export class SpriteGenerator {
   ): HTMLCanvasElement {
     const normalizedFrame = Math.abs(frame) % 4;
     const safe = (value?: string | null) => (value || 'none').toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 42);
+    const look = humanSkinIndex(visual.appearanceSeed);
     const visualKey = [
-      safe(visual.appearanceSeed),
+      `look${look}`,
       safe(visual.profession),
       safe(visual.weaponName),
       safe(visual.weaponCategory),
@@ -222,7 +219,7 @@ export class SpriteGenerator {
     const key = `entity_anim_${species}_${direction}_${animation}_${normalizedFrame}_${visualKey}`;
 
     return this.getSprite(key, (ctx) => {
-      this.drawSpeciesFrame(ctx, species, direction, animation, normalizedFrame, Boolean(visual.weaponName), visual.appearanceSeed);
+      this.drawSpeciesFrame(ctx, species, direction, animation, normalizedFrame, Boolean(visual.weaponName), look);
       if (this.isHumanoid(species)) {
         this.drawHumanoidVisualState(ctx, species, direction, animation, normalizedFrame, visual);
       }
@@ -246,11 +243,11 @@ export class SpriteGenerator {
     animation: EntitySpriteAnimation,
     frame: number,
     suppressFallbackWeapon: boolean = false,
-    appearanceSeed?: string
+    look: number = 0
   ): void {
     ctx.clearRect(0, 0, 24, 24);
     ctx.imageSmoothingEnabled = false;
-    this.pendingAppearance = appearanceSeed;
+    this.pendingLook = look;
 
     switch (species) {
       case SpeciesType.HUMAN:
@@ -272,10 +269,10 @@ export class SpriteGenerator {
   }
 
   /** Set for the duration of one frame draw, so the palette knows whose body it is. */
-  private static pendingAppearance: string | undefined;
+  private static pendingLook = 0;
 
   private static humanoidPalette(_species: SpeciesType): HumanoidSpritePalette {
-    return this.pendingAppearance ? humanAppearance(this.pendingAppearance) : HUMAN_SKINS[0];
+    return HUMAN_SKINS[this.pendingLook] ?? HUMAN_SKINS[0];
   }
 
   private static drawHumanoid(
@@ -340,53 +337,52 @@ export class SpriteGenerator {
     attack: boolean,
     suppressFallbackWeapon: boolean = false
   ): void {
+    // A small, flat-coloured person: head, tunic, two stick arms, two legs.
+    // About 13px tall inside the 24px cell — roughly two thirds of the old
+    // fantasy bodies — so a crowd reads as a crowd instead of a pile of detail.
     const back = direction === 'up';
-    const leftLegX = 8 + Math.min(0, step);
+    const leftLegX = 9 + Math.min(0, step);
     const rightLegX = 13 + Math.max(0, step);
     const armSwing = animation === 'walk' || animation === 'flee' || animation === 'carry' ? step : 0;
+    const top = 7 + bob;
 
-    this.rect(ctx, leftLegX, 17, 3, 5, p.boot);
-    this.rect(ctx, rightLegX, 17, 3, 5, p.boot);
-    this.rect(ctx, leftLegX, 21, 4, 1, p.clothShade);
-    this.rect(ctx, rightLegX, 21, 4, 1, p.clothShade);
+    this.rect(ctx, leftLegX, 17, 2, 3, p.clothShade);
+    this.rect(ctx, rightLegX, 17, 2, 3, p.clothShade);
+    this.rect(ctx, leftLegX, 19, 2, 1, p.boot);
+    this.rect(ctx, rightLegX, 19, 2, 1, p.boot);
 
-    this.rect(ctx, 7, 10 + bob, 10, 8, p.clothShade);
-    this.rect(ctx, 8, 10 + bob, 8, 7, p.cloth);
-    this.rect(ctx, 8, 16 + bob, 8, 1, p.trim);
-    this.rect(ctx, 10, 11 + bob, 4, 1, p.trim);
+    // Torso: one solid block of cloth with a belt across it.
+    this.rect(ctx, 9, top + 5, 6, 5, p.cloth);
+    this.rect(ctx, 9, top + 8, 6, 1, p.trim);
 
     const activeHands = attack || animation === 'gather' || animation === 'build' || animation === 'shoot';
     if (activeHands) {
-      this.rect(ctx, 4, 11 + bob, 4, 3, p.skinShade);
-      this.rect(ctx, 16, 10 + bob, 5, 3, p.skin);
-      // Legacy species sprites still get their signature weapon during a plain attack.
-      // Simulation-aware sprites layer the entity's actual weapon on top afterwards.
-      if (attack && !suppressFallbackWeapon) this.drawHumanoidWeapon(ctx, species, 18, 8 + bob, 'right', frame);
+      this.rect(ctx, 7, top + 6, 2, 2, p.skin);
+      this.rect(ctx, 15, top + 5, 3, 2, p.skin);
+      if (attack && !suppressFallbackWeapon) this.drawHumanoidWeapon(ctx, species, 17, top + 3, 'right', frame);
     } else if (animation === 'carry') {
-      this.rect(ctx, 5, 12 + bob, 4, 3, p.skinShade);
-      this.rect(ctx, 15, 12 + bob, 4, 3, p.skin);
+      this.rect(ctx, 8, top + 4, 2, 2, p.skin);
+      this.rect(ctx, 14, top + 4, 2, 2, p.skin);
     } else {
-      this.rect(ctx, 5 + armSwing, 11 + bob, 3, 5, p.skinShade);
-      this.rect(ctx, 16 - armSwing, 11 + bob, 3, 5, p.skin);
+      // Idle and walking: arms straight out to the sides, swinging with the step.
+      this.rect(ctx, 7, top + 6 + armSwing, 2, 3, p.skin);
+      this.rect(ctx, 15, top + 6 - armSwing, 2, 3, p.skin);
     }
 
     if (back) {
-      this.rect(ctx, 8, 5 + bob, 8, 6, p.hair);
-      this.rect(ctx, 9, 4 + bob, 6, 2, p.hair);
-      this.rect(ctx, 9, 6 + bob, 6, 4, p.skinShade);
-      this.rect(ctx, 7, 9 + bob, 10, 2, p.clothShade);
-      this.drawHumanoidSpeciesDetails(ctx, species, 'up', frame, bob);
+      // From behind, the whole head is hair.
+      this.rect(ctx, 9, top, 6, 5, p.hair);
+      this.rect(ctx, 9, top + 4, 6, 1, p.skinShade);
       return;
     }
 
-    this.rect(ctx, 7, 5 + bob, 2, 4, p.skinShade);
-    this.rect(ctx, 15, 5 + bob, 2, 4, p.skinShade);
-    this.rect(ctx, 8, 4 + bob, 8, 7, p.skin);
-    this.rect(ctx, 9, 4 + bob, 6, 2, p.hair);
-    this.rect(ctx, 10, 7 + bob, 1, 1, p.eye);
-    this.rect(ctx, 14, 7 + bob, 1, 1, p.eye);
-    this.rect(ctx, 12, 9 + bob, 2, 1, p.skinShade);
-    this.drawHumanoidSpeciesDetails(ctx, species, 'down', frame, bob);
+    // Head: skin block, hair cap over the top and down the temples, two eyes.
+    this.rect(ctx, 9, top + 1, 6, 4, p.skin);
+    this.rect(ctx, 9, top, 6, 2, p.hair);
+    this.px(ctx, 9, top + 2, p.hair);
+    this.px(ctx, 14, top + 2, p.hair);
+    this.px(ctx, 10, top + 3, p.eye);
+    this.px(ctx, 13, top + 3, p.eye);
   }
 
   private static drawHumanoidSide(
@@ -400,34 +396,34 @@ export class SpriteGenerator {
     attack: boolean,
     suppressFallbackWeapon: boolean = false
   ): void {
+    // The same person in profile: one visible arm, one visible eye.
     const lunge = attack ? 1 : 0;
     const armSwing = animation === 'walk' || animation === 'flee' || animation === 'carry' ? step : 0;
+    const top = 7 + bob;
+    const x = 9 + lunge;
 
-    this.rect(ctx, 8, 17, 3, 5, p.boot);
-    this.rect(ctx, 13, 17 + Math.abs(step), 3, 4, p.boot);
-    this.rect(ctx, 7 + lunge, 10 + bob, 10, 8, p.clothShade);
-    this.rect(ctx, 8 + lunge, 10 + bob, 8, 7, p.cloth);
-    this.rect(ctx, 9 + lunge, 15 + bob, 7, 1, p.trim);
+    this.rect(ctx, 9, 17, 2, 3, p.clothShade);
+    this.rect(ctx, 12, 17 + Math.abs(step), 2, Math.max(1, 3 - Math.abs(step)), p.clothShade);
+    this.rect(ctx, 9, 19, 2, 1, p.boot);
+    this.rect(ctx, 12, 19, 2, 1, p.boot);
 
-    this.rect(ctx, 9 + lunge, 5 + bob, 8, 6, p.skin);
-    this.rect(ctx, 8 + lunge, 6 + bob, 2, 4, p.skinShade);
-    this.rect(ctx, 10 + lunge, 4 + bob, 6, 2, p.hair);
-    this.rect(ctx, 16 + lunge, 7 + bob, 1, 1, p.eye);
-    this.rect(ctx, 17 + lunge, 9 + bob, 2, 1, p.skinShade);
+    this.rect(ctx, x, top + 5, 5, 5, p.cloth);
+    this.rect(ctx, x, top + 8, 5, 1, p.trim);
+
+    this.rect(ctx, x, top + 1, 5, 4, p.skin);
+    this.rect(ctx, x, top, 5, 2, p.hair);
+    this.px(ctx, x, top + 2, p.hair);
+    this.px(ctx, x + 3, top + 3, p.eye);
 
     const activeHands = attack || animation === 'gather' || animation === 'build' || animation === 'shoot';
     if (activeHands) {
-      this.rect(ctx, 16 + lunge, 11 + bob, 5, 3, p.skin);
-      if (attack && !suppressFallbackWeapon) this.drawHumanoidWeapon(ctx, species, 18 + lunge, 8 + bob, 'right', frame);
+      this.rect(ctx, x + 5, top + 5, 3, 2, p.skin);
+      if (attack && !suppressFallbackWeapon) this.drawHumanoidWeapon(ctx, species, x + 7, top + 3, 'right', frame);
     } else if (animation === 'carry') {
-      this.rect(ctx, 15, 12 + bob, 5, 3, p.skin);
-      this.rect(ctx, 7, 12 + bob, 3, 3, p.skinShade);
+      this.rect(ctx, x + 5, top + 4, 2, 2, p.skin);
     } else {
-      this.rect(ctx, 6 + armSwing, 11 + bob, 3, 5, p.skinShade);
-      this.rect(ctx, 16 - armSwing, 11 + bob, 3, 5, p.skin);
+      this.rect(ctx, x + 5, top + 6 - armSwing, 2, 3, p.skin);
     }
-
-    this.drawHumanoidSpeciesDetails(ctx, species, 'right', frame, bob);
   }
 
   private static drawHumanoidVisualState(
@@ -775,20 +771,6 @@ export class SpriteGenerator {
     this.rect(ctx, x + 5 + reach, y + 1, 1, 2, '#ffffff');
   }
 
-  private static drawHumanoidSpeciesDetails(
-    ctx: CanvasRenderingContext2D,
-    species: SpeciesType,
-    direction: SpriteDirection,
-    frame: number,
-    bob: number
-  ): void {
-    const side = direction === 'left' || direction === 'right';
-
-    // One people, so nothing is drawn here by blood. Everything that makes a
-    // citizen look different — skin, hair, clothes, tools, rank — is applied by
-    // humanAppearance() and the visual-state pass.
-    void species; void frame; void side; void bob;
-  }
 
   private static drawDeer(
     ctx: CanvasRenderingContext2D,

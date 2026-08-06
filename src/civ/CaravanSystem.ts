@@ -6,6 +6,7 @@ import { TileMap } from '../world/TileMap';
 import { TERRAINS } from '../world/Biomes';
 import { ParticleManager } from '../renderer/Particles';
 import { SimplePathfinder, ROAD_SPEED_BONUS } from '../ai/Pathfinding';
+import { hashString } from '../core/Random';
 import { fundUpgrade, upgradeCost } from './RoadEngineering';
 
 export type CaravanType = 'donkey' | 'camel' | 'cart';
@@ -90,10 +91,10 @@ const ROAD_UPGRADE_THRESHOLDS = {
 };
 
 /** Minimum traffic fraction to maintain a road level (below this, road degrades) */
-const ROAD_DEGRADE_FRACTION = 0.3;
+const ROAD_DEGRADE_FRACTION = 0.12;
 
 /** Yearly traffic decay factor */
-const ROAD_TRAFFIC_DECAY = 0.85;
+const ROAD_TRAFFIC_DECAY = 0.92;
 
 export class CaravanSystem {
   public activeCaravans: Map<string, OverlandCaravan> = new Map();
@@ -147,7 +148,7 @@ export class CaravanSystem {
       if (!this.activeCaravans.has(route.id)) {
         const dist = Math.hypot(toCity.x - fromCity.x, toCity.y - fromCity.y);
         const caravanType: CaravanType = dist > 15 ? 'camel' : dist > 8 ? 'cart' : 'donkey';
-        const landPath = SimplePathfinder.findPath(fromCity.x, fromCity.y, toCity.x, toCity.y, tileMap, 'land');
+        const landPath = SimplePathfinder.findPath(fromCity.x, fromCity.y, toCity.x, toCity.y, tileMap, 'land', 3000, hashString(route.id));
 
         // Don't spawn caravan if no valid land path exists
         if (landPath.length === 0) continue;
