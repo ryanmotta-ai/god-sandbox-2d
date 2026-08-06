@@ -1,418 +1,380 @@
-import { el, clear, badge, statRow, linkRow, emptyState, formatNumber } from '../core/Dom';
-import { GOODS } from '../../civ/Goods';
-import { roadCapacityFactor, portCapacityFactor, portOperational } from '../../civ/Infrastructure';
-import type { City } from '../../civ/City';
+/**
+ * The infrastructure and logistics command centre.
+ *
+ * The question it answers is *how are goods moving, where are the bottlenecks,
+ * and who suffers if this stops*. That last clause is the point of the phase: a
+ * damaged rail is not a finding, it is the first line of a chain that ends in a
+ * forge with no coal — so the overview opens on bottlenecks with their causal
+ * chains attached, and the network detail comes after.
+ *
+ * One absence shapes the whole screen and is said out loud wherever it matters:
+ * **there are no trains.** `RailwayNetwork.tickFreight` transfers stock directly
+ * between stations on a connected line; nothing physical rides the rails. The
+ * movers that do exist are caravans and ships, and both carry a real cargo, a
+ * real amount and a real position — so those are what the player can follow.
+ *
+ * Everything runs behind `LogisticsMetricsCache`. The snapshot sweeps the whole
+ * tile grid and walks every rail component; it must never run per frame.
+ */
+import { el } from '../core/Dom';
+import {
+  screenShell, tabs, button, searchInput, emptyState, tooltip,
+  type TabStrip, type TabItem
+} from '../kit';
+import { LogisticsMetricsCache, type LogisticsMetrics, type RouteView, type CorridorView } from '../logistics/LogisticsMetrics';
+import { diagnoseLogistics, logisticsProblems } from '../logistics/LogisticsDiagnostics';
+import {
+  buildOverview, buildNetworks, buildPorts, buildCorridors, buildCorridorDetail,
+  buildMovers, buildCityAccessTab
+} from '../logistics/LogisticsTabs';
+import type { Child } from '../core/Dom';
 import type { Screen, NavParams } from '../core/ScreenManager';
 import type { GameContext } from '../core/GameContext';
+import type { GoodId } from '../../civ/Goods';
 
-/**
- * The physical network the economy actually runs on.
- *
- * Everything here is counted off the map: road and rail levels come from tiles,
- * damage from what war did to them, port capacity from building HP. A number on
- * this screen is a thing you could walk to and look at.
- */
+/** What the tab builders are allowed to ask of the game. */
+export interface LogisticsScreenHost {
+  readonly ctx: GameContext;
 
-type InfraTab = 'overview' | 'roads' | 'rail' | 'ports';
+  /** Opens a good in the UI-5 economy screen. */
+  openGood(good: GoodId): void;
+  /** Opens the UI-3 city dossier. */
+  openCity(cityId: string): void;
+  /** Opens the UI-4 realm dossier. */
+  openRealm(kingdomId: string): void;
+  /** Closes the screen and centres the camera. */
+  goToMap(x: number, y: number, zoom?: number): void;
+  /** Frames a route by centring between its two ends. */
+  goToRoute(route: RouteView): void;
+  goToCorridor(corridor: CorridorView): void;
 
-const TABS: { id: InfraTab; label: string; icon: string }[] = [
-  { id: 'overview', label: 'Visão Geral', icon: '🗺️' },
-  { id: 'roads', label: 'Estradas', icon: '🛣️' },
-  { id: 'rail', label: 'Ferrovias', icon: '🚂' },
-  { id: 'ports', label: 'Portos', icon: '⚓' }
-];
+  focusPort(cityId: string | null): void;
+  focusCorridor(id: string | null): void;
+  setNetworkFilter(id: string): void;
+  setStatusFilter(id: string): void;
 
-const ROAD_NAMES = ['sem estrada', 'trilha de terra', 'estrada de pedra', 'via imperial'];
+  /**
+   * Asks for a map overlay. UI-10 owns the overlay experience; today this only
+   * hands the map back, and says so rather than pretending to draw one.
+   */
+  requestOverlay(kind: 'roads' | 'rail' | 'routes' | 'ports'): void;
+}
 
-export class InfrastructureScreen implements Screen {
+type TabId = 'overview' | 'networks' | 'ports' | 'corridors' | 'movers' | 'cities';
+
+const ALL_TABS: TabId[] = ['overview', 'networks', 'ports', 'corridors', 'movers', 'cities'];
+
+export class InfrastructureScreen implements Screen, LogisticsScreenHost {
   public readonly id = 'infrastructure' as const;
-  public readonly kind = 'overlay' as const;
+  public readonly kind = 'fullscreen' as const;
   public readonly dismissable = true;
 
-  private tab: InfraTab = 'overview';
-  private body: HTMLElement | null = null;
-  private ctx: GameContext | null = null;
-  /** Route the player followed a link to get here; highlighted until they navigate away. */
-  private focusRouteId: string | null = null;
+  public ctx!: GameContext;
+
+  private tab: TabId = 'overview';
+  private focusedPort: string | null = null;
+  private focusedCorridor: string | null = null;
+  private networkFilter = 'all';
+  private statusFilter = 'all';
+  private query = '';
+
+  private strip: TabStrip | null = null;
+  private shell: { root: HTMLElement; body: HTMLElement; setContent(c: Child[]): void } | null = null;
+  private metricsCache = new LogisticsMetricsCache();
+  private renderedYear = -1;
+  private highlight: string | null = null;
+
+  // ============================ SCREEN ============================
 
   public build(ctx: GameContext, params?: NavParams): HTMLElement {
     this.ctx = ctx;
-    this.body = el('div', { class: 'econ-body' });
 
-    if (params?.tab && TABS.some(t => t.id === params.tab)) this.tab = params.tab as InfraTab;
-    if (params) this.focusRouteId = params.routeId ?? null;
-
-    const root = el('div', { class: 'screen-container glass-panel' }, [
-      el('header', { class: 'screen-head' }, [
-        el('h2', { class: 'screen-title', text: '🛤️ Infraestrutura' }),
-        el('div', { class: 'screen-sub', text: `Ano ${ctx.sim.currentYear}` })
-      ]),
-      el('div', { class: 'econ-nav-tabs' },
-        TABS.map(t =>
-          el('button', {
-            class: `econ-tab-btn ${this.tab === t.id ? 'active' : ''}`,
-            text: `${t.icon} ${t.label}`,
-            on: {
-              click: () => {
-                this.tab = t.id;
-                root.querySelectorAll('.econ-tab-btn').forEach((b, i) =>
-                  b.classList.toggle('active', TABS[i]?.id === this.tab));
-                this.render();
-              }
-            }
-          })
-        )
-      ),
-      this.body
-    ]);
-
-    this.render();
-    return root;
-  }
-
-  private render(): void {
-    if (!this.body || !this.ctx) return;
-    clear(this.body);
-    switch (this.tab) {
-      case 'overview': return this.renderOverview();
-      case 'roads': return this.renderRoads();
-      case 'rail': return this.renderRail();
-      case 'ports': return this.renderPorts();
+    if (params?.tab && this.isTab(params.tab)) {
+      this.tab = params.tab;
+      this.focusedPort = null;
+      this.focusedCorridor = null;
     }
-  }
-
-  /** Walks the map once and counts what is physically there. */
-  private survey() {
-    const map = this.ctx!.tileMap;
-    const roadByLevel = [0, 0, 0, 0];
-    let roadDamaged = 0;
-    let railTiles = 0;
-    let railDamaged = 0;
-    let railSevered = 0;
-    let roadTraffic = 0;
-
-    for (let x = 0; x < map.width; x++) {
-      for (let y = 0; y < map.height; y++) {
-        const t = map.grid[x][y];
-        if (t.roadLevel > 0) {
-          roadByLevel[Math.min(3, t.roadLevel)]++;
-          roadTraffic += t.roadTraffic;
-          if (t.roadDamage > 0.01) roadDamaged++;
-        }
-        if (t.railLevel > 0) {
-          railTiles++;
-          if (t.railDamage > 0.01) railDamaged++;
-          if (t.railLevelEffective <= 0) railSevered++;
-        }
+    // An alert about a route lands on the corridor that carries it.
+    if (params?.routeId) {
+      const metrics = this.metricsCache.get(ctx, performance.now());
+      const corridor = metrics.corridors.find(c => c.routes.some(r => r.route.id === params.routeId));
+      if (corridor) {
+        this.tab = 'corridors';
+        this.focusedCorridor = corridor.id;
       }
     }
-    return { roadByLevel, roadDamaged, railTiles, railDamaged, railSevered, roadTraffic };
-  }
-
-  // ============================ OVERVIEW ============================
-
-  private renderOverview(): void {
-    const ctx = this.ctx!;
-    const body = this.body!;
-    const s = this.survey();
-    const roadTotal = s.roadByLevel[1] + s.roadByLevel[2] + s.roadByLevel[3];
-
-    const cities = [...ctx.sim.cities.values()];
-    const ports = cities.filter(c => portOperational(c)).length;
-    const industrial = cities.filter(c =>
-      [...c.buildings.values()].some(b => b.type === 'factory' || b.type === 'refinery' || b.type === 'smithy')
-    ).length;
-
-    body.appendChild(
-      el('div', { class: 'stat-grid' }, [
-        this.tile('🛣️', 'Tiles com Estrada', `${roadTotal}`),
-        this.tile('🚂', 'Tiles com Trilho', `${s.railTiles}`),
-        this.tile('⚓', 'Portos Operantes', `${ports}`),
-        this.tile('🏭', 'Centros Industriais', `${industrial}`),
-        this.tile('🚧', 'Estradas Danificadas', `${s.roadDamaged}`),
-        this.tile('💥', 'Trilhos Rompidos', `${s.railSevered}`),
-        this.tile('🚚', 'Tráfego Acumulado', formatNumber(Math.round(s.roadTraffic))),
-        this.tile('📦', 'Frete Ferroviário/ano', formatNumber(Math.round(ctx.sim.railways.yearlyFreight)))
-      ])
-    );
-
-    if (s.railSevered > 0) {
-      body.appendChild(
-        el('div', { style: { color: '#f87171', padding: '8px 0', fontSize: '12px' },
-          text: `⚠ ${s.railSevered} trecho(s) de ferrovia rompido(s) — as rotas que dependiam deles pararam.` })
-      );
-    }
-
-    // Bottlenecks: routes whose infrastructure is throttling them right now.
-    const throttled = [...ctx.sim.trade.routes.values()]
-      .map(r => {
-        const from = ctx.sim.cities.get(r.fromCityId);
-        const to = ctx.sim.cities.get(r.toCityId);
-        if (!from || !to) return null;
-        const capacity = r.kind === 'maritime'
-          ? portCapacityFactor(from, to)
-          : roadCapacityFactor(r.path, ctx.tileMap);
-        return { r, from, to, capacity };
-      })
-      .filter((x): x is NonNullable<typeof x> => !!x && x.capacity < 0.95)
-      .sort((a, b) => a.capacity - b.capacity)
-      .slice(0, 8);
-
-    body.appendChild(
-      this.list('🔻 Gargalos de Transporte', throttled.map(t =>
-        linkRow(
-          `${GOODS[t.r.good].icon} ${t.from.name} → ${t.to.name}`,
-          `${Math.round(t.capacity * 100)}% da capacidade`,
-          () => this.followRoute(t.r.path, t.from, t.to),
-          {
-            valueColor: t.capacity < 0.5 ? '#f87171' : '#fbbf24',
-            title: 'Ver onde a rota está travando'
-          }
-        )
-      ), 'Nenhuma rota está limitada pela infraestrutura.')
-    );
-  }
-
-  // ============================ ROADS ============================
-
-  private renderRoads(): void {
-    const ctx = this.ctx!;
-    const body = this.body!;
-    const s = this.survey();
-
-    body.appendChild(
-      el('div', { class: 'stat-list' }, [
-        statRow('🟤 Trilhas de terra', `${s.roadByLevel[1]} tiles`),
-        statRow('⬜ Estradas de pedra', `${s.roadByLevel[2]} tiles`),
-        statRow('🟡 Vias imperiais', `${s.roadByLevel[3]} tiles`),
-        statRow('🚧 Danificadas pela guerra', `${s.roadDamaged} tiles`, s.roadDamaged > 0 ? '#f87171' : undefined)
-      ])
-    );
-
-    const overland = [...ctx.sim.trade.routes.values()].filter(r => r.kind === 'overland');
-    if (overland.length === 0) {
-      body.appendChild(emptyState('🛣️', 'Nenhuma rota terrestre', 'Estradas nascem do tráfego de caravanas entre cidades.'));
-      return;
-    }
-
-    body.appendChild(
-      el('table', { class: 'styled-table' }, [
-        el('thead', {}, [
-          el('tr', {}, ['Rota', 'Bem', 'Volume', 'Estrada', 'Capacidade', 'Estado'].map(h => el('th', { text: h })))
-        ]),
-        el('tbody', {}, overland.map(r => {
-          const from = ctx.sim.cities.get(r.fromCityId);
-          const to = ctx.sim.cities.get(r.toCityId);
-          const capacity = roadCapacityFactor(r.path, ctx.tileMap);
-          const grade = this.averageRoadGrade(r.path);
-          return el('tr', {
-            class: `row-link${r.id === this.focusRouteId ? ' nav-focused' : ''}`,
-            title: 'Seguir esta rota no mapa',
-            on: { click: () => this.followRoute(r.path, from, to) }
-          }, [
-            el('td', { text: `${from?.name ?? '—'} → ${to?.name ?? '—'}` }),
-            this.goodCell(r.good),
-            el('td', { text: r.volume.toFixed(0) }),
-            el('td', { text: ROAD_NAMES[Math.round(grade)] ?? '—' }),
-            el('td', {
-              text: `${Math.round(capacity * 100)}%`,
-              style: { color: capacity < 0.6 ? '#f87171' : capacity > 1.05 ? '#4ade80' : '#e2e8f0' }
-            }),
-            el('td', {}, [badge(r.active ? 'Ativa' : 'Suspensa', r.active ? '#4ade80' : '#f87171')])
-          ]);
-        }))
-      ])
-    );
-  }
-
-  private averageRoadGrade(path: { x: number; y: number }[] | undefined): number {
-    if (!path || path.length === 0) return 0;
-    const map = this.ctx!.tileMap;
-    let sum = 0;
-    let count = 0;
-    for (const p of path) {
-      const t = map.getTile(Math.floor(p.x), Math.floor(p.y));
-      if (!t) continue;
-      sum += t.roadLevelEffective;
-      count++;
-    }
-    return count > 0 ? sum / count : 0;
-  }
-
-  // ============================ RAIL ============================
-
-  private renderRail(): void {
-    const ctx = this.ctx!;
-    const body = this.body!;
-    const rail = ctx.sim.railways;
-    const components = rail.components(ctx.tileMap);
-
-    if (components.length === 0) {
-      body.appendChild(emptyState('🚂', 'Nenhuma ferrovia',
-        'Ferrovias exigem energia a vapor, e um reino só as constrói quando tem carvão de um lado e forjas do outro.'));
-      return;
-    }
-
-    body.appendChild(
-      el('div', { class: 'stat-grid' }, [
-        this.tile('🚂', 'Linhas', `${components.length}`),
-        this.tile('📦', 'Frete/ano', formatNumber(Math.round(rail.yearlyFreight))),
-        this.tile('🔨', 'Trechos este ano', `${rail.yearlyConstructed}`),
-        this.tile('🏁', 'Linhas concluídas', `${rail.linesBuilt}`)
-      ])
-    );
-
-    body.appendChild(
-      el('table', { class: 'styled-table' }, [
-        el('thead', {}, [
-          el('tr', {}, ['Linha', 'Trechos', 'Condição', 'Estações', 'Estado'].map(h => el('th', { text: h })))
-        ]),
-        el('tbody', {}, components.map((comp, i) => {
-          const quality = rail.lineQuality(comp);
-          const stations = comp
-            .map(t => (t.cityId ? ctx.sim.cities.get(t.cityId) : null))
-            .filter((c): c is City => !!c);
-          const names = [...new Set(stations.map(c => c.name))];
-          const severed = comp.some(t => t.railLevelEffective <= 0);
-          // A broken line is the thing you most want to look at, so aim the
-          // camera at the break itself rather than at the middle of the track.
-          const aim = comp.find(t => t.railLevelEffective <= 0) ?? comp[Math.floor(comp.length / 2)];
-          return el('tr', {
-            class: 'row-link',
-            title: severed ? 'Ver o trecho rompido no mapa' : 'Ver esta linha no mapa',
-            on: { click: () => this.goToMap(aim.x, aim.y, 1.1) }
-          }, [
-            el('td', { text: `Linha ${i + 1}` }),
-            el('td', { text: `${comp.length}` }),
-            el('td', {
-              text: `${Math.round(quality * 100)}%`,
-              style: { color: quality < 0.6 ? '#f87171' : '#4ade80' }
-            }),
-            el('td', { text: names.length > 0 ? names.join(' ↔ ') : 'nenhuma' }),
-            el('td', {}, [badge(
-              severed ? 'Rompida' : names.length >= 2 ? 'Operante' : 'Incompleta',
-              severed ? '#f87171' : names.length >= 2 ? '#4ade80' : '#fbbf24'
-            )])
-          ]);
-        }))
-      ])
-    );
-  }
-
-  // ============================ PORTS ============================
-
-  private renderPorts(): void {
-    const ctx = this.ctx!;
-    const body = this.body!;
-    const withPorts = [...ctx.sim.cities.values()].filter(c =>
-      [...c.buildings.values()].some(b => b.type === 'harbor' || b.type === 'port')
-    );
-
-    if (withPorts.length === 0) {
-      body.appendChild(emptyState('⚓', 'Nenhum porto', 'Ancoradouros e portos abrem o comércio marítimo.'));
-      return;
-    }
-
-    body.appendChild(
-      el('table', { class: 'styled-table' }, [
-        el('thead', {}, [
-          el('tr', {}, ['Cidade', 'Instalação', 'Integridade', 'Operante'].map(h => el('th', { text: h })))
-        ]),
-        el('tbody', {}, withPorts.flatMap(c =>
-          [...c.buildings.values()]
-            .filter(b => b.type === 'harbor' || b.type === 'port')
-            .map(b => {
-              const health = b.hp / b.maxHp;
-              return el('tr', {}, [
-                el('td', { text: c.name }),
-                el('td', { text: b.type === 'port' ? '🚢 Porto profundo' : '⚓ Ancoradouro' }),
-                el('td', {
-                  text: `${Math.round(health * 100)}%`,
-                  style: { color: health <= 0.5 ? '#f87171' : '#4ade80' }
-                }),
-                el('td', {}, [badge(health > 0.5 ? 'Sim' : 'Fora de ação', health > 0.5 ? '#4ade80' : '#f87171')])
-              ]);
-            })
-        ))
-      ])
-    );
-
-    const maritime = [...ctx.sim.trade.routes.values()].filter(r => r.kind === 'maritime');
-    body.appendChild(
-      this.list('🚢 Rotas Marítimas', maritime.map(r => {
-        const from = ctx.sim.cities.get(r.fromCityId);
-        const to = ctx.sim.cities.get(r.toCityId);
-        const capacity = from && to ? portCapacityFactor(from, to) : 0;
-        const row = linkRow(
-          `${GOODS[r.good].icon} ${from?.name ?? '?'} → ${to?.name ?? '?'}`,
-          capacity <= 0.01 ? 'colapsada' : `${Math.round(capacity * 100)}% da capacidade`,
-          () => this.followRoute(r.path, from, to),
-          { valueColor: capacity <= 0.01 ? '#f87171' : undefined, title: 'Seguir esta rota no mapa' }
-        );
-        if (r.id === this.focusRouteId) row.classList.add('nav-focused');
-        return row;
-      }), 'Nenhuma rota marítima aberta.')
-    );
-  }
-
-  // ============================ NAVIGATION ============================
-
-  /**
-   * A goods cell that jumps to the economic deep-dive on that good. It lives
-   * inside a row that navigates to the map, so its click must not also trigger
-   * the row's.
-   */
-  private goodCell(good: keyof typeof GOODS): HTMLElement {
-    return el('td', {
-      class: 'cell-link',
-      text: `${GOODS[good].icon} ${GOODS[good].name}`,
-      title: `Ver ${GOODS[good].name} na economia`,
-      on: {
-        click: (ev: MouseEvent) => {
-          ev.stopPropagation();
-          this.ctx!.screens.open('economy', { good });
-        }
+    if (params?.cityId) {
+      const metrics = this.metricsCache.get(ctx, performance.now());
+      if (metrics.ports.some(p => p.cityId === params.cityId)) {
+        this.tab = 'ports';
+        this.focusedPort = params.cityId;
       }
+    }
+    this.highlight = params?.highlightCondition ?? null;
+
+    const metrics = this.metricsCache.get(ctx, performance.now());
+
+    const shell = screenShell({
+      title: 'Infraestrutura e logística',
+      subtitle: this.subtitleFor(metrics),
+      icon: 'trade-route',
+      onClose: () => ctx.screens.back(),
+      width: 'wide',
+      actions: [
+        searchInput({
+          placeholder: this.searchPlaceholder(),
+          value: this.query,
+          onInput: value => { this.query = value; this.renderTab(); }
+        })
+      ]
     });
+    this.shell = shell;
+    shell.root.classList.add('ae-log-screen');
+
+    this.strip = tabs(this.tabItems(metrics), this.tab, id => {
+      this.tab = id as TabId;
+      this.focusedPort = null;
+      this.focusedCorridor = null;
+      this.query = '';
+      this.renderTab();
+    });
+    shell.root.insertBefore(this.strip.root, shell.body);
+
+    this.renderTab();
+    return shell.root;
   }
 
   /**
-   * Points the camera at the middle of a route so the player sees the actual
-   * road or sea lane, not just a row about it.
+   * Rebuilt on a slow cadence while open.
+   *
+   * The cache decides whether anything is recomputed; this only decides when to
+   * redraw. Both are far slower than the frame rate on purpose — freight settles
+   * once a year and the tile sweep is the most expensive read in the interface.
    */
-  private followRoute(path: { x: number; y: number }[] | undefined, from?: City, to?: City): void {
-    const mid = path && path.length > 0
-      ? path[Math.floor(path.length / 2)]
-      : from && to
-        ? { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
-        : from ?? to;
-    if (!mid) return;
-    this.goToMap(mid.x, mid.y, 1.1);
+  public tick(ctx: GameContext): void {
+    if (!this.shell) return;
+    const metrics = this.metricsCache.get(ctx, performance.now());
+    if (metrics.year !== this.renderedYear) this.renderTab();
   }
 
-  /** Closes every screen and centres the world on a tile. */
-  private goToMap(x: number, y: number, zoom = 1.6): void {
-    const ctx = this.ctx!;
-    ctx.screens.closeAll();
-    ctx.focusOn(x, y, zoom);
+  public dispose(): void {
+    tooltip.hide();
+    this.shell = null;
+    this.strip = null;
   }
 
-  // ============================ HELPERS ============================
+  // ============================ HEADER ============================
 
-  private tile(icon: string, label: string, value: string): HTMLElement {
-    return el('div', { class: 'stat-tile' }, [
-      el('div', { class: 'stat-tile-icon', text: icon }),
-      el('div', { class: 'stat-tile-label', text: label }),
-      el('div', { class: 'stat-tile-value', text: value })
-    ]);
+  private subtitleFor(m: LogisticsMetrics): string {
+    const problems = logisticsProblems(diagnoseLogistics(m)).length;
+    const parts = [`Ano ${m.year}`];
+    if (m.routes.length) parts.push(`${m.activeRoutes} rota(s) ativa(s)`);
+    if (m.bottlenecks.length) parts.push(`${m.bottlenecks.length} gargalo(s)`);
+    else if (problems) parts.push(`${problems} condição(ões) fora do normal`);
+    return parts.join(' · ');
   }
 
-  private list(title: string, rows: HTMLElement[], emptyText: string): HTMLElement {
-    return el('div', { class: 'stat-list-block' }, [
-      el('h4', { text: title }),
-      rows.length > 0
-        ? el('div', { class: 'stat-list' }, rows)
-        : el('div', { class: 'muted', text: emptyText })
-    ]);
+  private searchPlaceholder(): string {
+    switch (this.tab) {
+      case 'corridors': return 'Buscar corredor…';
+      case 'cities': return 'Buscar assentamento ou reino…';
+      default: return 'Buscar…';
+    }
   }
+
+  // ============================ TABS ============================
+
+  /**
+   * The tab list, with empty tabs dropped.
+   *
+   * A stone-age world has no rail, no ports and no routes. Four dead tabs is
+   * worse than two live ones, and the badge counts say what is behind each one.
+   */
+  private tabItems(m: LogisticsMetrics): TabItem[] {
+    const items: TabItem[] = [
+      { id: 'overview', label: 'Visão geral', icon: 'trade-route', badge: m.bottlenecks.length || undefined }
+    ];
+
+    if (m.roads.tiles > 0 || m.rail.tiles > 0 || m.ports.length) {
+      items.push({
+        id: 'networks', label: 'Redes', icon: 'route',
+        badge: (m.roads.damagedTiles + m.rail.severedTiles) || undefined,
+        tooltip: m.rail.severedTiles
+          ? { title: 'Redes', description: `${m.rail.severedTiles} trecho(s) ferroviário(s) rompido(s)` }
+          : undefined
+      });
+    }
+    if (m.ports.length) {
+      items.push({
+        id: 'ports', label: 'Portos', icon: 'route', badge: m.ports.length,
+        tooltip: m.ports.some(p => !p.operational)
+          ? { title: 'Portos', description: `${m.ports.filter(p => !p.operational).length} inoperante(s)` }
+          : undefined
+      });
+    }
+    if (m.corridors.length) {
+      items.push({ id: 'corridors', label: 'Corredores', icon: 'trade-route', badge: m.corridors.length });
+    }
+    if (m.movers.length) {
+      items.push({ id: 'movers', label: 'Comboios', icon: 'route', badge: m.movers.length });
+    }
+    if (m.cities.length) {
+      items.push({
+        id: 'cities', label: 'Acesso', icon: 'city',
+        badge: m.cities.filter(c => c.isolated).length || undefined
+      });
+    }
+
+    return items;
+  }
+
+  private isTab(value: string): value is TabId {
+    return (ALL_TABS as string[]).includes(value);
+  }
+
+  private renderTab(): void {
+    if (!this.shell) return;
+    const metrics = this.metricsCache.get(this.ctx, performance.now());
+    this.renderedYear = metrics.year;
+
+    const available = this.tabItems(metrics).map(t => t.id);
+    if (!available.includes(this.tab)) this.tab = 'overview';
+    this.strip?.setActive(this.tab);
+
+    this.shell.setContent(this.contentFor(metrics));
+    this.applyHighlight();
+  }
+
+  private contentFor(m: LogisticsMetrics): Child[] {
+    if (this.focusedCorridor) {
+      const corridor = m.corridors.find(c => c.id === this.focusedCorridor);
+      if (!corridor) {
+        return [emptyState({
+          icon: 'trade-route',
+          title: 'Este corredor não existe mais',
+          hint: 'As rotas que o formavam foram fechadas ou os assentamentos deixaram de existir.',
+          action: button('Voltar', () => this.focusCorridor(null), { variant: 'secondary', size: 'sm', icon: 'close' })
+        })];
+      }
+      return buildCorridorDetail(corridor, this);
+    }
+
+    const filters = { network: this.networkFilter, status: this.statusFilter, query: this.query };
+
+    switch (this.tab) {
+      case 'overview': return buildOverview(m, this);
+      case 'networks': return buildNetworks(m, this);
+      case 'ports': return buildPorts(m, this, this.focusedPort);
+      case 'corridors': return buildCorridors(m, this, filters);
+      case 'movers': return buildMovers(m, this);
+      case 'cities': return buildCityAccessTab(m, this, this.query);
+      default: return [];
+    }
+  }
+
+  /** Draws the eye to one condition, for an alert deep link. Self-expiring. */
+  private applyHighlight(): void {
+    if (!this.highlight || !this.shell) return;
+    const target = this.shell.body.querySelector<HTMLElement>(`[data-condition-id="${this.highlight}"]`);
+    this.highlight = null;
+    if (!target) return;
+    target.classList.add('ae-log-condition-flash');
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    window.setTimeout(() => target.classList.remove('ae-log-condition-flash'), 2400);
+  }
+
+  // ============================ HOST ============================
+
+  public openGood(good: GoodId): void {
+    this.ctx.screens.open('economy', { good });
+  }
+
+  public openCity(cityId: string): void {
+    this.ctx.screens.open('city', { cityId });
+  }
+
+  public openRealm(kingdomId: string): void {
+    this.ctx.screens.open('realm', { focusKingdom: kingdomId });
+  }
+
+  public goToMap(x: number, y: number, zoom = 1.6): void {
+    this.ctx.screens.closeAll();
+    this.ctx.focusOn(x, y, zoom);
+  }
+
+  /**
+   * Frames a route by centring between its two ends and pulling back.
+   *
+   * Uses the existing camera rather than a second one, and the zoom is derived
+   * from the route's own length so a short haul is not framed like a continent.
+   */
+  public goToRoute(route: RouteView): void {
+    if (!route.fromCity || !route.toCity) {
+      const only = route.fromCity ?? route.toCity;
+      if (only) this.goToMap(only.x, only.y);
+      return;
+    }
+    const midX = (route.fromCity.x + route.toCity.x) / 2;
+    const midY = (route.fromCity.y + route.toCity.y) / 2;
+    this.goToMap(midX, midY, zoomForSpan(route.distance));
+  }
+
+  public goToCorridor(corridor: CorridorView): void {
+    const from = this.ctx.sim.cities.get(corridor.fromCityId);
+    const to = this.ctx.sim.cities.get(corridor.toCityId);
+    if (!from || !to) {
+      const only = from ?? to;
+      if (only) this.goToMap(only.x, only.y);
+      return;
+    }
+    const span = Math.hypot(from.x - to.x, from.y - to.y);
+    this.goToMap((from.x + to.x) / 2, (from.y + to.y) / 2, zoomForSpan(span));
+  }
+
+  public focusPort(cityId: string | null): void {
+    this.focusedPort = cityId;
+    if (cityId && this.tab !== 'ports') {
+      this.tab = 'ports';
+      this.strip?.setActive(this.tab);
+    }
+    this.renderTab();
+  }
+
+  public focusCorridor(id: string | null): void {
+    this.focusedCorridor = id;
+    if (id && this.tab !== 'corridors') {
+      this.tab = 'corridors';
+      this.strip?.setActive(this.tab);
+    }
+    this.renderTab();
+  }
+
+  public setNetworkFilter(id: string): void {
+    this.networkFilter = id;
+    this.renderTab();
+  }
+
+  public setStatusFilter(id: string): void {
+    this.statusFilter = id;
+    this.renderTab();
+  }
+
+  /**
+   * The overlay hook.
+   *
+   * UI-10 owns the overlay experience. Today the renderer has no road-traffic or
+   * route overlay to switch to, so this hands the map back rather than pretending
+   * to draw one — and the button that calls it says exactly that in its tooltip.
+   */
+  public requestOverlay(_kind: 'roads' | 'rail' | 'routes' | 'ports'): void {
+    this.ctx.screens.closeAll();
+  }
+}
+
+/** A zoom that frames a span of tiles without guessing at the camera's limits. */
+function zoomForSpan(span: number): number {
+  if (span <= 12) return 2;
+  if (span <= 30) return 1.2;
+  if (span <= 60) return 0.8;
+  return 0.6;
 }
