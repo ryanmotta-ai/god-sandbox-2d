@@ -5,7 +5,6 @@ import { ParticleManager } from '../src/renderer/Particles';
 import { SpeciesType } from '../src/entities/Species';
 import { generateDynastyName } from '../src/civ/Lineage';
 import { rng } from '../src/core/Random';
-import { WorldEra } from '../src/world/WeatherEras';
 
 rng.setSeed(12345);
 
@@ -13,7 +12,8 @@ const tileMap = new TileMap(96, 96, 'single_continent', 20260802);
 const sim = new SimulationEngine();
 const particles = new ParticleManager();
 
-const species = [SpeciesType.LUMINI, SpeciesType.SYLVANII];
+// Humans are the only civilised species left; the probe wants the expensive one.
+const species = [SpeciesType.HUMAN];
 const spawnPoints = species.map(() => {
   for (let i = 0; i < 400; i++) {
     const x = rng.rangeInt(2, tileMap.width - 3);
@@ -41,12 +41,19 @@ for (let i = 0; i < wildCount; i++) {
 }
 
 const start = Date.now();
-let lastYear = 1;
-let ticks = 0;
+// Mirrors main.ts's updateSimulation. The terrain sweeps used to be missing
+// here, which is why this probe read clean while they were the most expensive
+// thing in the game — a probe that skips half the tick measures half the game.
 for (let y = 0; y < 1; y++) {
   for (let t = 0; t < TICKS_PER_YEAR; t++) {
     sim.tickAI(tileMap, particles);
-    ticks++;
+    if (t % 2 === 0) {
+      tileMap.updateFireTick();
+      tileMap.updateFluidTick();
+    }
+    if (t % 10 === 0 && sim.kingdoms.size > 1) {
+      sim.diplomacy.tickDiplomacy([...sim.kingdoms.keys()], sim.currentYear);
+    }
   }
 }
 const elapsed = Date.now() - start;

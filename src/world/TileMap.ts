@@ -15,6 +15,17 @@ export class TileMap {
   private ecologyStep: number = 0;
   /** Tiles whose static terrain bake must be redrawn, keyed by x*height+y. */
   public dirtyTiles: Set<number> = new Set();
+  /**
+   * Both propagation sweeps walk the whole grid to find a handful of active
+   * tiles, and on a settled map they find none — 3600 times a simulated year.
+   * They only have anything to do after terrain changed, which is exactly what
+   * `markRenderDirty` already announces, so it arms them and a sweep that
+   * settles disarms them again.
+   */
+  private fireSettled = false;
+  private fluidSettled = false;
+  /** Fires found by the last sweep. While any burn, the sweep must keep running. */
+  private burningTiles = 0;
 
   constructor(width: number = 128, height: number = 128, preset: GeneratorPreset = 'single_continent', seed?: number) {
     this.width = width;
@@ -47,6 +58,8 @@ export class TileMap {
   /** Mark a tile and its 4-neighbours as needing a static-bake redraw (relief/edges depend on neighbours). */
   public markRenderDirty(x: number, y: number): void {
     const h = this.height;
+    this.fireSettled = false;
+    this.fluidSettled = false;
     this.dirtyTiles.add(x * h + y);
     if (x > 0) this.dirtyTiles.add((x - 1) * h + y);
     if (x < this.width - 1) this.dirtyTiles.add((x + 1) * h + y);
@@ -57,6 +70,8 @@ export class TileMap {
   /** Mark every tile dirty (used on world creation / load / resize). */
   public markAllDirty(): void {
     const h = this.height;
+    this.fireSettled = false;
+    this.fluidSettled = false;
     for (let x = 0; x < this.width; x++) {
       for (let y = 0; y < h; y++) this.dirtyTiles.add(x * h + y);
     }
@@ -139,6 +154,8 @@ export class TileMap {
 
   /** Fire & Fluid propagation logic tick with balanced burnouts and firebreaks */
   public updateFireTick(): number {
+    if (this.fireSettled && this.burningTiles === 0) return 0;
+    this.fireSettled = true;
     let activeFires = 0;
     const g = this.grid;
     const w = this.width;
@@ -216,6 +233,7 @@ export class TileMap {
       t.fireTimer = 0;
     }
 
+    this.burningTiles = activeFires + fireQueue.length;
     return activeFires;
   }
 
@@ -281,6 +299,10 @@ export class TileMap {
 
   /** Liquid flow propagation tick (water flows into low elevation tiles) */
   public updateFluidTick(): void {
+    if (this.fluidSettled) return;
+    // Set before the sweep, not after: the conversions below mark tiles dirty,
+    // which re-arms this and buys the spill another pass to keep flowing.
+    this.fluidSettled = true;
     const g = this.grid;
     const w = this.width;
     const h = this.height;
