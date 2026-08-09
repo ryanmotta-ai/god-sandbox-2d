@@ -40,13 +40,13 @@ function landTile(nearX?: number, nearY?: number, radius = 8): { x: number; y: n
 const posA = landTile(10, 10);
 const posB = landTile(50, 50);
 
-const cityA = new City('cityA', 'Ironvale', SpeciesType.LUMINI, posA.x, posA.y, 'Founder', 1);
-const cityB = new City('cityB', 'Dawnspire', SpeciesType.LUMINI, posB.x, posB.y, 'Founder', 1);
+const cityA = new City('cityA', 'Ironvale', SpeciesType.HUMAN, posA.x, posA.y, 'Founder', 1);
+const cityB = new City('cityB', 'Dawnspire', SpeciesType.HUMAN, posB.x, posB.y, 'Founder', 1);
 sim.cities.set(cityA.id, cityA);
 sim.cities.set(cityB.id, cityB);
 
-const kingdomA = new Kingdom('kA', 'Realm of Iron', SpeciesType.LUMINI, '#ff6b6b', cityA.id, 1);
-const kingdomB = new Kingdom('kB', 'Realm of Dawn', SpeciesType.LUMINI, '#4dabf7', cityB.id, 1);
+const kingdomA = new Kingdom('kA', 'Realm of Iron', SpeciesType.HUMAN, '#ff6b6b', cityA.id, 1);
+const kingdomB = new Kingdom('kB', 'Realm of Dawn', SpeciesType.HUMAN, '#4dabf7', cityB.id, 1);
 cityA.kingdomId = kingdomA.id;
 cityB.kingdomId = kingdomB.id;
 sim.kingdoms.set(kingdomA.id, kingdomA);
@@ -63,7 +63,7 @@ cityB.stock.add('gold', 5000);
 // Citizens (adults, labour pool).
 function spawnCitizens(city: City, kingdomId: string, count: number): void {
   for (let i = 0; i < count; i++) {
-    const e = sim.spawnEntity(SpeciesType.LUMINI, city.x, city.y, tileMap);
+    const e = sim.spawnEntity(SpeciesType.HUMAN, city.x, city.y, tileMap);
     e.cityId = city.id;
     e.kingdomId = kingdomId;
     e.profession = 'none';
@@ -145,7 +145,7 @@ paveAroundCity(cityA);
 cityB.stock.add('food', 500); // feed the besieging army so it survives the siege
 sim.diplomacy.declareWar(kingdomA.id, kingdomB.id, 42, 'coal');
 for (let i = 0; i < 12; i++) {
-  const soldier = sim.spawnEntity(SpeciesType.LUMINI, cityA.x, cityA.y, tileMap);
+  const soldier = sim.spawnEntity(SpeciesType.HUMAN, cityA.x, cityA.y, tileMap);
   soldier.cityId = cityB.id;
   soldier.kingdomId = kingdomB.id;
   soldier.profession = 'soldier';

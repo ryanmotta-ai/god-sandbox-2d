@@ -5,6 +5,8 @@ import { TileMap } from '../world/TileMap';
 import { TERRAINS, TerrainType } from '../world/Biomes';
 import { tileResourceToGood } from '../world/Tile';
 import { hashString, hashToUnit } from '../core/Random';
+import { outerFortification, pointInsideFortification, type FortificationLine } from './FortificationPlanner';
+import { districtAt } from './UrbanDistricts';
 
 /**
  * Where a building goes.
@@ -241,6 +243,10 @@ export interface BuildingSiteCandidate {
   desirabilityScore: number;
   terrainScore: number;
   resourceFitScore: number;
+  /** Streets, blocks, continuity, coast and rail reservation. */
+  urbanFormScore: number;
+  /** CITY-V2 historical ring / later infill preference. */
+  historicalGrowthScore: number;
   /** The good under the tile, when the building can actually exploit it. */
   resourceGood: GoodId | null;
   /** Tiles of new road this site would need. 0 = already on a street. */
@@ -249,10 +255,227 @@ export interface BuildingSiteCandidate {
 
 /** A single building already standing, flattened for cheap neighbourhood maths. */
 interface NearbyBuilding {
+  id: string;
   x: number;
   y: number;
   type: BuildingType;
   affinity: DistrictAffinity;
+  visualExtent: number;
+  builtYear: number;
+  originGeneration: number;
+}
+
+/**
+ * Source-canvas extent in world tiles for the current ART-V1 building class.
+ * This is visual clearance only: the economic Building remains a one-tile
+ * logical object and saves keep their existing format.
+ */
+function buildingVisualExtent(type: BuildingType): number {
+  if (['palace', 'keep', 'monument', 'great_library', 'grand_aqueduct', 'colosseum'].includes(type)) return 5;
+  if (['town_center', 'quarry', 'mine', 'factory', 'library', 'academy', 'temple', 'harbor', 'bank', 'stock_exchange', 'port', 'refinery', 'barracks'].includes(type)) return 4;
+  if (['farm', 'granary', 'pasture', 'lumber_camp', 'workshop', 'smithy', 'aqueduct', 'collective'].includes(type)) return 3;
+  return type === 'wall' || type === 'oil_well' ? 1 : 2;
+}
+
+export interface UrbanStreetPlan {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  streetClass: UrbanStreetClass;
+  alreadyConnected: boolean;
+}
+
+export type UrbanGrowthStage = 'camp' | 'village' | 'city' | 'great_city';
+export type UrbanStreetClass = 'primary' | 'secondary';
+
+export interface UrbanLot {
+  readonly x: number;
+  readonly y: number;
+  readonly blockId: string;
+  plannedStreet: UrbanStreetClass | null;
+  streetFrontage: UrbanStreetClass | null;
+  nearRail: boolean;
+  coastal: boolean;
+  occupied: boolean;
+  originYear: number | null;
+  originGeneration: number | null;
+}
+
+export interface UrbanBlock {
+  readonly id: string;
+  readonly lotKeys: Set<number>;
+  occupied: number;
+  readonly affinities: Map<DistrictAffinity, number>;
+  originYear: number | null;
+  originGeneration: number | null;
+}
+
+/** Derived urban fabric. It is deliberately runtime-only and never serialized. */
+export interface UrbanStructureSnapshot {
+  readonly stage: UrbanGrowthStage;
+  readonly radius: number;
+  readonly blockSize: number;
+  readonly streets: Map<number, UrbanStreetClass>;
+  readonly lots: Map<number, UrbanLot>;
+  readonly blocks: Map<string, UrbanBlock>;
+  readonly buildings: NearbyBuilding[];
+  readonly reservedRailTiles: Set<number>;
+}
+
+interface CachedUrbanStructure extends UrbanStructureSnapshot {
+  cityVersion: number;
+  architectureVersion: number;
+  networkSignature: string;
+  map: TileMap;
+}
+
+const URBAN_STRUCTURE_CACHE = new WeakMap<City, CachedUrbanStructure>();
+
+function growthStage(city: City): UrbanGrowthStage {
+  if (city.tier === 'camp') return 'camp';
+  if (city.tier === 'hamlet' || city.tier === 'village') return 'village';
+  if (city.tier === 'town' || city.tier === 'city') return 'city';
+  return 'great_city';
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function urbanTileKey(tileMap: TileMap, x: number, y: number): number { return x * tileMap.height + y; }
+
+function localNetworkSignature(city: City, tileMap: TileMap, radius: number): string {
+  const minCX = Math.max(0, Math.floor((city.x - radius) / tileMap.chunkSize));
+  const maxCX = Math.min(tileMap.chunkStore.chunksX - 1, Math.floor((city.x + radius) / tileMap.chunkSize));
+  const minCY = Math.max(0, Math.floor((city.y - radius) / tileMap.chunkSize));
+  const maxCY = Math.min(tileMap.chunkStore.chunksY - 1, Math.floor((city.y + radius) / tileMap.chunkSize));
+  const parts: string[] = [];
+  for (let cx = minCX; cx <= maxCX; cx++) for (let cy = minCY; cy <= maxCY; cy++) {
+    const chunk = tileMap.chunkStore.getChunk(cx, cy);
+    if (chunk) parts.push(`${cx}:${cy}:${chunk.terrainVersion}:${chunk.roadVersion}:${chunk.railVersion}`);
+  }
+  return parts.join('|');
+}
+
+function plannedStreetAt(city: City, stage: UrbanGrowthStage, blockSize: number, radius: number, x: number, y: number): UrbanStreetClass | null {
+  const dx = x - Math.floor(city.x), dy = y - Math.floor(city.y);
+  const distance = Math.hypot(dx, dy);
+  if (distance > radius) return null;
+  // The two axes are the historical high streets. Secondary streets appear
+  // only as the settlement grows and use a stagger that avoids a sterile grid.
+  if (dx === 0 || dy === 0) return 'primary';
+  if (stage === 'camp') return null;
+  const irregularity = city.architecturalProfile?.urbanForm.irregularity ?? .35;
+  const row = Math.floor(dy / blockSize), column = Math.floor(dx / blockSize);
+  const rowDeviation = irregularity < .34 ? 0 : Math.round((hashToUnit(hashString(city.id), row, 301) - .5) * irregularity * 3);
+  const columnDeviation = irregularity < .34 ? 0 : Math.round((hashToUnit(hashString(city.id), column, 302) - .5) * irregularity * 3);
+  const rowStagger = positiveModulo(row, 2) + rowDeviation;
+  const colStagger = positiveModulo(column, 2) + columnDeviation;
+  const onVertical = positiveModulo(dx + rowStagger, blockSize) === 0;
+  const onHorizontal = positiveModulo(dy + colStagger, blockSize) === 0;
+  return onVertical || onHorizontal ? 'secondary' : null;
+}
+
+function blockIdFor(city: City, blockSize: number, x: number, y: number): string {
+  const bx = Math.floor((x - Math.floor(city.x) + Math.floor(blockSize / 2)) / blockSize);
+  const by = Math.floor((y - Math.floor(city.y) + Math.floor(blockSize / 2)) / blockSize);
+  return `${bx}:${by}`;
+}
+
+function syncStructureBuildings(cache: CachedUrbanStructure, city: City): void {
+  cache.buildings.length = 0;
+  for (const block of cache.blocks.values()) { block.occupied = 0; block.affinities.clear(); block.originYear = null; block.originGeneration = null; }
+  for (const lot of cache.lots.values()) { lot.occupied = false; lot.originYear = null; lot.originGeneration = null; }
+  for (const building of city.buildings.values()) {
+    // Fortification pieces occupy their physical tiles, but they are not lots
+    // or district anchors. Treating forty curtain segments as urban buildings
+    // would pull every subsequent house toward the wall itself.
+    if (building.fortificationRole) continue;
+    const affinity = urbanProfile(building.type).affinity;
+    cache.buildings.push({
+      id: building.id, x: building.x, y: building.y, type: building.type, affinity,
+      visualExtent: buildingVisualExtent(building.type), builtYear: building.builtYear,
+      originGeneration: building.originGeneration
+    });
+    const key = urbanTileKey(cache.map, Math.floor(building.x), Math.floor(building.y));
+    const lot = cache.lots.get(key);
+    if (!lot) continue;
+    lot.occupied = true;
+    lot.originYear = building.builtYear;
+    lot.originGeneration = building.originGeneration;
+    const block = cache.blocks.get(lot.blockId);
+    if (block) {
+      block.occupied++; block.affinities.set(affinity, (block.affinities.get(affinity) ?? 0) + 1);
+      block.originYear = block.originYear === null ? building.builtYear : Math.min(block.originYear, building.builtYear);
+      block.originGeneration = block.originGeneration === null ? building.originGeneration : Math.min(block.originGeneration, building.originGeneration);
+    }
+  }
+  cache.cityVersion = city.buildingVersion;
+}
+
+function buildUrbanStructure(city: City, tileMap: TileMap, radius: number): CachedUrbanStructure {
+  const stage = growthStage(city);
+  const baseBlockSize = stage === 'camp' ? 4 : stage === 'village' ? 5 : stage === 'city' ? 6 : 7;
+  const blockSize = Math.max(3, Math.min(9, Math.round(baseBlockSize + (city.architecturalProfile?.urbanForm.blockScale ?? 0) * 1.35)));
+  const streets = new Map<number, UrbanStreetClass>();
+  const lots = new Map<number, UrbanLot>();
+  const blocks = new Map<string, UrbanBlock>();
+  const reservedRailTiles = new Set<number>();
+  const minX = Math.max(0, Math.floor(city.x - radius)), maxX = Math.min(tileMap.width - 1, Math.ceil(city.x + radius));
+  const minY = Math.max(0, Math.floor(city.y - radius)), maxY = Math.min(tileMap.height - 1, Math.ceil(city.y + radius));
+
+  for (let x = minX; x <= maxX; x++) for (let y = minY; y <= maxY; y++) {
+    if (Math.hypot(x - city.x, y - city.y) > radius) continue;
+    const tile = tileMap.getTile(x, y); if (!tile) continue;
+    const terrain = TERRAINS[tile.type];
+    if (terrain.isWater || !terrain.isWalkable || tile.type === TerrainType.LAVA || tile.type === TerrainType.MOUNTAIN) continue;
+    const key = urbanTileKey(tileMap, x, y);
+    if (tile.railLevelEffective > 0) { reservedRailTiles.add(key); continue; }
+    const plannedStreet = plannedStreetAt(city, stage, blockSize, radius, x, y);
+    if (tile.roadLevelEffective > 0) {
+      streets.set(key, tile.roadTraffic >= 70 || plannedStreet === 'primary' ? 'primary' : 'secondary');
+      continue;
+    }
+    const blockId = blockIdFor(city, blockSize, x, y);
+    let block = blocks.get(blockId);
+    if (!block) { block = { id: blockId, lotKeys: new Set(), occupied: 0, affinities: new Map(), originYear: null, originGeneration: null }; blocks.set(blockId, block); }
+    const lot: UrbanLot = {
+      x, y, blockId, plannedStreet, streetFrontage: null,
+      nearRail: tileMap.getNeighbors(x, y, true).some(neighbor => neighbor.railLevelEffective > 0),
+      coastal: tileMap.isCoastalLand(x, y), occupied: !!tile.buildingId,
+      originYear: null, originGeneration: null
+    };
+    lots.set(key, lot); block.lotKeys.add(key);
+  }
+
+  // Street frontage belongs to lots, so site scoring is O(1).
+  for (const [key, streetClass] of streets) {
+    const x = Math.floor(key / tileMap.height), y = key % tileMap.height;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const lot = lots.get(urbanTileKey(tileMap, x + dx, y + dy));
+      if (lot && (streetClass === 'primary' || lot.streetFrontage === null)) lot.streetFrontage = streetClass;
+    }
+  }
+
+  const cache: CachedUrbanStructure = {
+    stage, radius, blockSize, streets, lots, blocks, buildings: [], reservedRailTiles,
+    cityVersion: -1, architectureVersion: city.architecturalVersion,
+    networkSignature: localNetworkSignature(city, tileMap, radius), map: tileMap
+  };
+  syncStructureBuildings(cache, city);
+  return cache;
+}
+
+function ensureUrbanStructure(city: City, tileMap: TileMap, radius: number): CachedUrbanStructure {
+  let cache = URBAN_STRUCTURE_CACHE.get(city);
+  const signature = localNetworkSignature(city, tileMap, radius);
+  if (!cache || cache.map !== tileMap || cache.radius !== radius || cache.stage !== growthStage(city)
+    || cache.architectureVersion !== city.architecturalVersion || cache.networkSignature !== signature) {
+    cache = buildUrbanStructure(city, tileMap, radius); URBAN_STRUCTURE_CACHE.set(city, cache); return cache;
+  }
+  if (cache.cityVersion !== city.buildingVersion) syncStructureBuildings(cache, city);
+  return cache;
 }
 
 /**
@@ -270,19 +493,31 @@ interface CityContext {
   builtRadius: number;
   densityTarget: number;
   maxExtension: number;
+  structure: CachedUrbanStructure;
+  currentGeneration: number;
+  historicalRadius: number;
+  outerWall: FortificationLine | null;
+  /** 0..1 pressure to leave the currently active enclosure. */
+  enclosurePressure: number;
 }
 
-function buildContext(city: City): CityContext {
-  const buildings: NearbyBuilding[] = [];
+function buildContext(city: City, tileMap: TileMap, radius: number): CityContext {
+  const structure = ensureUrbanStructure(city, tileMap, radius);
+  const buildings = structure.buildings;
   let sumDist = 0;
-  for (const b of city.buildings.values()) {
-    buildings.push({
-      x: b.x,
-      y: b.y,
-      type: b.type,
-      affinity: urbanProfile(b.type).affinity
-    });
-    sumDist += Math.hypot(b.x - city.x, b.y - city.y);
+  let historicalRadius = 0;
+  const currentGeneration = city.currentUrbanGeneration;
+  for (const b of buildings) {
+    const distance = Math.hypot(b.x - city.x, b.y - city.y);
+    sumDist += distance;
+    if (b.originGeneration < currentGeneration) historicalRadius = Math.max(historicalRadius, distance);
+  }
+  const outerWall = outerFortification(city);
+  let enclosurePressure = 0;
+  if (outerWall?.status === 'active') {
+    const inside = buildings.filter(building => pointInsideFortification(outerWall, building.x + .5, building.y + .5)).length;
+    const practicalCapacity = outerWall.originalUrbanBuildings + Math.max(5, Math.round(outerWall.perimeter * .13));
+    enclosurePressure = Math.max(0, Math.min(1, inside / Math.max(1, practicalCapacity)));
   }
   return {
     city,
@@ -290,8 +525,13 @@ function buildContext(city: City): CityContext {
     centerY: city.y,
     buildings,
     builtRadius: buildings.length > 0 ? Math.max(2, sumDist / buildings.length) : 2,
-    densityTarget: TIER_DENSITY_TARGET[city.tier] ?? 0.35,
-    maxExtension: maxRoadExtensionFor(city)
+    densityTarget: (TIER_DENSITY_TARGET[city.tier] ?? 0.35) * .58 + (city.architecturalProfile?.urbanForm.density ?? .42) * .42,
+    maxExtension: maxRoadExtensionFor(city),
+    structure,
+    currentGeneration,
+    historicalRadius: Math.max(2, historicalRadius),
+    outerWall,
+    enclosurePressure
   };
 }
 
@@ -364,8 +604,9 @@ function neighbourScores(
   // Spacing: too close to anything is bad, and how bad depends on what this
   // building is. A palace wants a courtyard; a terrace of houses does not.
   let spacing = 0;
-  if (closest < profile.spacing) {
-    spacing = -(profile.spacing - closest) / Math.max(0.3, profile.spacing);
+  const culturalSpacing = profile.spacing * (1 + (ctx.city.architecturalProfile?.urbanForm.openSpace ?? .25) * .28);
+  if (closest < culturalSpacing) {
+    spacing = -(culturalSpacing - closest) / Math.max(0.3, culturalSpacing);
   }
 
   return { affinity: Math.min(3, affinity), repulsion: Math.min(4, repulsion), density, spacing };
@@ -391,6 +632,131 @@ function terrainScore(tileMap: TileMap, x: number, y: number): number {
   const moveCost = TERRAINS[tile.type].moveCost;
   // moveCost stands in for how hard the ground is to work: 1 is easy, 3 is not.
   return -(moveCost - 1) * 0.5;
+}
+
+function scoreUrbanForm(ctx: CityContext, type: BuildingType, profile: UrbanProfile, tileMap: TileMap, x: number, y: number): number {
+  const key = urbanTileKey(tileMap, x, y);
+  const lot = ctx.structure.lots.get(key);
+  if (!lot) return -70;
+  let score = 0;
+
+  // Preserve future corridors. A city may consume one under extreme physical
+  // pressure, but normal construction leaves the street skeleton open.
+  if (lot.plannedStreet === 'primary') score -= 72;
+  else if (lot.plannedStreet === 'secondary') score -= 38;
+
+  let plannedFrontage: UrbanStreetClass | null = null;
+  for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+    const neighborKey = urbanTileKey(tileMap, x + dx, y + dy);
+    const realized = ctx.structure.streets.get(neighborKey);
+    const planned = ctx.structure.lots.get(neighborKey)?.plannedStreet ?? null;
+    const found = realized ?? planned;
+    if (found === 'primary') { plannedFrontage = 'primary'; break; }
+    if (found === 'secondary') plannedFrontage = 'secondary';
+  }
+  const frontage = lot.streetFrontage ?? plannedFrontage;
+  if (frontage) {
+    const coreUse = profile.affinity === 'civic' || profile.affinity === 'commercial' || profile.affinity === 'knowledge';
+    const neighbourhoodUse = profile.affinity === 'residential' || profile.affinity === 'agricultural';
+    score += frontage === 'primary' ? (coreUse ? 34 : 18) : (neighbourhoodUse ? 30 : 20);
+    if (lot.streetFrontage) score += 12;
+  } else if (profile.prefersRoad > .7) score -= 24 * (ctx.city.architecturalProfile?.urbanForm.roadPreference ?? 1);
+
+  const block = ctx.structure.blocks.get(lot.blockId);
+  const matching = block?.affinities.get(profile.affinity) ?? 0;
+  if (matching > 0) score += Math.min(28, matching * 9);
+  if (block && block.occupied / Math.max(1, block.lotKeys.size) > ctx.densityTarget) score -= 12 * (1 - profile.densityTolerance);
+
+  let nearbyUrban = 0;
+  for (const building of ctx.structure.buildings) {
+    const d = Math.hypot(building.x - x, building.y - y);
+    if (d <= 2.25) nearbyUrban++;
+  }
+  score += Math.min(18, nearbyUrban * 5); // continuity, not isolated dots
+
+  if (lot.nearRail) {
+    if (profile.affinity === 'industrial' || profile.affinity === 'logistics' || profile.affinity === 'extraction') score += 30;
+    else if (profile.affinity === 'residential' || profile.affinity === 'civic') score -= 32;
+  }
+  if (lot.coastal) {
+    if (profile.affinity === 'logistics') score += 36;
+    else if (profile.affinity === 'residential' || profile.affinity === 'commercial') score += 6;
+  }
+
+  // CITY-V5: existing activity creates functional gravity. This is not a
+  // zoning permission â€” any valid lot can still win â€” but real commercial,
+  // rail, port and industrial concentrations pull compatible construction.
+  const district = districtAt(ctx.city, x, y);
+  if (district) {
+    const functional = district.type;
+    if (profile.affinity === 'industrial') {
+      if (functional === 'industrial' || functional === 'railway' || functional === 'port' || functional === 'artisan') score += 34;
+      if (functional === 'residential_rich' || functional === 'historic_core' || functional === 'civic') score -= 42;
+      score += district.accessibility * 22 - district.landValue * 10;
+    } else if (profile.affinity === 'logistics') {
+      if (functional === 'port' || functional === 'railway' || functional === 'industrial') score += 42;
+      score += district.accessibility * 28;
+    } else if (profile.affinity === 'commercial') {
+      if (functional === 'commercial' || functional === 'historic_core' || functional === 'railway' || functional === 'port') score += 34;
+      score += district.accessibility * 20 + district.landValue * 13;
+    } else if (profile.affinity === 'residential') {
+      if (functional === 'residential_common' || functional === 'residential_rich' || functional === 'residential_worker') score += 28;
+      if (functional === 'industrial') score -= 42;
+      score += district.desirability * 24 - district.pollution * 28;
+      if (functional === 'residential_rich') score -= Math.max(0, district.density - .45) * 38;
+      if (functional === 'residential_worker') score += district.density * 14; // compact housing close to work
+    } else if (profile.affinity === 'civic' || profile.affinity === 'knowledge') {
+      if (functional === 'historic_core' || functional === 'civic' || functional === 'religious') score += 32;
+      score += district.landValue * 18 - district.pollution * 24;
+    } else if (profile.affinity === 'agricultural') {
+      if (functional === 'rural' || functional === 'periphery') score += 36;
+      score -= district.landValue * 10;
+    } else if (profile.affinity === 'military') {
+      if (functional === 'military' || functional === 'periphery') score += 28;
+    }
+    if ((type === 'factory' || type === 'refinery') && functional === 'railway') score += 24;
+    if ((type === 'market' || type === 'bank') && functional === 'railway') score += 18; // second centre around a station
+  }
+  return score;
+}
+
+function hasVisualClearance(ctx: CityContext, type: BuildingType, x: number, y: number): boolean {
+  const extent = buildingVisualExtent(type) * (ctx.city.architecturalProfile?.urbanForm.buildingScale ?? 1);
+  for (const building of ctx.buildings) {
+    // Canvases contain roof height and transparent margins, so they may touch;
+    // only reject the dense overlap that makes distinct buildings unreadable.
+    const clearance = (extent + building.visualExtent) * .38;
+    if (Math.hypot(building.x - x, building.y - y) < clearance) return false;
+  }
+  return true;
+}
+
+function scoreHistoricalGrowth(ctx: CityContext, profile: UrbanProfile, x: number, y: number): number {
+  if (ctx.currentGeneration <= 0) return 0;
+  const distance = Math.hypot(x - ctx.centerX, y - ctx.centerY);
+  const mature = ctx.currentGeneration >= 3;
+  // Mature cities occasionally fill an older block; most projects establish
+  // the next readable ring beyond the previous phase.
+  const infillPass = mature && (ctx.buildings.length + ctx.currentGeneration) % 5 === 0;
+  const target = infillPass
+    ? Math.max(2.5, ctx.historicalRadius * .62)
+    : Math.min(ctx.structure.radius * .84, ctx.historicalRadius + 1.5 + ctx.currentGeneration * .35);
+  let score = 42 - Math.abs(distance - target) * 11;
+  const lot = ctx.structure.lots.get(urbanTileKey(ctx.structure.map, x, y));
+  const block = lot ? ctx.structure.blocks.get(lot.blockId) : undefined;
+  if (!infillPass && block?.originGeneration !== null && block?.originGeneration !== undefined && block.originGeneration < ctx.currentGeneration) score -= 24;
+  if (!infillPass && distance <= ctx.historicalRadius + .5 && profile.affinity !== 'civic' && profile.affinity !== 'commercial') score -= 62;
+  if (infillPass && block && block.occupied > 0) score += 14;
+  if (ctx.outerWall?.status === 'active') {
+    const inside = pointInsideFortification(ctx.outerWall, x + .5, y + .5);
+    // A newly enclosed city fills protected land first. Once that land is
+    // pressured, continuity immediately outside the gates becomes preferable;
+    // growth never stops merely because the curtain is full.
+    if (ctx.enclosurePressure < .78) score += inside ? 34 : -46;
+    else if (ctx.enclosurePressure < .92) score += inside ? 10 : 18;
+    else score += inside ? -28 : 48;
+  }
+  return score;
 }
 
 /**
@@ -434,7 +800,7 @@ export class UrbanPlanner {
     radius: number,
     limit: number = 6
   ): BuildingSiteCandidate[] {
-    const ctx = buildContext(city);
+    const ctx = buildContext(city, tileMap, radius);
     const profile = urbanProfile(def.type);
 
     const raw: BuildingSiteCandidate[] = [];
@@ -442,7 +808,7 @@ export class UrbanPlanner {
     // ---- Extraction: geology chooses the site, not the town plan. ----
     if (def.resourceMode === 'required' && def.resourceTargets?.length) {
       for (const tile of tileMap.findResourceSites(city.x, city.y, radius, def.resourceTargets, false)) {
-        if (!this.tileIsBuildable(tileMap, city, tile.x, tile.y)) continue;
+        if (!this.tileIsBuildable(tileMap, city, tile.x, tile.y) || !hasVisualClearance(ctx, def.type, tile.x, tile.y)) continue;
         const good = tileResourceToGood(tile.resourceType);
         if (!good) continue;
         const c = this.scoreSite(ctx, def, profile, tileMap, tile.x, tile.y, good);
@@ -466,7 +832,7 @@ export class UrbanPlanner {
     for (let x = minX; x <= maxX; x++) {
       for (let y = minY; y <= maxY; y++) {
         if (Math.hypot(x - city.x, y - city.y) > radius) continue;
-        if (!this.tileIsBuildable(tileMap, city, x, y)) continue;
+        if (!this.tileIsBuildable(tileMap, city, x, y) || !hasVisualClearance(ctx, def.type, x, y)) continue;
         if (def.requiresCoast && !tileMap.isCoastalLand(x, y)) continue;
         if (wouldWasteResource(tileMap, x, y, def)) continue;
 
@@ -512,6 +878,7 @@ export class UrbanPlanner {
   private static tileIsBuildable(tileMap: TileMap, city: City, x: number, y: number): boolean {
     const tile = tileMap.getTile(x, y);
     if (!tile || tile.buildingId) return false;
+    if (tile.roadLevelEffective > 0 || tile.railLevelEffective > 0) return false;
     const terrain = TERRAINS[tile.type];
     if (terrain.isWater || !terrain.isWalkable || tile.type === TerrainType.LAVA) return false;
     if (tile.cityId && tile.cityId !== city.id) return false;
@@ -574,6 +941,8 @@ export class UrbanPlanner {
       frontage = 1;
     }
     const frontageScore = PLANNER_WEIGHTS.roadAccess * profile.prefersRoad * frontage;
+    const urbanFormScore = scoreUrbanForm(ctx, def.type, profile, tileMap, x, y);
+    const historicalGrowthScore = scoreHistoricalGrowth(ctx, profile, x, y);
 
     // A deterministic hair of noise so two equally-good tiles don't always
     // resolve the same way, without ever using Math.random.
@@ -589,6 +958,8 @@ export class UrbanPlanner {
       terrScore +
       resourceFitScore +
       frontageScore +
+      urbanFormScore +
+      historicalGrowthScore +
       jitter;
 
     return {
@@ -603,9 +974,105 @@ export class UrbanPlanner {
       desirabilityScore,
       terrainScore: terrScore,
       resourceFitScore,
+      urbanFormScore,
+      historicalGrowthScore,
       resourceGood,
       roadExtensionTiles: 0
     };
+  }
+
+  /** Runtime-only urban fabric for diagnostics and CITY-V1 tests. */
+  public static structure(city: City, tileMap: TileMap, radius: number): UrbanStructureSnapshot {
+    return ensureUrbanStructure(city, tileMap, radius);
+  }
+
+  /** Incremental building update: no rescan of the urban survey area. */
+  public static recordConstruction(city: City, tileMap: TileMap, buildingId: string): void {
+    const cache = URBAN_STRUCTURE_CACHE.get(city);
+    const building = city.buildings.get(buildingId);
+    if (!cache || cache.map !== tileMap || !building) return;
+    const affinity = urbanProfile(building.type).affinity;
+    if (!cache.buildings.some(item => item.id === building.id)) {
+      cache.buildings.push({
+        id: building.id, x: building.x, y: building.y, type: building.type, affinity,
+        visualExtent: buildingVisualExtent(building.type), builtYear: building.builtYear,
+        originGeneration: building.originGeneration
+      });
+    }
+    const lot = cache.lots.get(urbanTileKey(tileMap, Math.floor(building.x), Math.floor(building.y)));
+    if (lot && !lot.occupied) {
+      lot.occupied = true;
+      lot.originYear = building.builtYear;
+      lot.originGeneration = building.originGeneration;
+      const block = cache.blocks.get(lot.blockId);
+      if (block) {
+        block.occupied++; block.affinities.set(affinity, (block.affinities.get(affinity) ?? 0) + 1);
+        block.originYear = block.originYear === null ? building.builtYear : Math.min(block.originYear, building.builtYear);
+        block.originGeneration = block.originGeneration === null ? building.originGeneration : Math.min(block.originGeneration, building.originGeneration);
+      }
+    }
+    cache.cityVersion = city.buildingVersion;
+  }
+
+  /**
+   * Connects a building frontage to the nearest realised street, not blindly
+   * back to city hall. This is what lets blocks grow outward incrementally.
+   */
+  public static planStreetConnection(city: City, tileMap: TileMap, buildingX: number, buildingY: number, radius: number): UrbanStreetPlan | null {
+    const cache = ensureUrbanStructure(city, tileMap, radius);
+    const approaches: Array<{ x: number; y: number; planned: UrbanStreetClass | null }> = [];
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const x = Math.floor(buildingX + dx), y = Math.floor(buildingY + dy);
+      const tile = tileMap.getTile(x, y); if (!tile || tile.buildingId || tile.railLevelEffective > 0) continue;
+      const terrain = TERRAINS[tile.type]; if (terrain.isWater || !terrain.isWalkable || tile.type === TerrainType.LAVA || tile.type === TerrainType.MOUNTAIN) continue;
+      const key = urbanTileKey(tileMap, x, y);
+      const existing = cache.streets.get(key);
+      if (tile.roadLevelEffective > 0 || existing) {
+        return { fromX: x, fromY: y, toX: x, toY: y, streetClass: existing ?? 'secondary', alreadyConnected: true };
+      }
+      approaches.push({ x, y, planned: cache.lots.get(key)?.plannedStreet ?? null });
+    }
+    if (approaches.length === 0) return null;
+
+    let best: { approach: typeof approaches[number]; streetX: number; streetY: number; streetClass: UrbanStreetClass; distance: number } | null = null;
+    for (const approach of approaches) for (const [key, streetClass] of cache.streets) {
+      const streetX = Math.floor(key / tileMap.height), streetY = key % tileMap.height;
+      const distance = Math.abs(streetX - approach.x) + Math.abs(streetY - approach.y) - (approach.planned === 'primary' ? .5 : 0);
+      if (!best || distance < best.distance) best = { approach, streetX, streetY, streetClass, distance };
+    }
+
+    if (!best) {
+      // First street: leave the town-center tile free and depart from the gate
+      // on the side facing the new lot.
+      const centerX = Math.floor(city.x), centerY = Math.floor(city.y);
+      const approach = approaches.sort((a, b) => Math.hypot(a.x-centerX,a.y-centerY) - Math.hypot(b.x-centerX,b.y-centerY))[0];
+      const dx = Math.abs(approach.x-centerX) >= Math.abs(approach.y-centerY) ? Math.sign(approach.x-centerX) : 0;
+      const dy = dx === 0 ? Math.sign(approach.y-centerY) : 0;
+      const gateX = centerX + (dx || 1), gateY = centerY + dy;
+      return { fromX: gateX, fromY: gateY, toX: approach.x, toY: approach.y, streetClass: 'primary', alreadyConnected: false };
+    }
+
+    const streetClass: UrbanStreetClass = best.streetClass === 'primary' || best.approach.planned === 'primary' ? 'primary' : 'secondary';
+    return { fromX: best.streetX, fromY: best.streetY, toX: best.approach.x, toY: best.approach.y, streetClass, alreadyConnected: false };
+  }
+
+  /** Incrementally folds new road tiles into lots/blocks and advances the local signature. */
+  public static recordStreetPath(city: City, tileMap: TileMap, path: readonly { x: number; y: number }[], streetClass: UrbanStreetClass): void {
+    const cache = URBAN_STRUCTURE_CACHE.get(city);
+    if (!cache || cache.map !== tileMap) return;
+    for (const point of path) {
+      const x = Math.floor(point.x), y = Math.floor(point.y), key = urbanTileKey(tileMap, x, y);
+      const planned = plannedStreetAt(city, cache.stage, cache.blockSize, cache.radius, x, y);
+      const resolved = streetClass === 'primary' || planned === 'primary' ? 'primary' : 'secondary';
+      cache.streets.set(key, resolved);
+      const formerLot = cache.lots.get(key);
+      if (formerLot) { cache.blocks.get(formerLot.blockId)?.lotKeys.delete(key); cache.lots.delete(key); }
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const lot = cache.lots.get(urbanTileKey(tileMap, x + dx, y + dy));
+        if (lot && (resolved === 'primary' || lot.streetFrontage === null)) lot.streetFrontage = resolved;
+      }
+    }
+    cache.networkSignature = localNetworkSignature(city, tileMap, cache.radius);
   }
 }
 

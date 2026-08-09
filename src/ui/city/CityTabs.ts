@@ -844,6 +844,8 @@ export function buildHistory(city: City, metrics: CityMetrics, host: CityScreenH
     .filter(e => e.importance !== 'minor')
     .sort((a, b) => b.year - a.year);
 
+  const IMPORTANCE_PT: Record<string, string> = { minor: 'menor', normal: 'normal', major: 'maior', legendary: 'lendária' };
+
   if (!all.length) {
     return [emptyState({
       icon: 'history',
@@ -875,7 +877,7 @@ export function buildHistory(city: City, metrics: CityMetrics, host: CityScreenH
               icon: 'history',
               rows: [
                 { label: 'Ano', value: `${event.year}` },
-                { label: 'Importância', value: event.importance },
+                { label: 'Importância', value: IMPORTANCE_PT[event.importance] ?? event.importance },
                 { label: 'Tipo', value: event.type }
               ],
               footnote: event.causes.length ? `Causa: ${event.causes[0]}` : undefined

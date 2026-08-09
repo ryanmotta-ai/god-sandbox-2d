@@ -76,7 +76,8 @@ export type AlertKind =
   | 'embargo'
   | 'trade-broken'
   | 'vassalage-broken'
-  | 'food-shortage';
+  | 'food-shortage'
+  | 'tech-bottleneck';
 
 export interface WorldEventEntry {
   id: string;
@@ -105,7 +106,8 @@ const KIND_META: Record<AlertKind, {
   'embargo':              { icon: 'economy',    severity: 'warning',  aggregate: n => `${n} embargos declarados` },
   'trade-broken':         { icon: 'trade',      severity: 'warning',  aggregate: n => `${n} acordos comerciais rompidos` },
   'vassalage-broken':     { icon: 'kingdom',    severity: 'warning',  aggregate: n => `${n} vassalagens rompidas` },
-  'food-shortage':        { icon: 'agriculture',severity: 'warning',  aggregate: n => `${n} cidades com escassez de alimento` }
+  'food-shortage':        { icon: 'agriculture',severity: 'warning',  aggregate: n => `${n} cidades com escassez de alimento` },
+  'tech-bottleneck':      { icon: 'technology', severity: 'warning',  aggregate: n => `${n} gargalos tecnológicos` }
 };
 
 /** How long the same key stays suppressed. Real time, so it holds at any speed. */
@@ -332,26 +334,57 @@ export class AlertCenter {
   public evaluate(snapshot: WorldSnapshot): void {
     if (!this.enabled || snapshot.year === this.lastDerivedYear) return;
     this.lastDerivedYear = snapshot.year;
-    if (!this.sim || snapshot.citiesInFamine === 0) return;
+    if (!this.sim) return;
 
     // Report the worst-affected settlement by name and let aggregation handle the
     // rest; a list of every hungry city is a wall of text, not an alert.
-    let worst: City | null = null;
-    for (const city of this.sim.cities.values()) {
-      if (city.famineYears <= 0) continue;
-      if (!worst || city.famineYears > worst.famineYears) worst = city;
+    if (snapshot.citiesInFamine > 0) {
+      let worst: City | null = null;
+      for (const city of this.sim.cities.values()) {
+        if (city.famineYears <= 0) continue;
+        if (!worst || city.famineYears > worst.famineYears) worst = city;
+      }
+      if (worst) {
+        this.push({
+          kind: 'food-shortage',
+          key: `food-shortage:${worst.id}`,
+          title: 'Escassez de alimento',
+          description: `${worst.name} · ${worst.famineYears} ${worst.famineYears === 1 ? 'ano' : 'anos'} de fome`,
+          focus: { x: worst.x, y: worst.y },
+          ref: this.cityRef(worst),
+          conditionHint: 'food'
+        });
+      }
     }
-    if (!worst) return;
 
-    this.push({
-      kind: 'food-shortage',
-      key: `food-shortage:${worst.id}`,
-      title: 'Escassez de alimento',
-      description: `${worst.name} · ${worst.famineYears} ${worst.famineYears === 1 ? 'ano' : 'anos'} de fome`,
-      focus: { x: worst.x, y: worst.y },
-      ref: this.cityRef(worst),
-      conditionHint: 'food'
-    });
+    // The simulation already recomputes these capabilities annually. Read the
+    // worst real gap; never scan recipes or the map from the alert layer.
+    let gap: { kingdom: Kingdom; techId: string; name: string; capacity: number; reason: string } | null = null;
+    for (const kingdom of this.sim.kingdoms.values()) {
+      for (const capability of kingdom.techCapabilities) {
+        if (capability.capacity >= 0.5) continue;
+        const missingGood = capability.missingGoods[0];
+        const missingBuilding = capability.missingBuildings[0];
+        const reason = missingGood
+          ? `insumo ausente: ${missingGood}`
+          : missingBuilding ? `indústria ausente: ${missingBuilding}` : 'implantação material insuficiente';
+        if (!gap || capability.capacity < gap.capacity) {
+          gap = { kingdom, techId: capability.techId, name: capability.name, capacity: capability.capacity, reason };
+        }
+      }
+    }
+    if (gap) {
+      this.push({
+        kind: 'tech-bottleneck',
+        key: `tech-bottleneck:${gap.kingdom.id}:${gap.techId}`,
+        title: 'Gargalo tecnológico',
+        description: `${gap.kingdom.name} · ${gap.name} · ${gap.reason}`,
+        ref: {
+          kind: 'technology', id: gap.techId, name: gap.name,
+          qualifier: gap.kingdom.name, context: { kingdomId: gap.kingdom.id }, status: 'warning'
+        }
+      });
+    }
   }
 
   // ============================ EVENT WIRING ============================
@@ -371,13 +404,20 @@ export class AlertCenter {
       const a = this.asKingdom(d?.k1);
       const b = this.asKingdom(d?.k2);
       if (!a && !b) return;
+      const war = this.sim ? [...this.sim.diplomacy.activeWars.values()].find(candidate =>
+        (candidate.attacker === a?.id && candidate.defender === b?.id) ||
+        (candidate.attacker === b?.id && candidate.defender === a?.id)
+      ) : null;
       this.push({
         kind: 'war-declared',
         key: `war:${a?.id ?? '?'}:${b?.id ?? '?'}`,
         title: 'Guerra declarada',
         description: `${a?.name ?? 'Um reino'} → ${b?.name ?? 'outro reino'}`,
         focus: this.capitalOf(a) ?? undefined,
-        ref: a ? this.kingdomRef(a) : undefined
+        ref: war ? {
+          kind: 'war', id: war.id, name: `${a?.name ?? 'Um reino'} vs ${b?.name ?? 'outro reino'}`,
+          status: 'critical', qualifier: `Ano ${war.startYear}`
+        } : a ? this.kingdomRef(a) : undefined
       });
     });
 
@@ -527,7 +567,11 @@ export class AlertCenter {
       const tech = d?.tech?.name ?? d?.tech;
       if (!tech) return;
       this.note(`${k?.name ?? 'Um reino'} descobre ${tech}`, 'technology',
-        { ref: k ? this.kingdomRef(k) : undefined });
+        {
+          ref: d?.tech?.id
+            ? { kind: 'technology', id: d.tech.id, name: tech, qualifier: k?.name, context: { kingdomId: k?.id } }
+            : k ? this.kingdomRef(k) : undefined
+        });
     });
 
     events.on('rulerCrowned', (d: any) => {

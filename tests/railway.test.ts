@@ -467,14 +467,14 @@ function makeWorld(
   assert.equal(back.railOwnerId, 'k1', 'railOwnerId survives round-trip');
   assert.ok(Math.abs(back.railDamage - 0.4) < 0.001, 'railDamage survives round-trip');
 
-  // Simulate a save from before railways existed.
-  for (const item of data.tiles) {
-    delete item.rail;
-    delete item.raild;
-    delete item.railo;
+  // Simulate a legacy monolithic save from before railways existed.
+  const legacy = { width: tileMap.width, height: tileMap.height, seed: tileMap.seed, tiles: [] as any[] };
+  for (let x = 0; x < tileMap.width; x++) for (let yy = 0; yy < tileMap.height; yy++) {
+    const item = tileMap.getTile(x, yy)!;
+    legacy.tiles.push({ x, y: yy, t: item.type, h: item.height, temp: item.temperature, m: item.moisture, r: item.resourceType, ra: item.resourceAmount, rm: item.resourceMax, b: item.buildingId, k: item.kingdomId, c: item.cityId, f: item.isOnFire, rl: item.roadLevel, rt: item.roadTraffic, rd: item.roadDamage });
   }
   const oldReload = new TileMap(1, 1, 'single_continent', 1);
-  oldReload.deserialize(data);
+  oldReload.deserialize(legacy);
   const oldBack = oldReload.getTile(4, y)!;
   assert.equal(oldBack.railLevel, 0, 'old save loads with no rails');
   assert.equal(oldBack.railDamage, 0, 'old save loads with no rail damage');

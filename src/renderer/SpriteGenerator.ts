@@ -1876,67 +1876,46 @@ export class SpriteGenerator {
       this.rect(ctx, 40, 39, 13, 2, '#451a03');
       this.rect(ctx, 41, 39, 12, 1, '#92400e');
 
-      // === HORSE at the front/right ===
+      // === DRAFT OX / BULLOCK at the front/right ===
       // Rear legs
-      this.rect(ctx, 45, 39, 4, 14, '#451a03');
-      this.rect(ctx, 46, 39, 3, 13, '#78350f');
-      this.rect(ctx, 52, 40, 4, 13, '#451a03');
-      this.rect(ctx, 53, 40, 2, 12, '#92400e');
+      this.rect(ctx, 45, 39, 4, 14, '#3f2314');
+      this.rect(ctx, 46, 39, 3, 13, '#6e3c1d');
+      this.rect(ctx, 52, 40, 4, 13, '#3f2314');
+      this.rect(ctx, 53, 40, 2, 12, '#8d4e25');
       this.rect(ctx, 44, 52, 6, 3, '#1e293b');
       this.rect(ctx, 51, 52, 6, 3, '#1e293b');
 
-      // Body barrel
-      this.rect(ctx, 42, 29, 15, 2, '#451a03');
-      this.rect(ctx, 40, 31, 19, 9, '#451a03');
-      this.rect(ctx, 43, 40, 15, 4, '#451a03');
-      this.rect(ctx, 43, 30, 13, 2, '#b45309');
-      this.rect(ctx, 41, 32, 17, 7, '#92400e');
-      this.rect(ctx, 44, 39, 13, 4, '#78350f');
-      this.rect(ctx, 44, 32, 11, 1, '#d97706');
-      // Coat texture
-      this.px(ctx, 45, 34, '#d97706'); this.px(ctx, 50, 37, '#78350f');
-      this.px(ctx, 55, 34, '#b45309'); this.px(ctx, 47, 40, '#92400e');
+      // Heavy Ox Barrel Body
+      this.rect(ctx, 40, 28, 20, 12, '#3f2314');
+      this.rect(ctx, 41, 29, 18, 10, '#6e3c1d');
+      this.rect(ctx, 43, 31, 14, 6, '#f8fafc'); // White/cream hide patch
+      this.rect(ctx, 44, 32, 12, 4, '#e2e8f0');
 
       // Front legs
-      this.rect(ctx, 56, 38, 4, 15, '#451a03');
-      this.rect(ctx, 57, 38, 2, 14, '#92400e');
-      this.rect(ctx, 60, 37, 3, 16, '#451a03');
-      this.rect(ctx, 61, 38, 2, 14, '#78350f');
+      this.rect(ctx, 56, 38, 4, 15, '#3f2314');
+      this.rect(ctx, 57, 38, 2, 14, '#8d4e25');
+      this.rect(ctx, 60, 37, 3, 16, '#3f2314');
+      this.rect(ctx, 61, 38, 2, 14, '#6e3c1d');
       this.rect(ctx, 55, 52, 6, 3, '#1e293b');
       this.rect(ctx, 59, 52, 5, 3, '#1e293b');
 
-      // Neck and head facing right
-      this.rect(ctx, 53, 22, 7, 12, '#451a03');
-      this.rect(ctx, 54, 21, 6, 13, '#92400e');
-      this.rect(ctx, 56, 20, 4, 10, '#b45309');
-      // Mane
-      this.rect(ctx, 52, 21, 2, 10, '#451a03');
-      this.px(ctx, 51, 23, '#451a03'); this.px(ctx, 51, 26, '#451a03'); this.px(ctx, 52, 29, '#451a03');
-      // Head / muzzle
-      this.rect(ctx, 57, 18, 6, 8, '#451a03');
-      this.rect(ctx, 58, 17, 6, 8, '#b45309');
-      this.rect(ctx, 61, 21, 3, 5, '#78350f');
-      this.px(ctx, 63, 24, '#1e293b');
-      // Ear
-      this.rect(ctx, 58, 14, 2, 4, '#451a03');
-      this.rect(ctx, 59, 13, 2, 4, '#92400e');
-      this.px(ctx, 60, 12, '#451a03');
-      // Eye / face highlight
-      this.px(ctx, 61, 19, '#fef3c7');
-      this.px(ctx, 62, 19, '#1e293b');
-      this.px(ctx, 60, 18, '#d97706');
+      // Muscular neck and broad Ox head
+      this.rect(ctx, 52, 21, 9, 13, '#3f2314');
+      this.rect(ctx, 53, 20, 8, 12, '#6e3c1d');
+      this.rect(ctx, 57, 18, 7, 9, '#6e3c1d');
+      this.rect(ctx, 60, 20, 4, 6, '#3f2314');
+      // Horns
+      this.rect(ctx, 56, 13, 2, 6, '#fef08a');
+      this.rect(ctx, 55, 12, 2, 2, '#e2e8f0');
+      this.rect(ctx, 60, 14, 2, 5, '#fef08a');
+      this.rect(ctx, 61, 13, 2, 2, '#e2e8f0');
+      // Eye & Snort Ring
+      this.px(ctx, 61, 21, '#1e293b');
+      this.rect(ctx, 62, 24, 2, 2, '#fbbf24');
 
-      // Tail flowing left/back
-      this.rect(ctx, 40, 31, 3, 2, '#451a03');
-      this.rect(ctx, 38, 32, 3, 7, '#451a03');
-      this.rect(ctx, 36, 37, 4, 3, '#451a03');
-
-      // Harness / tack, clearly connecting forward horse to cart
-      this.rect(ctx, 54, 26, 7, 1, '#451a03');
-      this.rect(ctx, 57, 23, 1, 9, '#451a03');
-      this.rect(ctx, 43, 35, 14, 1, '#451a03');
-      this.rect(ctx, 42, 38, 15, 1, '#78350f');
-      this.px(ctx, 56, 27, '#fbbf24');
+      // Wooden Yoke / Harness
+      this.rect(ctx, 51, 22, 3, 10, '#451a03');
+      this.rect(ctx, 42, 35, 14, 1, '#451a03');
     }, 64, 64);
 
     // ============ LUMINI - Golden sun-blessed humanoid ============

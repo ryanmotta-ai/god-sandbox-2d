@@ -58,6 +58,15 @@ export interface WarReparations {
   endYear: number;
 }
 
+/**
+ * A realm remains the political unit used by diplomacy, territory and cities.
+ * Colonial realms use the same unit, with an explicit constitutional link to
+ * their metropole instead of being disguised as a distant city or a vassal.
+ */
+export type ColonialStatus = 'COLONY' | 'AUTONOMOUS_COLONY' | 'INDEPENDENT';
+export type ColonialAccess = 'maritime' | 'overland' | null;
+export type SeparatistMovement = 'none' | 'organizing' | 'revolt';
+
 export class Kingdom {
   public id: string;
   public name: string;
@@ -124,6 +133,29 @@ export class Kingdom {
   /** Set when this realm is itself a vassal. */
   public overlordId: string | null = null;
 
+  /** Constitutional state reserved for COL-V1 and later autonomy/independence work. */
+  public colonialStatus: ColonialStatus = 'INDEPENDENT';
+  /** Founding realm while this realm is a colonial subject; never uses vassalage. */
+  public metropoleId: string | null = null;
+  /** Colonial realms founded by this metropole. */
+  public colonyIds: Set<string> = new Set();
+  /** Route class that made the initial expedition viable. */
+  public colonialAccess: ColonialAccess = null;
+  /** 0..1 — local control over colonial affairs; 1 after independence. */
+  public colonialAutonomy: number = 1;
+  /** 0..1 — willingness to remain under the metropole's rule. */
+  public colonialLoyalty: number = 1;
+  /** 0..1 — accumulated constitutional and material conflict with the metropole. */
+  public colonialTension: number = 0;
+  /** 0..1 — distinct colonial political identity, built by time and distance. */
+  public colonialIdentity: number = 1;
+  /** Separatist organisation is stateful; escalation is driven by pressure, not a dice roll. */
+  public separatistMovement: SeparatistMovement = 'none';
+  public separatistSince: number | null = null;
+  public revoltYear: number | null = null;
+  /** Material and diplomatic aid supplied by outside powers during a revolt. */
+  public foreignSupport: number = 0;
+
   /** Kept for the old culture-level display. Now derived from research. */
   public cultureLevel: number = 1;
   /** Legacy numeric wealth, mirrored from the economy treasury. */
@@ -167,6 +199,33 @@ export class Kingdom {
 
   public get isEmpire(): boolean {
     return this.government === 'empire';
+  }
+
+  public get isColony(): boolean {
+    return this.colonialStatus === 'COLONY' || this.colonialStatus === 'AUTONOMOUS_COLONY';
+  }
+
+  /** Establish the non-vassal constitutional relation used by colonial realms. */
+  public establishColony(metropoleId: string, access: Exclude<ColonialAccess, null>): void {
+    this.colonialStatus = 'COLONY';
+    this.metropoleId = metropoleId;
+    this.colonialAccess = access;
+    this.colonialAutonomy = 0.12;
+    this.colonialLoyalty = 0.78;
+    this.colonialTension = 0.08;
+    this.colonialIdentity = 0.12;
+    this.separatistMovement = 'none';
+    this.separatistSince = null;
+    this.revoltYear = null;
+    this.foreignSupport = 0;
+  }
+
+  public addColony(colonyId: string): void {
+    this.colonyIds.add(colonyId);
+  }
+
+  public removeColony(colonyId: string): void {
+    this.colonyIds.delete(colonyId);
   }
 
   /**
@@ -325,6 +384,18 @@ export class Kingdom {
       knownKingdoms: Array.from(this.knownKingdoms),
       vassalIds: Array.from(this.vassalIds),
       overlordId: this.overlordId,
+      colonialStatus: this.colonialStatus,
+      metropoleId: this.metropoleId,
+      colonyIds: Array.from(this.colonyIds),
+      colonialAccess: this.colonialAccess,
+      colonialAutonomy: this.colonialAutonomy,
+      colonialLoyalty: this.colonialLoyalty,
+      colonialTension: this.colonialTension,
+      colonialIdentity: this.colonialIdentity,
+      separatistMovement: this.separatistMovement,
+      separatistSince: this.separatistSince,
+      revoltYear: this.revoltYear,
+      foreignSupport: this.foreignSupport,
       cultureLevel: this.cultureLevel,
       wealth: this.wealth,
       exportVolume: this.exportVolume,
@@ -359,6 +430,22 @@ export class Kingdom {
     kingdom.knownKingdoms = new Set(data.knownKingdoms ?? []);
     kingdom.vassalIds = new Set(data.vassalIds ?? []);
     kingdom.overlordId = data.overlordId ?? null;
+    kingdom.colonialStatus = data.colonialStatus ?? 'INDEPENDENT';
+    kingdom.metropoleId = data.metropoleId ?? null;
+    kingdom.colonyIds = new Set(data.colonyIds ?? []);
+    kingdom.colonialAccess = data.colonialAccess === 'maritime' || data.colonialAccess === 'overland'
+      ? data.colonialAccess
+      : null;
+    kingdom.colonialAutonomy = data.colonialAutonomy ?? (kingdom.isColony ? 0.12 : 1);
+    kingdom.colonialLoyalty = data.colonialLoyalty ?? (kingdom.isColony ? 0.78 : 1);
+    kingdom.colonialTension = data.colonialTension ?? (kingdom.isColony ? 0.08 : 0);
+    kingdom.colonialIdentity = data.colonialIdentity ?? (kingdom.isColony ? 0.12 : 1);
+    kingdom.separatistMovement = data.separatistMovement === 'organizing' || data.separatistMovement === 'revolt'
+      ? data.separatistMovement
+      : 'none';
+    kingdom.separatistSince = data.separatistSince ?? null;
+    kingdom.revoltYear = data.revoltYear ?? null;
+    kingdom.foreignSupport = data.foreignSupport ?? 0;
     kingdom.cultureLevel = data.cultureLevel ?? 1;
     kingdom.wealth = data.wealth ?? 100;
     kingdom.exportVolume = data.exportVolume ?? 0;

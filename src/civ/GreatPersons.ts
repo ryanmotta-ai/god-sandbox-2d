@@ -21,17 +21,17 @@ export interface GreatPersonData {
 }
 
 export const GREAT_PERSON_TITLES: Record<GreatPersonType, string[]> = {
-  scholar: ['the Wise', 'the Enlightened', 'Master of Stars', 'the Arch-Scholar'],
-  builder: ['the Architect', 'Master Builder', 'shaper of Stones', 'the Grand Mason'],
-  hero: ['the Undefeated', 'Iron Heart', 'Dragonslayer', 'Champion of the Realm'],
-  diplomat: ['the Peacemaker', 'Silver-Tongue', 'the Envoy', 'Architect of Pacts']
+  scholar: ['o Sábio', 'o Iluminado', 'Mestre das Estrelas', 'o Arqui-Erudito'],
+  builder: ['o Arquiteto', 'Mestre Construtor', 'Moldador de Pedras', 'o Grão-Pedreiro'],
+  hero: ['o Invicto', 'Coração de Ferro', 'Matador de Dragões', 'Campeão do Reino'],
+  diplomat: ['o Pacificador', 'Língua de Prata', 'o Emissário', 'Arquiteto de Pactos']
 };
 
 export const MONUMENT_TYPES: { type: BuildingType; name: string; desc: string }[] = [
-  { type: 'monument' as BuildingType, name: 'Statue of the Founder', desc: '+30% Kingdom Stability & Cultural Prestige' },
-  { type: 'great_library' as BuildingType, name: 'Great Library of Wisdom', desc: '+50% National Research Output & Ancient Records' },
-  { type: 'grand_aqueduct' as BuildingType, name: 'Grand Aqueduct of Nations', desc: '+50% City Population Capacity & Harvest' },
-  { type: 'colosseum' as BuildingType, name: 'Grand Colosseum of Legends', desc: '+30% Military Morale & Lowers War Weariness' }
+  { type: 'monument' as BuildingType, name: 'Estátua do Fundador', desc: '+30% de Estabilidade do Reino e Prestígio Cultural' },
+  { type: 'great_library' as BuildingType, name: 'Grande Biblioteca da Sabedoria', desc: '+50% de Produção de Pesquisa Nacional e Registros Antigos' },
+  { type: 'grand_aqueduct' as BuildingType, name: 'Grande Aqueduto das Nações', desc: '+50% de Capacidade Populacional da Cidade e Colheita' },
+  { type: 'colosseum' as BuildingType, name: 'Grande Coliseu das Lendas', desc: '+30% de Moral Militar e Reduz a Exaustão de Guerra' }
 ];
 
 export class GreatPersonManager {
@@ -106,7 +106,7 @@ export class GreatPersonManager {
     chronicle.log(
       year,
       'great_person',
-      `${e.title} emerged in ${kingdom.name} as a Great ${type}.`,
+      `${e.title} emergiu em ${kingdom.name} como um Grande ${type}.`,
       {
         title: e.title,
         importance: 'legendary',
@@ -117,9 +117,9 @@ export class GreatPersonManager {
           ...(e.cityId && cities.get(e.cityId) ? [{ kind: 'city' as const, id: e.cityId, name: cities.get(e.cityId)!.name }] : [])
         ],
         tags: ['great person', type, 'legacy'],
-        consequences: [`${e.title} became a remembered figure of ${kingdom.name}.`],
+        consequences: [`${e.title} tornou-se uma figura lembrada de ${kingdom.name}.`],
         threadId: `person:${e.id}`,
-        threadTitle: `Life and Legacy of ${e.title}`,
+        threadTitle: `Vida e Legado de ${e.title}`,
         data: { greatPersonType: type, level: e.level, kills: e.kills }
       }
     );
@@ -148,11 +148,11 @@ export class GreatPersonManager {
         if (techKeys.length > 0) {
           const tech = rng.pick(techKeys);
           kingdom.research.complete(tech.id);
-          const opus = `The Codex of ${tech.name}`;
+          const opus = `O Códice de ${tech.name}`;
           chronicle.log(
             year,
             'great_person',
-            `${e.title} authored "${opus}", completing the discovery of ${tech.name} for ${kingdom.name}.`,
+            `${e.title} escreveu "${opus}", completando a descoberta de ${tech.name} para ${kingdom.name}.`,
             {
               title: opus,
               importance: 'legendary',
@@ -163,10 +163,10 @@ export class GreatPersonManager {
                 { kind: 'tech', id: tech.id, name: tech.name }
               ],
               tags: ['magnum opus', 'scholar', 'technology'],
-              causes: [`${e.title}'s scholarship produced a major breakthrough.`],
-              consequences: [`${kingdom.name} completed ${tech.name}.`],
+              causes: [`A erudição de ${e.title} produziu um grande avanço.`],
+              consequences: [`${kingdom.name} concluiu ${tech.name}.`],
               threadId: `person:${e.id}`,
-              threadTitle: `Life and Legacy of ${e.title}`
+              threadTitle: `Vida e Legado de ${e.title}`
             }
           );
         } else {
@@ -189,9 +189,9 @@ export class GreatPersonManager {
           chronicle.log(
             year,
             'great_person',
-            `${e.title} found every great wonder already built, and endowed the treasury of ${kingdom.name} instead.`,
+            `${e.title} descobriu que todas as grandes maravilhas já haviam sido construídas, e então encheu o tesouro de ${kingdom.name}.`,
             {
-              title: `${e.title}'s Endowment`,
+              title: `A Doação de ${e.title}`,
               importance: 'major',
               scope: 'person',
               refs: [
@@ -199,9 +199,9 @@ export class GreatPersonManager {
                 { kind: 'kingdom', id: kingdom.id, name: kingdom.name }
               ],
               tags: ['builder', 'endowment', 'treasury'],
-              consequences: [`${kingdom.name} received a major treasury endowment.`],
+              consequences: [`${kingdom.name} recebeu uma grande doação para o tesouro.`],
               threadId: `person:${e.id}`,
-              threadTitle: `Life and Legacy of ${e.title}`
+              threadTitle: `Vida e Legado de ${e.title}`
             }
           );
           break;
@@ -217,7 +217,7 @@ export class GreatPersonManager {
           chronicle.log(
             year,
             'great_person',
-            `${e.title} judged ${city.name} too small for a monument, and endowed the treasury of ${kingdom.name} instead.`
+            `${e.title} considerou ${city.name} pequena demais para um monumento, e em vez disso doou para o tesouro de ${kingdom.name}.`
           );
           break;
         }
@@ -226,17 +226,18 @@ export class GreatPersonManager {
         const bId = nextId('wonder');
         const building = new Building(bId, monument.type, city.x + 1, city.y + 1, city.id);
         city.buildings.set(bId, building);
+        city.markBuildingTopologyChanged();
 
         // Mark tile
         const tile = tileMap.getTile(city.x + 1, city.y + 1);
-        if (tile) tile.buildingId = bId;
+        if (tile) { tile.buildingId = bId; tileMap.markRenderDirty(tile.x, tile.y); }
 
         kingdom.economy.stability = Math.min(1.0, kingdom.economy.stability + 0.25);
 
         chronicle.log(
           year,
           'wonder',
-          `${e.title} financed and constructed the ${monument.name} in ${city.name}.`,
+          `${e.title} financiou e construiu o ${monument.name} em ${city.name}.`,
           {
             title: monument.name,
             importance: 'legendary',
@@ -248,10 +249,10 @@ export class GreatPersonManager {
               { kind: 'building', id: building.id, name: monument.name }
             ],
             tags: ['wonder', 'builder', monument.type],
-            causes: [`${e.title} used their great legacy to undertake a monumental work.`],
+            causes: [`${e.title} usou seu grande legado para realizar uma obra monumental.`],
             consequences: [monument.desc],
             threadId: `person:${e.id}`,
-            threadTitle: `Life and Legacy of ${e.title}`
+            threadTitle: `Vida e Legado de ${e.title}`
           }
         );
         break;
@@ -267,9 +268,9 @@ export class GreatPersonManager {
         chronicle.log(
           year,
           'great_person',
-          `${e.title} rallied the armies of ${kingdom.name} and became a symbol of military resolve.`,
+          `${e.title} reuniu os exércitos de ${kingdom.name} e tornou-se um símbolo de determinação militar.`,
           {
-            title: `Heroic Legacy of ${e.title}`,
+            title: `Legado Heróico de ${e.title}`,
             importance: 'legendary',
             scope: 'person',
             refs: [
@@ -277,9 +278,9 @@ export class GreatPersonManager {
               { kind: 'kingdom', id: kingdom.id, name: kingdom.name }
             ],
             tags: ['hero', 'war', 'morale'],
-            consequences: [`War weariness in ${kingdom.name} fell sharply and ${e.title} received legendary arms.`],
+            consequences: [`A exaustão de guerra em ${kingdom.name} caiu drasticamente e ${e.title} recebeu armas lendárias.`],
             threadId: `person:${e.id}`,
-            threadTitle: `Life and Legacy of ${e.title}`
+            threadTitle: `Vida e Legado de ${e.title}`
           }
         );
         break;
@@ -295,9 +296,9 @@ export class GreatPersonManager {
         chronicle.log(
           year,
           'great_person',
-          `${e.title} brokered grand non-aggression treaties for ${kingdom.name}.`,
+          `${e.title} intermediou grandes tratados de não-agressão para ${kingdom.name}.`,
           {
-            title: `Diplomatic Legacy of ${e.title}`,
+            title: `Legado Diplomático de ${e.title}`,
             importance: 'legendary',
             scope: 'person',
             refs: [
@@ -305,9 +306,9 @@ export class GreatPersonManager {
               { kind: 'kingdom', id: kingdom.id, name: kingdom.name }
             ],
             tags: ['diplomat', 'treaty', 'peace'],
-            consequences: [`${kingdom.name} gained stability and new non-aggression commitments.`],
+            consequences: [`${kingdom.name} ganhou estabilidade e novos compromissos de não-agressão.`],
             threadId: `person:${e.id}`,
-            threadTitle: `Life and Legacy of ${e.title}`
+            threadTitle: `Vida e Legado de ${e.title}`
           }
         );
         break;

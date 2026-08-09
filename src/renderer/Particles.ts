@@ -31,9 +31,12 @@ export interface Projectile {
 }
 
 export class ParticleManager {
+  private static readonly MAX_PARTICLES = 250;
+  private static readonly MAX_PROJECTILES = 160;
   private pool: ObjectPool<Particle>;
   public activeParticles: Particle[] = [];
   public activeProjectiles: Projectile[] = [];
+  private relevanceCenter: { x: number; y: number; radius: number } | null = null;
 
   constructor() {
     this.pool = new ObjectPool<Particle>(
@@ -43,12 +46,27 @@ export class ParticleManager {
     );
   }
 
-  public spawnParticle(x: number, y: number, color: string, vx: number = 0, vy: number = 0, maxLife: number = 0.5, size: number = 3): void {
-    if (this.activeParticles.length >= 250) {
+  public setRelevanceCenter(x: number, y: number, radius: number = 100): void {
+    this.relevanceCenter = { x, y, radius };
+  }
+
+  private obtainParticle(x: number, y: number, important: boolean): Particle | null {
+    if (!important && this.relevanceCenter) {
+      const dx = x - this.relevanceCenter.x;
+      const dy = y - this.relevanceCenter.y;
+      if (dx * dx + dy * dy > this.relevanceCenter.radius * this.relevanceCenter.radius) return null;
+    }
+    if (this.activeParticles.length >= ParticleManager.MAX_PARTICLES) {
+      if (!important) return null;
       const old = this.activeParticles.shift();
       if (old) this.pool.release(old);
     }
-    const p = this.pool.obtain();
+    return this.pool.obtain();
+  }
+
+  public spawnParticle(x: number, y: number, color: string, vx: number = 0, vy: number = 0, maxLife: number = 0.5, size: number = 3): void {
+    const p = this.obtainParticle(x, y, false);
+    if (!p) return;
     p.x = x;
     p.y = y;
     p.vx = vx;
@@ -78,7 +96,8 @@ export class ParticleManager {
   }
 
   public spawnDamageNumber(x: number, y: number, damage: number): void {
-    const p = this.pool.obtain();
+    const p = this.obtainParticle(x, y, true);
+    if (!p) return;
     p.x = x;
     p.y = y;
     p.vx = (Math.random() - 0.5) * 0.2;
@@ -112,6 +131,11 @@ export class ParticleManager {
       this.spawnParticle(startX, startY, 'rgba(226,232,240,0.6)', (Math.random()-0.5)*0.3, -0.4, 0.35, 3);
     }
 
+    // Projectiles carry gameplay impacts. Resolve the oldest one before making
+    // room instead of silently dropping damage when battles become dense.
+    if (this.activeProjectiles.length >= ParticleManager.MAX_PROJECTILES) {
+      this.triggerProjectileImpact(this.activeProjectiles[0], 0);
+    }
     this.activeProjectiles.push({
       x: startX,
       y: startY,

@@ -403,6 +403,7 @@ export function buildGoodInspector(good: GoodId, m: EconomyMetrics, host: Econom
   return [
     el('div', { class: 'ae-econ-inspector-head' }, [
       button('Voltar aos bens', () => host.closeInspector(), { variant: 'ghost', size: 'sm', icon: 'close' }),
+      button('Ver no mapa', () => host.showGoodOnMap(good), { variant: 'secondary', size: 'sm', icon: 'map' }),
       badgeRow([
         badge(def.kind === 'crafted' ? 'Manufaturado' : 'Bruto', { size: 'sm', variant: 'outline' }),
         badge(tierLabel(position.tier), { size: 'sm', variant: 'outline' }),
@@ -464,7 +465,7 @@ export function buildGoodInspector(good: GoodId, m: EconomyMetrics, host: Econom
 
     buildPriceHistory(position, host),
     buildWhyPrice(position, m, host),
-    buildChain(good, m, host),
+    buildProductionChainPreview(good, m, host),
     buildInputsOutputs(good, m, host),
 
     el('div', { class: 'ae-econ-two-up' }, [
@@ -634,7 +635,11 @@ function buildWhyPrice(position: WorldGoodPosition, m: EconomyMetrics, host: Eco
  * Node colour is the world position of that good — green in surplus, amber tight,
  * red short — so a chain shows *where* it is broken, not only what it contains.
  */
-function buildChain(good: GoodId, m: EconomyMetrics, host: EconomyScreenHost): HTMLElement | null {
+export function buildProductionChainPreview(
+  good: GoodId,
+  m: EconomyMetrics,
+  host: Pick<EconomyScreenHost, 'inspectGood'>
+): HTMLElement | null {
   const { upstream, node, downstream } = chainAround(good);
   if (!upstream.length && !downstream.length) return null;
 
@@ -1341,7 +1346,7 @@ function buildRoutesPanel(
                 value: r.marginPerUnit.toFixed(2),
                 status: r.marginPerUnit > 0 ? 'positive' : 'warning'
               },
-              { label: 'Distância', value: `${r.distance.toFixed(0)} tiles` },
+              { label: 'Distância', value: `${r.distance.toFixed(0)} blocos` },
               { label: 'Aberta no ano', value: `${r.route.establishedYear}` }
             ],
             footnote: 'Clique para abrir os detalhes desta rota'
@@ -1367,7 +1372,7 @@ export function buildRouteDetail(view: RouteView, host: EconomyScreenHost): Chil
       badgeRow([
         badge(ROUTE_STATUS[view.status].label, { size: 'sm', status: ROUTE_STATUS[view.status].status }),
         badge(view.kind === 'maritime' ? 'Marítima' : 'Terrestre', { size: 'sm', variant: 'outline', icon: 'route' }),
-        view.railTiles > 0 ? badge(`${view.railTiles} tiles de trilho no caminho`, { size: 'sm', variant: 'outline', icon: 'route' }) : null
+        view.railTiles > 0 ? badge(`${view.railTiles} blocos de trilho no caminho`, { size: 'sm', variant: 'outline', icon: 'route' }) : null
       ])
     ]),
 
@@ -1393,7 +1398,7 @@ export function buildRouteDetail(view: RouteView, host: EconomyScreenHost): Chil
           status: view.utilization >= 0.99 ? 'warning' : 'positive'
         }),
         stat({ label: 'Valor acumulado', value: formatCompact(view.route.totalValue), icon: 'coin' }),
-        stat({ label: 'Distância', value: `${view.distance.toFixed(0)}`, unit: 'tiles', icon: 'map' }),
+        stat({ label: 'Distância', value: `${view.distance.toFixed(0)}`, unit: 'blocos', icon: 'map' }),
         stat({
           label: 'Fator da via', value: formatPercent(view.capacityFactor), icon: 'route',
           status: view.capacityFactor < 0.75 ? 'warning' : 'positive',

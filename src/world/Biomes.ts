@@ -29,7 +29,7 @@ export interface TerrainConfig {
 export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   [TerrainType.DEEP_OCEAN]: {
     id: TerrainType.DEEP_OCEAN,
-    name: 'Deep Ocean',
+    name: 'Oceano Profundo',
     color: '#0f172a',
     isWater: true,
     isWalkable: false,
@@ -49,7 +49,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.SAND]: {
     id: TerrainType.SAND,
-    name: 'Sand',
+    name: 'Areia',
     color: '#fde047',
     isWater: false,
     isWalkable: true,
@@ -59,7 +59,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.SOIL]: {
     id: TerrainType.SOIL,
-    name: 'Soil',
+    name: 'Terra',
     color: '#854d0e',
     isWater: false,
     isWalkable: true,
@@ -69,7 +69,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.GRASS]: {
     id: TerrainType.GRASS,
-    name: 'Grassland',
+    name: 'Pastagem',
     color: '#15803d',
     isWater: false,
     isWalkable: true,
@@ -79,7 +79,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.FOREST]: {
     id: TerrainType.FOREST,
-    name: 'Dense Forest',
+    name: 'Floresta Densa',
     color: '#166534',
     isWater: false,
     isWalkable: true,
@@ -89,7 +89,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.SAVANNA]: {
     id: TerrainType.SAVANNA,
-    name: 'Savanna',
+    name: 'Savana',
     color: '#ca8a04',
     isWater: false,
     isWalkable: true,
@@ -99,7 +99,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.SWAMP]: {
     id: TerrainType.SWAMP,
-    name: 'Swamp',
+    name: 'Pântano',
     color: '#3f6212',
     isWater: false,
     isWalkable: true,
@@ -119,7 +119,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.SNOW]: {
     id: TerrainType.SNOW,
-    name: 'Snow',
+    name: 'Neve',
     color: '#e2e8f0',
     isWater: false,
     isWalkable: true,
@@ -129,7 +129,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.MOUNTAIN]: {
     id: TerrainType.MOUNTAIN,
-    name: 'Mountain',
+    name: 'Montanha',
     color: '#475569',
     isWater: false,
     isWalkable: false,
@@ -149,7 +149,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.ARCANE]: {
     id: TerrainType.ARCANE,
-    name: 'Arcane Grove',
+    name: 'Bosque Arcano',
     color: '#a855f7',
     isWater: false,
     isWalkable: true,
@@ -159,7 +159,7 @@ export const TERRAINS: Record<TerrainType, TerrainConfig> = {
   },
   [TerrainType.CORRUPTED]: {
     id: TerrainType.CORRUPTED,
-    name: 'Corrupted Wastes',
+    name: 'Terras Corrompidas',
     color: '#581c87',
     isWater: false,
     isWalkable: true,

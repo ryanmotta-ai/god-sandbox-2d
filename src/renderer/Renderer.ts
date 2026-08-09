@@ -8,7 +8,8 @@ import { SpeciesType, SPECIES_DEFINITIONS } from '../entities/Species';
 import { Kingdom } from '../civ/Kingdom';
 import { City } from '../civ/City';
 import { ParticleManager } from './Particles';
-import { OverlayMode } from './Overlays';
+import { OverlayMode, type OverlayManager, type WarOverlayFocus } from './Overlays';
+import type { MapIntelligenceSnapshot, MapCityDatum } from '../ui/map/MapIntelligence';
 import { WorldEra } from '../world/WeatherEras';
 import { SpriteGenerator, type EntitySpriteAnimation, type SpriteDirection } from './SpriteGenerator';
 import { SpriteRegistry } from './SpriteRegistry';
@@ -22,6 +23,8 @@ import {
 } from './BridgeSprites';
 import { PROP_SCALE, propAspect, roadProp, type RoadProp } from './RoadSprites';
 import { CARAVAN_FRAMES, CARAVAN_PX, STRIDE_TILES, caravanSprite, type CaravanView } from './CaravanSprites';
+import type { SpatialHash } from '../core/SpatialHash';
+import { perfProfiler } from '../perf/PerformanceProfiler';
 
 /** Deposit tiers so plentiful that drawing every one clutters the whole map. */
 const COMMON_NODE_TIERS = new Set<GoodTier>(['common']);
@@ -118,7 +121,12 @@ export class PixelRenderer {
   private ctx: CanvasRenderingContext2D;
   private animTimer: number = 0;
   private diplomacy: DiplomacyManager | null = null;
-  private options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
+  public options: RenderOptions = { ...DEFAULT_RENDER_OPTIONS };
+
+  public toggleGrid(): boolean {
+    this.options.showGrid = !this.options.showGrid;
+    return this.options.showGrid;
+  }
   /** Current selection ring, or null when nothing is selected. */
   private selection: SelectionMark | null = null;
   /** Last ambient FX emission per building; avoids particle spam at high FPS. */
@@ -132,6 +140,7 @@ export class PixelRenderer {
   private terrainW: number = 0;
   private terrainH: number = 0;
   private readonly bakeTileSize: number = 16;
+  private readonly visibleEntityScratch: Entity[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -783,21 +792,25 @@ export class PixelRenderer {
     tileMap.markAllDirty();
   }
 
-  /** Redraw dirty static tiles into the bake canvas. Animated water/lava tiles are cleared to transparent (drawn per frame). */
+  /** Redraw dirty static tiles, including a stable base frame for animated surfaces. */
   private bakeDirtyTiles(tileMap: TileMap): void {
-    if (!this.terrainCtx || tileMap.dirtyTiles.size === 0) return;
+    if (!this.terrainCtx || (!tileMap.allTilesDirty && tileMap.dirtyTiles.size === 0)) return;
     const savedCtx = this.ctx;
     this.ctx = this.terrainCtx;
     const W = tileMap.width;
     const H = tileMap.height;
-    for (const idx of tileMap.dirtyTiles) {
-      const x = Math.floor(idx / H);
-      const y = idx - x * H;
-      if (x < 0 || x >= W || y < 0 || y >= H) continue;
-      this.bakeStaticTile(tileMap, x, y);
-    }
+    if (tileMap.allTilesDirty) {
+      for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) this.bakeStaticTile(tileMap, x, y);
+    } else for (const idx of tileMap.dirtyTiles) {
+        const x = Math.floor(idx / H);
+        const y = idx - x * H;
+        if (x < 0 || x >= W || y < 0 || y >= H) continue;
+        this.bakeStaticTile(tileMap, x, y);
+      }
     this.ctx = savedCtx;
     tileMap.dirtyTiles.clear();
+    tileMap.allTilesDirty = false;
+    tileMap.dirtyChunks.clear();
   }
 
   private bakeStaticTile(tileMap: TileMap, x: number, y: number): void {
@@ -806,9 +819,6 @@ export class PixelRenderer {
     const bx = x * ts;
     const by = y * ts;
     this.ctx.clearRect(bx, by, ts, ts);
-    // Animated surfaces stay transparent in the bake (drawn per frame).
-    if (this.isWater(tile.type) || tile.type === TerrainType.LAVA) return;
-
     this.setHashBase(x, y);
     const color =
       tile.renderSurface !== null &&
@@ -900,6 +910,13 @@ export class PixelRenderer {
     if (tileSize >= 8) {
       this.drawTerrainDetails(tile, x, y, screenX, screenY, tileSize);
     }
+  }
+
+  /** Cheap animated accent over the cached water/lava base. */
+  private drawAnimatedTerrainAccent(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+    this.setHashBase(x, y);
+    this.drawTerrainTexture(tile, x, y, screenX, screenY, tileSize);
+    if (tile.type === TerrainType.LAVA && tileSize >= 8) this.drawTerrainDetails(tile, x, y, screenX, screenY, tileSize);
   }
 
   private drawDataTileTexture(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
@@ -1443,7 +1460,11 @@ export class PixelRenderer {
     brushSize: number,
     ships?: Iterable<Ship>,
     caravans?: Iterable<OverlandCaravan>,
-    railways?: { yearlyFreight: number }
+    railways?: { yearlyFreight: number },
+    warFocus?: WarOverlayFocus | null,
+    overlays?: OverlayManager,
+    mapIntel?: MapIntelligenceSnapshot | null,
+    entityIndex?: SpatialHash<Entity>
   ): void {
     const width = this.canvas.width;
     const height = this.canvas.height;
@@ -1464,12 +1485,19 @@ export class PixelRenderer {
     const maxX = Math.min(tileMap.width - 1, Math.ceil(bottomRight.x));
     const minY = Math.max(0, Math.floor(topLeft.y));
     const maxY = Math.min(tileMap.height - 1, Math.ceil(bottomRight.y));
+    const visibleEntities = entityIndex
+      ? entityIndex.queryRect(minX - 2, minY - 2, maxX + 2, maxY + 2, this.visibleEntityScratch)
+      : entities;
+    perfProfiler.setCounter('visibleEntities', visibleEntities.length);
+    perfProfiler.setCounter('approximateDrawCalls', (maxX - minX + 1) * (maxY - minY + 1) + visibleEntities.length + cities.size);
 
     // ========== 1. RENDER TERRAIN TILES ==========
     // Static (non-animated) terrain is baked into an offscreen canvas once and only
     // redrawn per dirty tile; the bake covers base+texture+relief+edges+details.
     // Animated water/lava and overlay modes fall back to per-tile drawing.
-    const useBake = overlayMode === 'none';
+    // Analytical modes tint the baked terrain in later passes. Only the two
+    // legacy terrain-replacement views need the slower per-tile path.
+    const useBake = overlayMode !== 'biome' && overlayMode !== 'temperature';
     if (useBake) {
       this.ensureTerrainBake(tileMap);
       this.bakeDirtyTiles(tileMap);
@@ -1492,9 +1520,12 @@ export class PixelRenderer {
         const tile = tileMap.grid[x][y];
         const sx = x * tileSize + baseSX;
         const sy = y * tileSize + baseSY;
-        // Per-frame: animated surfaces (water/lava) or full path when overlay is active.
-        if (!useBake || this.isWater(tile.type) || tile.type === TerrainType.LAVA) {
+        // Replacement overlays use the full path. Animated surfaces reuse the
+        // cached base and receive only a cheap moving accent.
+        if (!useBake) {
           this.drawTerrainTile(tileMap, tile, x, y, sx, sy, tileSize, overlayMode);
+        } else if (this.isWater(tile.type) || tile.type === TerrainType.LAVA) {
+          this.drawAnimatedTerrainAccent(tile, x, y, sx, sy, tileSize);
         }
 
         // Roads are drawn afterwards as a connected network (drawRoadsPass),
@@ -1624,13 +1655,28 @@ export class PixelRenderer {
     }
 
     // ========== 1a. KINGDOM TERRITORY ==========
-    this.drawTerritoryPass(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, kingdoms, overlayMode);
+    this.drawTerritoryPass(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, kingdoms, overlayMode, warFocus, overlays, mapIntel);
+
+    // ========== 1aa. PRIMARY ANALYTICAL MODE ==========
+    if (mapIntel && (overlayMode === 'population' || overlayMode === 'economy')) {
+      this.drawCityHeatOverlay(camera, width, height, tileSize, mapIntel.cities, overlayMode, overlays);
+    }
+    if (overlayMode === 'resources') {
+      this.drawResourceOverlay(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, overlays?.resourceGood ?? 'all');
+    }
 
     // ========== 1b. ROAD NETWORK POLYLINES (A+C+E) ==========
     this.drawRoadsPass(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, cities, kingdoms);
 
     // ========== 1c. RAILWAYS ==========
     this.drawRailwaysPass(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, !!railways && railways.yearlyFreight > 0);
+
+    // ========== 1d. COMBINABLE WORLD-INTELLIGENCE LAYERS ==========
+    if (overlays) {
+      this.drawInfrastructureIntelligence(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, overlays, mapIntel);
+      if (overlays.layers.has('trade') && mapIntel) this.drawTradeOverlay(camera, width, height, tileSize, mapIntel);
+      if (overlays.layers.has('armies')) this.drawArmyOverlay(camera, width, height, tileSize, tileSize < 4 ? entities : visibleEntities, kingdoms);
+    }
 
     // ========== 2. RENDER BUILDINGS (LOD medium+) ==========
     for (const city of cities.values()) {
@@ -1711,7 +1757,7 @@ export class PixelRenderer {
     // ========== 3. RENDER ENTITIES (LOD medium+) ==========
     if (tileSize < 6) { 
       // far zoom: no individual entities
-    } else for (const e of entities) {
+    } else for (const e of visibleEntities) {
       if (e.x >= minX && e.x <= maxX && e.y >= minY && e.y <= maxY) {
         const screenPos = camera.worldToScreen(e.x, e.y, width, height);
 
@@ -1984,18 +2030,27 @@ export class PixelRenderer {
     }
 
     // ========== 3b. CITY NAME LABELS ==========
-    if (this.options.showCityNames && tileSize > 5) {
+    if (this.options.showCityNames && (overlays?.layers.has('city-labels') ?? true) && tileSize > 2.4) {
+      const occupied: Array<{ x: number; y: number; w: number; h: number }> = [];
       this.ctx.textAlign = 'center';
       for (const city of cities.values()) {
         if (city.x < minX || city.x > maxX || city.y < minY || city.y > maxY) continue;
+        const realm = city.kingdomId ? kingdoms.get(city.kingdomId) : null;
+        const capital = realm?.capitalCityId === city.id;
+        if (tileSize < 4 && !capital && city.population < 35) continue;
+        if (tileSize < 6 && !capital && city.population < 12) continue;
         const screenPos = camera.worldToScreen(city.x, city.y, width, height);
-        const k = city.kingdomId ? kingdoms.get(city.kingdomId) : null;
+        const k = realm;
         const fontSize = Math.max(9, Math.min(13, tileSize * 0.6));
 
         const labelX = screenPos.x + tileSize / 2;
         const labelY = screenPos.y + tileSize * 1.6;
 
         this.ctx.font = `600 ${fontSize}px 'Outfit', sans-serif`;
+        const labelW = this.ctx.measureText(city.name).width + 8;
+        const box = { x: labelX - labelW / 2, y: labelY - fontSize, w: labelW, h: fontSize * 2.1 };
+        if (occupied.some(other => box.x < other.x + other.w && box.x + box.w > other.x && box.y < other.y + other.h && box.y + box.h > other.y)) continue;
+        occupied.push(box);
         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
         this.ctx.fillText(city.name, labelX + 1, labelY + 1);
         this.ctx.fillStyle = k ? k.secondaryColor : '#e2e8f0';
@@ -2189,6 +2244,9 @@ export class PixelRenderer {
       this.ctx.stroke();
     }
 
+    // ========== 6c. WAR FOCUS ==========
+    if (overlayMode === 'war' && warFocus) this.drawWarFocus(camera, width, height, tileSize, entities, cities, kingdoms, warFocus);
+
     // ========== 7. SELECTION ==========
     if (this.selection) this.drawSelectionMark(camera, width, height, tileSize);
 
@@ -2205,6 +2263,72 @@ export class PixelRenderer {
       this.ctx.stroke();
       this.ctx.setLineDash([]);
     }
+  }
+
+  /** Focus marks for UI-9. Purely visual: all subjects come from the dossier. */
+  private drawWarFocus(
+    camera: Camera,
+    width: number,
+    height: number,
+    tileSize: number,
+    entities: Entity[],
+    cities: Map<string, City>,
+    kingdoms: Map<string, Kingdom>,
+    focus: WarOverlayFocus
+  ): void {
+    const ctx = this.ctx;
+    const entityIds = new Set(focus.entityIds);
+    const cityIds = new Set(focus.cityIds);
+    const participantIds = new Set(focus.participantIds);
+    const pulse = 0.72 + Math.sin(this.animTimer * 3.2) * 0.2;
+    ctx.save();
+
+    // Combatants remain individually legible at close zoom, while far zoom
+    // collapses them into a sparse constellation instead of a solid wash.
+    if (tileSize >= 4) {
+      for (const entity of entities) {
+        if (!entityIds.has(entity.id)) continue;
+        const pos = camera.worldToScreen(entity.x, entity.y, width, height);
+        const color = entity.kingdomId ? kingdoms.get(entity.kingdomId)?.color ?? '#f8fafc' : '#f8fafc';
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = color;
+        ctx.fillRect(Math.round(pos.x + tileSize * 0.38), Math.round(pos.y - Math.max(3, tileSize * 0.35)), Math.max(2, tileSize * 0.18), Math.max(2, tileSize * 0.18));
+      }
+    }
+
+    for (const city of cities.values()) {
+      if (!cityIds.has(city.id)) continue;
+      const pos = camera.worldToScreen(city.x, city.y, width, height);
+      const color = city.besiegerId ? '#ef4444' : city.kingdomId && participantIds.has(city.kingdomId) ? kingdoms.get(city.kingdomId)?.color ?? '#fbbf24' : '#fbbf24';
+      const radius = Math.max(10, tileSize * 1.35);
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
+      ctx.setLineDash([Math.max(3, tileSize * 0.35), Math.max(3, tileSize * 0.25)]);
+      ctx.beginPath();
+      ctx.arc(pos.x + tileSize / 2, pos.y + tileSize / 2, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.setLineDash([]);
+    for (const point of focus.points) {
+      const pos = camera.worldToScreen(point.x, point.y, width, height);
+      const color = point.kind === 'siege' ? '#ef4444' : point.kind === 'engagement' ? '#f59e0b' : point.kind === 'infrastructure' ? '#c084fc' : '#38bdf8';
+      const radius = Math.max(12, tileSize * (point.kind === 'engagement' ? 1.8 : 1.45));
+      ctx.globalAlpha = pulse;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(2, tileSize * 0.14);
+      ctx.beginPath();
+      ctx.arc(pos.x + tileSize / 2, pos.y + tileSize / 2, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(pos.x + tileSize / 2 - radius * 0.5, pos.y + tileSize / 2);
+      ctx.lineTo(pos.x + tileSize / 2 + radius * 0.5, pos.y + tileSize / 2);
+      ctx.moveTo(pos.x + tileSize / 2, pos.y + tileSize / 2 - radius * 0.5);
+      ctx.lineTo(pos.x + tileSize / 2, pos.y + tileSize / 2 + radius * 0.5);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   /**
@@ -2478,16 +2602,222 @@ export class PixelRenderer {
   /** Shoreline contours for the frame, drawn faintly — a coast is not contested. */
   private shorePaths: (Path2D | undefined)[] = [];
 
+  private intelligenceRealmColor(
+    kingdom: Kingdom,
+    mode: OverlayMode,
+    overlays?: OverlayManager,
+    intel?: MapIntelligenceSnapshot | null
+  ): { r: number; g: number; b: number } {
+    if (mode === 'diplomacy' && this.diplomacy) {
+      const reference = overlays?.selectedRealmId ?? kingdom.id;
+      const status = this.diplomacy.getStatus(reference, kingdom.id);
+      const color = status === 'war' ? '#ef4444'
+        : status === 'hostile' ? '#f59e0b'
+        : status === 'alliance' || status === 'friendly' ? '#38bdf8'
+        : '#94a3b8';
+      return this.hexToRgb(color);
+    }
+    if (mode === 'politics') {
+      const facts = intel?.politics.find(item => item.kingdomId === kingdom.id);
+      if (facts) {
+        const pressure = Math.max(facts.revoltRisk, facts.coupRisk, facts.reformPressure, 1 - facts.stability, 1 - facts.legitimacy);
+        return this.hexToRgb(pressure >= 0.62 ? '#ef4444' : pressure >= 0.34 ? '#f59e0b' : '#22c55e');
+      }
+    }
+    return kingdom.rgbColor;
+  }
+
+  private drawCityHeatOverlay(
+    camera: Camera, width: number, height: number, tileSize: number,
+    cities: MapCityDatum[], mode: 'population' | 'economy', overlays?: OverlayManager
+  ): void {
+    const metric = overlays?.economyMetric ?? 'prosperity';
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = 'screen';
+    for (const city of cities) {
+      const pos = camera.worldToScreen(city.x + 0.5, city.y + 0.5, width, height);
+      if (pos.x < -80 || pos.y < -80 || pos.x > width + 80 || pos.y > height + 80) continue;
+      const value = mode === 'population' ? city.populationLevel
+        : metric === 'output' ? city.outputLevel
+        : metric === 'employment' ? city.employment
+        : metric === 'food' ? city.foodSecurity === null ? null : Math.min(1, city.foodSecurity / 1.2)
+        : city.prosperity;
+      if (value === null) continue;
+      const v = Math.max(0, Math.min(1, value));
+      const color = mode === 'population'
+        ? v > 0.82 ? '#ef4444' : v > 0.58 ? '#f59e0b' : v > 0.32 ? '#a3e635' : '#38bdf8'
+        : v > 0.68 ? '#22c55e' : v > 0.38 ? '#f59e0b' : '#ef4444';
+      const radius = Math.max(10, Math.min(72, tileSize * (2.2 + Math.sqrt(Math.max(1, city.territoryTiles)) * 0.34)));
+      const grad = this.ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, radius);
+      grad.addColorStop(0, `${color}b8`);
+      grad.addColorStop(0.45, `${color}64`);
+      grad.addColorStop(1, `${color}00`);
+      this.ctx.fillStyle = grad;
+      this.ctx.beginPath();
+      this.ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
+  private drawResourceOverlay(
+    tileMap: TileMap, minX: number, maxX: number, minY: number, maxY: number,
+    tileSize: number, baseSX: number, baseSY: number, selected: string | 'all'
+  ): void {
+    const step = tileSize < 2.5 ? 4 : tileSize < 5 ? 2 : 1;
+    this.ctx.save();
+    for (let x = minX; x <= maxX; x += step) for (let y = minY; y <= maxY; y += step) {
+      let best: Tile | null = null;
+      for (let dx = 0; dx < step && x + dx <= maxX; dx++) for (let dy = 0; dy < step && y + dy <= maxY; dy++) {
+        const tile = tileMap.grid[x + dx][y + dy];
+        if (!tile.resourceType || (selected !== 'all' && tile.resourceType !== selected)) continue;
+        if (!best || tile.resourceAmount > best.resourceAmount) best = tile;
+      }
+      if (!best?.resourceType) continue;
+      const amount = best.resourceMax > 0 ? best.resourceAmount / best.resourceMax : best.resourceAmount > 0 ? 1 : 0;
+      const color = GOODS[best.resourceType]?.color ?? '#fbbf24';
+      const sx = x * tileSize + baseSX;
+      const sy = y * tileSize + baseSY;
+      const size = Math.max(2, tileSize * step * 0.72);
+      this.ctx.globalAlpha = amount > 0 ? 0.32 + Math.min(1, amount) * 0.48 : 0.32;
+      this.ctx.fillStyle = color;
+      this.ctx.fillRect(sx + (tileSize * step - size) / 2, sy + (tileSize * step - size) / 2, size, size);
+      if (amount <= 0) {
+        this.ctx.strokeStyle = '#64748b';
+        this.ctx.setLineDash([2, 2]);
+        this.ctx.strokeRect(sx, sy, Math.max(2, tileSize * step), Math.max(2, tileSize * step));
+        this.ctx.setLineDash([]);
+      }
+    }
+    this.ctx.restore();
+  }
+
+  private drawTradeOverlay(camera: Camera, width: number, height: number, tileSize: number, intel: MapIntelligenceSnapshot): void {
+    const routes = intel.routes.slice(0, tileSize < 3 ? 24 : tileSize < 6 ? 70 : 140);
+    const maxVolume = Math.max(1, ...routes.map(item => item.route.volume));
+    this.ctx.save();
+    this.ctx.lineCap = 'round';
+    this.ctx.lineJoin = 'round';
+    for (const item of routes) {
+      const path = item.route.path?.length ? item.route.path
+        : item.fromCity && item.toCity ? [{ x: item.fromCity.x, y: item.fromCity.y }, { x: item.toCity.x, y: item.toCity.y }]
+        : [];
+      if (path.length < 2) continue;
+      const color = GOODS[item.good]?.color ?? '#22d3ee';
+      this.ctx.strokeStyle = color;
+      this.ctx.globalAlpha = item.route.active ? 0.72 : 0.42;
+      this.ctx.lineWidth = Math.max(1.2, Math.min(4.5, 1 + 3.2 * Math.sqrt(item.route.volume / maxVolume)));
+      this.ctx.setLineDash(item.route.active ? [] : [5, 5]);
+      this.ctx.beginPath();
+      for (let i = 0; i < path.length; i++) {
+        const p = camera.worldToScreen(path[i].x + 0.5, path[i].y + 0.5, width, height);
+        if (i === 0) this.ctx.moveTo(p.x, p.y); else this.ctx.lineTo(p.x, p.y);
+      }
+      this.ctx.stroke();
+      const mid = Math.max(1, Math.floor(path.length / 2));
+      const a = camera.worldToScreen(path[mid - 1].x + 0.5, path[mid - 1].y + 0.5, width, height);
+      const b = camera.worldToScreen(path[mid].x + 0.5, path[mid].y + 0.5, width, height);
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
+      this.ctx.setLineDash([]);
+      this.ctx.fillStyle = color;
+      this.ctx.translate(b.x, b.y);
+      this.ctx.rotate(angle);
+      this.ctx.beginPath();
+      this.ctx.moveTo(5, 0); this.ctx.lineTo(-4, -3.2); this.ctx.lineTo(-4, 3.2); this.ctx.closePath(); this.ctx.fill();
+      this.ctx.rotate(-angle);
+      this.ctx.translate(-b.x, -b.y);
+    }
+    this.ctx.restore();
+  }
+
+  private drawInfrastructureIntelligence(
+    tileMap: TileMap, minX: number, maxX: number, minY: number, maxY: number,
+    tileSize: number, baseSX: number, baseSY: number,
+    overlays: OverlayManager, intel?: MapIntelligenceSnapshot | null
+  ): void {
+    const roads = overlays.layers.has('roads');
+    const traffic = overlays.layers.has('road-traffic');
+    const rail = overlays.layers.has('rail');
+    const ports = overlays.layers.has('ports');
+    const issues = overlays.layers.has('logistics');
+    if (!roads && !traffic && !rail && !ports && !issues) return;
+    this.ctx.save();
+    const step = tileSize < 2.5 ? 2 : 1;
+    for (let x = minX; x <= maxX; x += step) for (let y = minY; y <= maxY; y += step) {
+      const tile = tileMap.grid[x][y];
+      const sx = x * tileSize + baseSX;
+      const sy = y * tileSize + baseSY;
+      if (roads && tile.roadLevel > 0) {
+        this.ctx.fillStyle = tile.roadDamage > 0.45 ? 'rgba(239,68,68,.7)' : `rgba(251,191,36,${0.28 + tile.roadLevel * 0.16})`;
+        this.ctx.fillRect(sx, sy + tileSize * 0.34, Math.max(2, tileSize * step), Math.max(1.5, tileSize * 0.3));
+      }
+      if (traffic && tile.roadTraffic > 0) {
+        this.ctx.fillStyle = `rgba(251,113,133,${Math.min(0.82, 0.18 + Math.log1p(tile.roadTraffic) / 8)})`;
+        this.ctx.beginPath(); this.ctx.arc(sx + tileSize / 2, sy + tileSize / 2, Math.max(2, tileSize * 0.42), 0, Math.PI * 2); this.ctx.fill();
+      }
+      if (rail && tile.railLevel > 0) {
+        this.ctx.strokeStyle = tile.railDamage >= 0.75 ? '#ef4444' : '#67e8f9';
+        this.ctx.globalAlpha = 0.82;
+        this.ctx.lineWidth = Math.max(1.5, tileSize * 0.22);
+        this.ctx.beginPath(); this.ctx.moveTo(sx, sy + tileSize / 2); this.ctx.lineTo(sx + tileSize * step, sy + tileSize / 2); this.ctx.stroke();
+      }
+    }
+    if (ports && intel) for (const port of intel.ports) {
+      const x = port.x * tileSize + baseSX + tileSize / 2;
+      const y = port.y * tileSize + baseSY + tileSize / 2;
+      this.ctx.globalAlpha = 0.9;
+      this.ctx.fillStyle = port.operational ? '#38bdf8' : '#ef4444';
+      this.ctx.beginPath(); this.ctx.arc(x, y, Math.max(4, tileSize * 0.7), 0, Math.PI * 2); this.ctx.fill();
+      this.ctx.fillStyle = '#082f49'; this.ctx.fillRect(x - 1, y - Math.max(3, tileSize * 0.42), 2, Math.max(6, tileSize * 0.84));
+    }
+    if (issues && intel) for (const issue of intel.issues) {
+      if (!issue.at) continue;
+      const x = issue.at.x * tileSize + baseSX + tileSize / 2;
+      const y = issue.at.y * tileSize + baseSY + tileSize / 2;
+      const r = Math.max(5, tileSize * 0.62);
+      this.ctx.globalAlpha = 0.92;
+      this.ctx.fillStyle = issue.severity === 'critical' ? '#ef4444' : '#f59e0b';
+      this.ctx.beginPath(); this.ctx.moveTo(x, y - r); this.ctx.lineTo(x + r, y); this.ctx.lineTo(x, y + r); this.ctx.lineTo(x - r, y); this.ctx.closePath(); this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
+  private drawArmyOverlay(camera: Camera, width: number, height: number, tileSize: number, entities: Entity[], kingdoms: Map<string, Kingdom>): void {
+    const military = entities.filter(entity => ['soldier', 'archer', 'leader', 'king'].includes(entity.profession));
+    this.ctx.save();
+    if (tileSize < 4) {
+      const counts = new Map<string, number>();
+      for (const entity of military) if (entity.kingdomId) counts.set(entity.kingdomId, (counts.get(entity.kingdomId) ?? 0) + 1);
+      for (const [id, count] of counts) {
+        const kingdom = kingdoms.get(id); if (!kingdom) continue;
+        const p = camera.worldToScreen(kingdom.cachedCenter.x, kingdom.cachedCenter.y, width, height);
+        this.ctx.fillStyle = kingdom.color; this.ctx.globalAlpha = 0.82;
+        this.ctx.beginPath(); this.ctx.arc(p.x, p.y, Math.max(4, Math.min(13, 3 + Math.sqrt(count))), 0, Math.PI * 2); this.ctx.fill();
+      }
+    } else for (const entity of military) {
+      const p = camera.worldToScreen(entity.x + 0.5, entity.y + 0.5, width, height);
+      this.ctx.fillStyle = entity.kingdomId ? kingdoms.get(entity.kingdomId)?.color ?? '#f8fafc' : '#f8fafc';
+      this.ctx.globalAlpha = 0.78;
+      const r = Math.max(2, tileSize * 0.24);
+      this.ctx.beginPath(); this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2); this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
   private drawTerritoryPass(
     tileMap: TileMap,
     minX: number, maxX: number, minY: number, maxY: number,
     tileSize: number, baseSX: number, baseSY: number,
     kingdoms: Map<string, Kingdom>,
-    overlayMode: OverlayMode
+    overlayMode: OverlayMode,
+    warFocus?: WarOverlayFocus | null,
+    overlays?: OverlayManager,
+    mapIntel?: MapIntelligenceSnapshot | null
   ): void {
     if (tileSize < 1 || kingdoms.size === 0) return;
     const ctx = this.ctx;
-    const political = overlayMode === 'political';
+    const political = overlayMode === 'political' || overlayMode === 'diplomacy' || overlayMode === 'politics' || overlayMode === 'war';
+    const warParticipants = overlayMode === 'war' ? new Set(warFocus?.participantIds ?? []) : null;
 
     const x0 = Math.max(0, minX - 1);
     const x1 = Math.min(tileMap.width - 1, maxX + 1);
@@ -2601,12 +2931,13 @@ export class PixelRenderer {
     }
     for (let own = 1; own < realms.length; own++) {
       const kingdom = realms[own]!;
-      const { r, g, b } = kingdom.rgbColor;
+      const { r, g, b } = this.intelligenceRealmColor(kingdom, overlayMode, overlays, mapIntel);
       // Deepest first, so the firmer edge bands land on top of the wash.
       for (let band = DEPTH; band >= 0; band--) {
         const path = bands[own][band];
         if (!path) continue;
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${TINT[band]})`;
+        const alpha = warParticipants ? (warParticipants.has(kingdom.id) ? Math.min(0.76, TINT[band] + 0.10) : TINT[band] * 0.20) : TINT[band];
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
         ctx.fill(path);
       }
     }
@@ -2666,8 +2997,9 @@ export class PixelRenderer {
       for (let own = 1; own < realms.length; own++) {
         const path = this.shorePaths[own];
         if (!path) continue;
-        const { r, g, b } = realms[own]!.rgbColor;
-        ctx.strokeStyle = `rgba(${Math.min(255, r + 60)}, ${Math.min(255, g + 60)}, ${Math.min(255, b + 60)}, 0.5)`;
+        const { r, g, b } = this.intelligenceRealmColor(realms[own]!, overlayMode, overlays, mapIntel);
+        const alpha = warParticipants ? (warParticipants.has(realms[own]!.id) ? 0.62 : 0.14) : 0.5;
+        ctx.strokeStyle = `rgba(${Math.min(255, r + 60)}, ${Math.min(255, g + 60)}, ${Math.min(255, b + 60)}, ${alpha})`;
         ctx.stroke(path);
       }
 
@@ -2683,8 +3015,9 @@ export class PixelRenderer {
       for (let own = 1; own < realms.length; own++) {
         const path = this.frontierPaths[own];
         if (!path) continue;
-        const { r, g, b } = realms[own]!.rgbColor;
-        ctx.strokeStyle = `rgba(${Math.min(255, r + 50)}, ${Math.min(255, g + 50)}, ${Math.min(255, b + 50)}, 0.95)`;
+        const { r, g, b } = this.intelligenceRealmColor(realms[own]!, overlayMode, overlays, mapIntel);
+        const alpha = warParticipants ? (warParticipants.has(realms[own]!.id) ? 1 : 0.18) : 0.95;
+        ctx.strokeStyle = `rgba(${Math.min(255, r + 50)}, ${Math.min(255, g + 50)}, ${Math.min(255, b + 50)}, ${alpha})`;
         ctx.stroke(path);
       }
       this.frontierPaths.length = 0;

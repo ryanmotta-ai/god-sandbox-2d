@@ -10,6 +10,7 @@ export interface HasPosition {
 export class SpatialHash<T extends HasPosition> {
   private cellSize: number;
   private grid: Map<number, Set<T>> = new Map();
+  private itemCells: Map<string, number> = new Map();
 
   constructor(cellSize: number = 8) {
     this.cellSize = cellSize;
@@ -24,36 +25,63 @@ export class SpatialHash<T extends HasPosition> {
 
   public clear(): void {
     this.grid.clear();
+    this.itemCells.clear();
   }
 
   public insert(item: T): void {
     const key = this.getKey(item.x, item.y);
+    const previousKey = this.itemCells.get(item.id);
+    if (previousKey === key) return;
+    if (previousKey !== undefined) this.removeFromCell(item, previousKey);
     if (!this.grid.has(key)) {
       this.grid.set(key, new Set());
     }
     this.grid.get(key)!.add(item);
+    this.itemCells.set(item.id, key);
   }
 
   public remove(item: T): void {
-    const key = this.getKey(item.x, item.y);
-    if (this.grid.has(key)) {
-      this.grid.get(key)!.delete(item);
-    }
+    const key = this.itemCells.get(item.id);
+    if (key === undefined) return;
+    this.removeFromCell(item, key);
+    this.itemCells.delete(item.id);
   }
 
-  public update(item: T, oldX: number, oldY: number): void {
-    const oldKey = this.getKey(oldX, oldY);
+  public update(item: T, _oldX?: number, _oldY?: number): void {
+    const oldKey = this.itemCells.get(item.id);
     const newKey = this.getKey(item.x, item.y);
     if (oldKey !== newKey) {
-      if (this.grid.has(oldKey)) {
-        this.grid.get(oldKey)!.delete(item);
-      }
+      if (oldKey !== undefined) this.removeFromCell(item, oldKey);
       this.insert(item);
     }
   }
 
-  public queryRadius(x: number, y: number, radius: number): T[] {
-    const result: T[] = [];
+  private removeFromCell(item: T, key: number): void {
+    const cell = this.grid.get(key);
+    if (!cell) return;
+    cell.delete(item);
+    if (cell.size === 0) this.grid.delete(key);
+  }
+
+  public rebuild(items: Iterable<T>): void {
+    this.clear();
+    for (const item of items) this.insert(item);
+  }
+
+  public get size(): number { return this.itemCells.size; }
+  public has(id: string): boolean { return this.itemCells.has(id); }
+
+  public validate(items: Iterable<T>): boolean {
+    let count = 0;
+    for (const item of items) {
+      count++;
+      if (!this.itemCells.has(item.id)) return false;
+    }
+    return count === this.itemCells.size;
+  }
+
+  public queryRadius(x: number, y: number, radius: number, result: T[] = []): T[] {
+    result.length = 0;
     const minCx = Math.floor((x - radius) / this.cellSize);
     const maxCx = Math.floor((x + radius) / this.cellSize);
     const minCy = Math.floor((y - radius) / this.cellSize);
@@ -77,6 +105,25 @@ export class SpatialHash<T extends HasPosition> {
       }
     }
 
+    return result;
+  }
+
+  /** Viewport/region query used by rendering and future regional simulation. */
+  public queryRect(minX: number, minY: number, maxX: number, maxY: number, result: T[] = []): T[] {
+    result.length = 0;
+    const minCx = Math.floor(minX / this.cellSize);
+    const maxCx = Math.floor(maxX / this.cellSize);
+    const minCy = Math.floor(minY / this.cellSize);
+    const maxCy = Math.floor(maxY / this.cellSize);
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        const items = this.grid.get(cx * 100000 + cy);
+        if (!items) continue;
+        for (const item of items) {
+          if (item.x >= minX && item.x <= maxX && item.y >= minY && item.y <= maxY) result.push(item);
+        }
+      }
+    }
     return result;
   }
 }

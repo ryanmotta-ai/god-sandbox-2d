@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-aethoria-storage-list"
+description = "Enables the aethoria_storage_list command without any pre-configured scope."
+commands.allow = ["aethoria_storage_list"]
+
+[[permission]]
+identifier = "deny-aethoria-storage-list"
+description = "Denies the aethoria_storage_list command without any pre-configured scope."
+commands.deny = ["aethoria_storage_list"]

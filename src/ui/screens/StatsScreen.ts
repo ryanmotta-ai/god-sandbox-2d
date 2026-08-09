@@ -21,12 +21,12 @@ export class StatsScreen implements Screen {
     const layout = el('div', { class: 'screen-panel' }, [
       el('header', { class: 'screen-head' }, [
         el('div', {}, [
-          el('h2', { class: 'screen-title', text: '📊 World Statistics' }),
-          el('p', { class: 'screen-sub', text: `${ctx.stats.samples.length} years recorded · currently year ${ctx.sim.currentYear}` })
+          el('h2', { class: 'screen-title', text: '📊 Estatísticas do Mundo' }),
+          el('p', { class: 'screen-sub', text: `${ctx.stats.samples.length} anos registrados · ano atual ${ctx.sim.currentYear}` })
         ]),
         el('div', { class: 'head-actions' }, [
-          button('Refresh', () => this.render(), { icon: '🔄' }),
-          button('Close', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
+          button('Atualizar', () => this.render(), { icon: '🔄' }),
+          button('Fechar', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
         ])
       ]),
       this.bodyEl
@@ -43,20 +43,20 @@ export class StatsScreen implements Screen {
 
     this.bodyEl.appendChild(
       el('div', { class: 'stat-grid cols-4' }, [
-        this.tile('👥', 'Population', formatNumber(sim.entities.length), `peak ${formatNumber(stats.peakPopulation)}`),
-        this.tile('🏛️', 'Cities', `${sim.cities.size}`),
-        this.tile('👑', 'Kingdoms', `${sim.kingdoms.size}`, `peak ${stats.peakKingdoms}`),
-        this.tile('⚔️', 'Wars fought', `${sim.diplomacy.activeWars.size + sim.diplomacy.warHistory.length}`, `${sim.diplomacy.activeWars.size} ongoing`),
-        this.tile('👶', 'Total births', formatNumber(sim.totalBirths)),
-        this.tile('💀', 'Total deaths', formatNumber(sim.totalDeaths)),
-        this.tile('🔥', 'Burning tiles', `${this.ctx.activeFires}`),
-        this.tile('📅', 'Current year', `${sim.currentYear}`)
+        this.tile('👥', 'População', formatNumber(sim.entities.length), `pico de ${formatNumber(stats.peakPopulation)}`),
+        this.tile('🏛️', 'Cidades', `${sim.cities.size}`),
+        this.tile('👑', 'Reinos', `${sim.kingdoms.size}`, `pico de ${stats.peakKingdoms}`),
+        this.tile('⚔️', 'Guerras travadas', `${sim.diplomacy.activeWars.size + sim.diplomacy.warHistory.length}`, `${sim.diplomacy.activeWars.size} em andamento`),
+        this.tile('👶', 'Total de nascimentos', formatNumber(sim.totalBirths)),
+        this.tile('💀', 'Total de mortes', formatNumber(sim.totalDeaths)),
+        this.tile('🔥', 'Blocos em chamas', `${this.ctx.activeFires}`),
+        this.tile('📅', 'Ano atual', `${sim.currentYear}`)
       ])
     );
 
     if (samples.length < 2) {
       this.bodyEl.appendChild(
-        emptyState('⏳', 'Not enough history yet', 'Let the simulation run for a few years and the charts will fill in.')
+        emptyState('⏳', 'Histórico insuficiente', 'Deixe a simulação rodar por alguns anos e os gráficos serão preenchidos.')
       );
     } else {
       const years = samples.map(s => s.year);
@@ -64,14 +64,14 @@ export class StatsScreen implements Screen {
       this.bodyEl.appendChild(
         el('section', { class: 'panel' }, [
           el('header', { class: 'panel-head' }, [
-            el('h3', { class: 'panel-title', text: 'Population Over Time' }),
-            el('p', { class: 'panel-sub', text: 'Civilised folk versus wildlife across recorded history.' })
+            el('h3', { class: 'panel-title', text: 'População ao Longo do Tempo' }),
+            el('p', { class: 'panel-sub', text: 'Povo civilizado versus vida selvagem ao longo da história registrada.' })
           ]),
           el('div', { class: 'panel-body' }, [
             lineChart(
               [
-                { label: 'Humanoids', color: '#fbbf24', values: samples.map(s => s.humanoids) },
-                { label: 'Wildlife', color: '#34d399', values: samples.map(s => s.wildlife) }
+                { label: 'Humanoides', color: '#fbbf24', values: samples.map(s => s.humanoids) },
+                { label: 'Vida Selvagem', color: '#34d399', values: samples.map(s => s.wildlife) }
               ],
               years,
               { height: 220 }
@@ -83,14 +83,14 @@ export class StatsScreen implements Screen {
       this.bodyEl.appendChild(
         el('section', { class: 'panel' }, [
           el('header', { class: 'panel-head' }, [
-            el('h3', { class: 'panel-title', text: 'Civilisation & Conflict' })
+            el('h3', { class: 'panel-title', text: 'Civilização e Conflito' })
           ]),
           el('div', { class: 'panel-body' }, [
             lineChart(
               [
-                { label: 'Cities', color: '#38bdf8', values: samples.map(s => s.cities) },
-                { label: 'Kingdoms', color: '#a855f7', values: samples.map(s => s.kingdoms) },
-                { label: 'Active wars', color: '#ef4444', values: samples.map(s => s.activeWars) }
+                { label: 'Cidades', color: '#38bdf8', values: samples.map(s => s.cities) },
+                { label: 'Reinos', color: '#a855f7', values: samples.map(s => s.kingdoms) },
+                { label: 'Guerras ativas', color: '#ef4444', values: samples.map(s => s.activeWars) }
               ],
               years,
               { height: 200 }
@@ -102,13 +102,13 @@ export class StatsScreen implements Screen {
       this.bodyEl.appendChild(
         el('section', { class: 'panel' }, [
           el('header', { class: 'panel-head' }, [
-            el('h3', { class: 'panel-title', text: 'Births & Deaths per Year' })
+            el('h3', { class: 'panel-title', text: 'Nascimentos e Mortes por Ano' })
           ]),
           el('div', { class: 'panel-body' }, [
             lineChart(
               [
-                { label: 'Births', color: '#10b981', values: samples.map(s => s.births) },
-                { label: 'Deaths', color: '#ef4444', values: samples.map(s => s.deaths) }
+                { label: 'Nascimentos', color: '#10b981', values: samples.map(s => s.births) },
+                { label: 'Mortes', color: '#ef4444', values: samples.map(s => s.deaths) }
               ],
               years,
               { height: 180 }
@@ -122,11 +122,11 @@ export class StatsScreen implements Screen {
     const breakdown = stats.speciesBreakdown(sim);
     this.bodyEl.appendChild(
       el('section', { class: 'panel' }, [
-        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Species Distribution' })]),
+        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Distribuição de Espécies' })]),
         el('div', { class: 'panel-body' }, [
           breakdown.length
             ? donutChart(breakdown.map(b => ({ label: b.name, value: b.count, color: b.color })), 'creatures')
-            : el('p', { class: 'muted small', text: 'No creatures are alive in this world.' })
+            : el('p', { class: 'muted small', text: 'Não há criaturas vivas neste mundo.' })
         ])
       ])
     );
@@ -136,8 +136,8 @@ export class StatsScreen implements Screen {
     this.bodyEl.appendChild(
       el('section', { class: 'panel' }, [
         el('header', { class: 'panel-head' }, [
-          el('h3', { class: 'panel-title', text: 'Kingdom Power Ranking' }),
-          el('p', { class: 'panel-sub', text: 'Derived from military strength, levels and territory held.' })
+          el('h3', { class: 'panel-title', text: 'Ranking de Poder dos Reinos' }),
+          el('p', { class: 'panel-sub', text: 'Derivado da força militar, níveis e território mantido.' })
         ]),
         el('div', { class: 'panel-body' }, [
           rankings.length
@@ -147,7 +147,7 @@ export class StatsScreen implements Screen {
                 color: r.color,
                 sublabel: `👥 ${formatNumber(r.population)} · 🏛️ ${r.cities} · 🗺️ ${formatNumber(r.territory)}`
               })))
-            : el('p', { class: 'muted small', text: 'No kingdoms have been founded yet.' })
+            : el('p', { class: 'muted small', text: 'Nenhum reino foi fundado ainda.' })
         ])
       ])
     );
@@ -168,13 +168,13 @@ export class StatsScreen implements Screen {
     this.bodyEl.appendChild(
       el('section', { class: 'panel' }, [
         el('header', { class: 'panel-head' }, [
-          el('h3', { class: 'panel-title', text: 'Trait Prevalence' }),
-          el('p', { class: 'panel-sub', text: 'How many living creatures carry each trait.' })
+          el('h3', { class: 'panel-title', text: 'Prevalência de Traços' }),
+          el('p', { class: 'panel-sub', text: 'Quantas criaturas vivas carregam cada traço.' })
         ]),
         el('div', { class: 'panel-body' }, [
           traitData.length
             ? barList(traitData)
-            : el('p', { class: 'muted small', text: 'No creature carries a notable trait.' })
+            : el('p', { class: 'muted small', text: 'Nenhuma criatura carrega um traço notável.' })
         ])
       ])
     );
@@ -186,7 +186,7 @@ export class StatsScreen implements Screen {
 
     this.bodyEl.appendChild(
       el('section', { class: 'panel' }, [
-        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Living Legends' })]),
+        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Lendas Vivas' })]),
         el('div', { class: 'panel-body' }, [
           legends.length
             ? el('div', { class: 'legend-table' }, legends.map((e, i) => {
@@ -202,11 +202,11 @@ export class StatsScreen implements Screen {
                 }, [
                   el('span', { class: 'legend-rank', text: `#${i + 1}` }),
                   el('span', { class: 'legend-name', text: e.name, style: { color: SPECIES_DEFINITIONS[e.species].primaryColor } }),
-                  el('span', { class: 'legend-meta', text: `Lvl ${e.level} · ${e.kills} kills · ${e.profession}` }),
-                  el('span', { class: 'legend-realm', text: kingdom?.name ?? 'Independent', style: { color: kingdom?.color ?? '#64748b' } })
+                  el('span', { class: 'legend-meta', text: `Nvl ${e.level} · ${e.kills} abates · ${e.profession}` }),
+                  el('span', { class: 'legend-realm', text: kingdom?.name ?? 'Independente', style: { color: kingdom?.color ?? '#64748b' } })
                 ]);
               }))
-            : el('p', { class: 'muted small', text: 'No one lives to tell a tale.' })
+            : el('p', { class: 'muted small', text: 'Ninguém vive para contar a história.' })
         ])
       ])
     );

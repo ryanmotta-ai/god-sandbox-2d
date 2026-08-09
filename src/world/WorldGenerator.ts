@@ -3,219 +3,448 @@ import { TerrainType } from './Biomes';
 import { SimplexNoise } from './Noise';
 import { RandomService } from '../core/Random';
 import { generateDeposits } from './Deposits';
-import { WORLD_BLUEPRINTS, fieldOf, ridgeField } from './WorldBlueprints';
+import { WORLD_BLUEPRINTS, fieldOf, ridgeField, type WorldBlueprint } from './WorldBlueprints';
+import { WORLD_CHUNK_SIZE } from './WorldChunks';
 
-export type GeneratorPreset =
-  | 'archipelago'
-  | 'single_continent'
-  | 'two_continents';
+export type GeneratorPreset = 'archipelago' | 'single_continent' | 'two_continents';
 
+const CARDINALS = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+const DIRECTIONS = [
+  [1, 0], [-1, 0], [0, 1], [0, -1],
+  [1, 1], [1, -1], [-1, 1], [-1, -1]
+] as const;
+
+interface GenerationNoise {
+  continental: SimplexNoise;
+  coast: SimplexNoise;
+  detail: SimplexNoise;
+  warpU: SimplexNoise;
+  warpV: SimplexNoise;
+  ridge: SimplexNoise;
+  basin: SimplexNoise;
+  moisture: SimplexNoise;
+  temperature: SimplexNoise;
+}
+
+/** Geographic generation 2.0: continental structure first, local detail last. */
 export class WorldGenerator {
-  /**
-   * Builds one of the three designed worlds.
-   *
-   * The `seed` argument is accepted for callers that still pass one, but it is
-   * deliberately ignored for terrain: each world has a fixed seed baked into its
-   * blueprint, because a map you can learn is worth more here than a map you
-   * cannot predict.
-   */
   public static generate(
     width: number,
     height: number,
     presetInput: GeneratorPreset = 'single_continent',
-    _seed?: number
+    seed?: number,
+    targetGrid?: Tile[][],
+    onProgress?: (stage: string, completed: number, total: number) => void
   ): Tile[][] {
     const blueprint = WORLD_BLUEPRINTS[presetInput] ?? WORLD_BLUEPRINTS.single_continent;
-    const actualSeed = blueprint.seed;
+    const actualSeed = this.mixSeed(blueprint.seed, seed ?? blueprint.seed);
     const rng = new RandomService(actualSeed);
-    const noiseHeight = new SimplexNoise(rng);
-    const noiseRidge = new SimplexNoise(new RandomService(actualSeed + 500));
-    const noiseMoisture = new SimplexNoise(new RandomService(actualSeed + 1000));
-    const noiseTemp = new SimplexNoise(new RandomService(actualSeed + 2000));
-    // Low-frequency noise producing a few large, cohesive regions where magic
-    // leaks into the world (instead of salt-and-pepper single-tile patches).
-    const noiseMagic = new SimplexNoise(new RandomService(actualSeed + 3000));
-    const noiseWarp = new SimplexNoise(new RandomService(actualSeed + 4000));
+    const noise = this.createNoise(actualSeed);
+    const grid: Tile[][] = targetGrid ?? [];
+    const tileCount = width * height;
+    const ridgeStrength = new Float32Array(tileCount);
 
-    const grid: Tile[][] = [];
+    for (let x = 0; x < width; x++) if (!grid[x]) grid[x] = [];
+    const chunksX = Math.ceil(width / WORLD_CHUNK_SIZE);
+    const chunksY = Math.ceil(height / WORLD_CHUNK_SIZE);
+    let completedChunks = 0;
 
-    // Step 1: Compute height, moisture, and temperature maps
-    for (let x = 0; x < width; x++) {
-      grid[x] = [];
-      for (let y = 0; y < height; y++) {
-        const u = (x + 0.5) / width;
-        const v = (y + 0.5) / height;
+    // Relief and broad climate are evaluated in WORLD-V1 chunks. All noise is
+    // sampled in normalized coordinates, so a 512 map has larger regions rather
+    // than four times as many tiny ones.
+    for (let chunkX = 0; chunkX < chunksX; chunkX++) {
+      for (let chunkY = 0; chunkY < chunksY; chunkY++) {
+        const minX = chunkX * WORLD_CHUNK_SIZE;
+        const minY = chunkY * WORLD_CHUNK_SIZE;
+        const maxX = Math.min(width, minX + WORLD_CHUNK_SIZE);
+        const maxY = Math.min(height, minY + WORLD_CHUNK_SIZE);
 
-        // The designed landmass is the backbone of the height field. Noise only
-        // roughens it, at an amplitude small enough that the shape survives —
-        // otherwise the map stops being the map that was drawn.
-        const detail = noiseHeight.octave2D(x, y, 5, 0.5, 0.035) - 0.5;
-        const coast = noiseWarp.octave2D(x, y, 3, 0.5, 0.055) - 0.5;
+        for (let x = minX; x < maxX; x++) {
+          for (let y = minY; y < maxY; y++) {
+            const u = (x + 0.5) / width;
+            const v = (y + 0.5) / height;
+            const warpU = (noise.warpU.octave2D(u, v, 3, 0.52, 2.1) - 0.5) * 0.065;
+            const warpV = (noise.warpV.octave2D(u, v, 3, 0.52, 2.1) - 0.5) * 0.065;
+            const wu = u + warpU;
+            const wv = v + warpV;
 
-        let land = fieldOf(blueprint.land, u, v);
-        land += coast * 0.16;
+            const designedLand = fieldOf(blueprint.land, wu, wv);
+            const landInfluence = this.clamp(designedLand * 4, 0, 1);
+            const continental = noise.continental.octave2D(u, v, 4, 0.52, 1.45) - 0.5;
+            const coast = noise.coast.octave2D(u, v, 3, 0.5, 4.8) - 0.5;
+            const detail = noise.detail.octave2D(u, v, 3, 0.48, 12) - 0.5;
+            const land = designedLand
+              + continental * (0.07 + landInfluence * 0.13)
+              + coast * 0.055;
 
-        // Mountains sit on top of land that already exists, so a range never
-        // rises straight out of open ocean.
-        let ridgeAmount = 0;
-        for (const range of blueprint.ranges) {
-          ridgeAmount = Math.max(ridgeAmount, ridgeField(range, u, v) * range.height);
+            let ridge = 0;
+            for (const range of blueprint.ranges) {
+              ridge = Math.max(ridge, ridgeField(range, wu, wv) * range.height);
+            }
+            const ridgeTexture = noise.ridge.octave2D(u, v, 3, 0.5, 7.5);
+            ridge *= 0.78 + ridgeTexture * 0.34;
+            ridgeStrength[x * height + y] = ridge;
+
+            const shapedLand = Math.pow(Math.max(0, Math.min(1.2, land)), 0.52);
+            const basin = 1 - Math.abs(noise.basin.octave2D(u, v, 3, 0.5, 2.6) * 2 - 1);
+            let elevation = 0.225 + shapedLand * 0.52 + detail * 0.035;
+            if (land > 0.08) elevation += ridge * 0.38;
+            if (land > 0.2 && ridge < 0.16) elevation -= basin * 0.025;
+
+            // Keep a navigable ocean frame and prevent noisy land bridges at the
+            // map boundary. Designed islands remain safely inside this margin.
+            const edgeDistance = Math.min(u, v, 1 - u, 1 - v);
+            if (edgeDistance < 0.045) elevation -= (0.045 - edgeDistance) * 4.8;
+            elevation = this.clamp(elevation, 0, 1);
+
+            const latitude = Math.abs(v * 2 - 1);
+            const temperatureRegion = noise.temperature.octave2D(u, v, 3, 0.52, 1.8) - 0.5;
+            let temperature = 32 - latitude * latitude * 61 + temperatureRegion * 13;
+            temperature -= Math.max(0, elevation - 0.53) * 54;
+
+            const wetRegion = fieldOf(blueprint.wetlands, wu, wv);
+            const forestRegion = fieldOf(blueprint.forests, wu, wv);
+            const dryRegion = fieldOf(blueprint.drylands, wu, wv);
+            let moisture = 0.43 + (noise.moisture.octave2D(u, v, 4, 0.55, 1.75) - 0.5) * 0.62;
+            moisture += wetRegion * 0.38 + forestRegion * 0.18 - dryRegion * 0.5;
+            temperature += dryRegion * 10;
+
+            const reliefType = elevation < 0.295
+              ? TerrainType.DEEP_OCEAN
+              : elevation < 0.345
+                ? TerrainType.SHALLOW_WATER
+                : ridge > 0.34 || elevation > 0.79
+                  ? TerrainType.MOUNTAIN
+                  : TerrainType.GRASS;
+            const tile = new Tile(x, y, reliefType, elevation);
+            tile.temperature = Math.round(temperature);
+            tile.moisture = this.clamp(moisture, 0, 1);
+            tile.fertility = this.fertilityFor(reliefType, tile.moisture);
+            grid[x][y] = tile;
+          }
         }
-        const ridgeNoise = 1 - Math.abs(noiseRidge.octave2D(x, y, 3, 0.5, 0.09) * 2 - 1);
-        ridgeAmount *= 0.75 + ridgeNoise * 0.35;
-
-        // The blob falloff is smooth, which means a straight mapping spends most
-        // of each landmass in the shallow band and drowns the design in shelf.
-        // Raising the field to a fractional power pushes the interior up so the
-        // coastline sits near the rim where it was drawn.
-        const shaped = Math.pow(Math.max(0, Math.min(1.2, land)), 0.55);
-        let nH = 0.255 + shaped * 0.44 + detail * 0.075;
-        if (land > 0.12) nH += ridgeAmount * 0.36;
-        nH = Math.max(0, Math.min(1, nH));
-
-        // Climate. Latitude first, then altitude, then the designed dry regions.
-        const latitude = Math.abs(v * 2 - 1); // 0 at the equator, 1 at the poles
-        const tempNoise = noiseTemp.octave2D(x, y, 3, 0.5, 0.02) - 0.5;
-        let tempC = 32 - latitude * latitude * 62 + tempNoise * 14;
-        tempC -= Math.max(0, nH - 0.55) * 46; // Thinner air on the high ground
-
-        let nM = noiseMoisture.octave2D(x, y, 4, 0.5, 0.035);
-        nM += fieldOf(blueprint.wetlands, u, v) * 0.45;
-        nM += fieldOf(blueprint.forests, u, v) * 0.2;
-        const dry = fieldOf(blueprint.drylands, u, v);
-        nM -= dry * 0.5;
-        tempC += dry * 12;
-        nM = Math.max(0, Math.min(1, nM));
-
-        const forest = fieldOf(blueprint.forests, u, v);
-        const wet = fieldOf(blueprint.wetlands, u, v);
-        const type = this.classify(nH, tempC, nM, forest, wet, ridgeAmount, land);
-
-        const tile = new Tile(x, y, type, nH);
-        tile.temperature = Math.round(tempC);
-        tile.moisture = nM;
-        tile.fertility = this.fertilityFor(type, nM);
-
-        grid[x][y] = tile;
+        completedChunks++;
+        onProgress?.('terrain', completedChunks, chunksX * chunksY);
       }
     }
 
-    // Step 2: Carve Meandering Natural Rivers from Mountain Peaks to the Sea
-    this.carveRivers(grid, width, height, rng);
+    // Ocean distance supplies continentality, wet coasts and river routing in a
+    // single linear pass. It also makes inland basins visibly distinct.
+    const oceanDistance = this.buildOceanDistance(grid, width, height);
+    this.classifyRegionalBiomes(grid, width, height, blueprint, noise, ridgeStrength, oceanDistance);
+    onProgress?.('climate', 1, 1);
 
-    // Step 3: Cellular Biome Smoothing Pass to eliminate isolated single-pixel noise
-    this.smoothBiomes(grid, width, height);
+    this.smoothBiomes(grid, width, height, 2);
+    onProgress?.('biomes', 1, 1);
 
-    // Arcane and corrupted ground are land cover types of their own, so they
-    // stay off while the world is limited to two biomes.
-    void this.carveMagicRegions; void noiseMagic;
+    this.carveRiverSystems(grid, width, height, rng, oceanDistance);
+    onProgress?.('rivers', 1, 1);
 
-    // Step 4: Generate Clustered Natural Resources & Deposits
     generateDeposits(grid, width, height, actualSeed);
-
+    onProgress?.('resources', 1, 1);
     return grid;
   }
 
-  /**
-   * Turns height, climate and the designed regions into a terrain type.
-   *
-   * Kept as one place so the biome rules are readable side by side — before
-   * this, land collapsed straight to grass, which meant no mountains, and with
-   * no mountains the river carver had no sources and never ran at all.
-   */
-  private static classify(
-    nH: number,
-    _tempC: number,
-    moisture: number,
-    forest: number,
-    _wetland: number,
-    ridge: number,
-    _land: number
-  ): TerrainType {
-    // Water and rock are relief, not land cover: the sea has to exist for ports
-    // and the ranges have to exist for stone, ore and river sources.
-    if (nH < 0.285) return TerrainType.DEEP_OCEAN;
-    if (nH < 0.335) return TerrainType.SHALLOW_WATER;
-    if (ridge > 0.38 || nH > 0.76) return TerrainType.MOUNTAIN;
-
-    // The two biomes. Where the blueprint drew woodland and the ground is damp
-    // enough to hold it, the land is forest; everywhere else is open country.
-    if (forest > 0.34 && moisture > 0.36) return TerrainType.FOREST;
-    return TerrainType.GRASS;
-  }
-
-  /** Fertility follows the biome and how wet it is, not a flat constant. */
-  private static fertilityFor(type: TerrainType, moisture: number): number {
-    const base: Partial<Record<TerrainType, number>> = {
-      [TerrainType.GRASS]: 0.85,
-      [TerrainType.FOREST]: 0.6,
-      [TerrainType.MOUNTAIN]: 0.05,
-      [TerrainType.SHALLOW_WATER]: 0.1,
-      [TerrainType.DEEP_OCEAN]: 0
+  private static createNoise(seed: number): GenerationNoise {
+    const at = (offset: number) => new SimplexNoise(new RandomService((seed + offset) >>> 0));
+    return {
+      continental: at(101), coast: at(503), detail: at(907),
+      warpU: at(1301), warpV: at(1699), ridge: at(2203), basin: at(2801),
+      moisture: at(3301), temperature: at(3907)
     };
-    const moistureFit = 1 - Math.min(0.6, Math.abs(moisture - 0.55) * 0.9);
-    return Math.max(0.02, Math.min(1, (base[type] ?? 0.4) * moistureFit));
   }
 
-  /**
-   * Scatters a small number of cohesive arcane / corrupted regions. Rather than
-   * the previous per-tile 1.5% salt-and-pepper, magic now appears as a few distinct
-   * irradiated landscapes, each a contiguous patch — visually readable and
-   * tactically meaningful.
-   */
-  private static carveMagicRegions(
-    grid: Tile[][], width: number, height: number, rng: RandomService, noiseMagic: SimplexNoise
-  ): void {
-    // ~1 region per 64×64 of world area (2-6 regions depending on size), half
-    // arcane, half corrupted.
-    const regionCount = Math.max(2, Math.min(6, Math.round((width * height) / 4096)));
-    const isArcane: boolean[] = [];
-    for (let i = 0; i < regionCount; i++) isArcane.push(rng.chance(0.5));
+  private static mixSeed(a: number, b: number): number {
+    let value = (a ^ b ^ 0x9e3779b9) >>> 0;
+    value = Math.imul(value ^ (value >>> 16), 0x21f0aaad);
+    value = Math.imul(value ^ (value >>> 15), 0x735a2d97);
+    return (value ^ (value >>> 15)) >>> 0;
+  }
 
-    // Centers are drawn only from land, so a small archipelago still gets its
-    // full quota of magic instead of a few tiles that survived the coast.
-    const landTiles: Array<{ x: number; y: number }> = [];
-    for (let x = 2; x < width - 2; x++) {
-      for (let y = 2; y < height - 2; y++) {
-        const t = grid[x][y];
-        if (!this.isWaterType(t.type) && t.type !== TerrainType.MOUNTAIN && t.type !== TerrainType.LAVA) {
-          landTiles.push({ x, y });
+  private static classifyRegionalBiomes(
+    grid: Tile[][],
+    width: number,
+    height: number,
+    blueprint: WorldBlueprint,
+    noise: GenerationNoise,
+    ridgeStrength: Float32Array,
+    oceanDistance: Int32Array
+  ): void {
+    const scale = Math.max(1, Math.min(width, height));
+    for (let chunkX = 0; chunkX < Math.ceil(width / WORLD_CHUNK_SIZE); chunkX++) {
+      for (let chunkY = 0; chunkY < Math.ceil(height / WORLD_CHUNK_SIZE); chunkY++) {
+        const maxX = Math.min(width, (chunkX + 1) * WORLD_CHUNK_SIZE);
+        const maxY = Math.min(height, (chunkY + 1) * WORLD_CHUNK_SIZE);
+        for (let x = chunkX * WORLD_CHUNK_SIZE; x < maxX; x++) {
+          for (let y = chunkY * WORLD_CHUNK_SIZE; y < maxY; y++) {
+            const tile = grid[x][y];
+            if (this.isWaterType(tile.type) || tile.type === TerrainType.MOUNTAIN) {
+              tile.fertility = this.fertilityFor(tile.type, tile.moisture);
+              continue;
+            }
+            const u = (x + 0.5) / width;
+            const v = (y + 0.5) / height;
+            const forest = fieldOf(blueprint.forests, u, v);
+            const wetland = fieldOf(blueprint.wetlands, u, v);
+            const dryland = fieldOf(blueprint.drylands, u, v);
+            const continentality = this.clamp(oceanDistance[x * height + y] / (scale * 0.3), 0, 1);
+            const coastalRain = Math.exp(-oceanDistance[x * height + y] / Math.max(5, scale * 0.055)) * 0.2;
+            const regional = (noise.moisture.octave2D(u, v, 3, 0.55, 2.15) - 0.5) * 0.2;
+            tile.moisture = this.clamp(
+              tile.moisture + coastalRain + regional - continentality * 0.14 - dryland * 0.2,
+              0,
+              1
+            );
+
+            tile.type = this.classifyLand(
+              tile.height,
+              tile.temperature,
+              tile.moisture,
+              forest,
+              wetland,
+              ridgeStrength[x * height + y],
+              oceanDistance[x * height + y]
+            );
+            tile.fertility = this.fertilityFor(tile.type, tile.moisture);
+          }
         }
       }
     }
-    if (landTiles.length === 0) return;
+  }
 
-    const usedCenters: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < regionCount; i++) {
-      let center = rng.pick(landTiles);
-      for (let attempt = 0; attempt < 60; attempt++) {
-        const candidate = rng.pick(landTiles);
-        if (usedCenters.every(c => Math.hypot(c.x - candidate.x, c.y - candidate.y) >= 24)) {
-          center = candidate;
-          break;
+  private static classifyLand(
+    elevation: number,
+    temperature: number,
+    moisture: number,
+    forest: number,
+    wetland: number,
+    ridge: number,
+    oceanDistance: number
+  ): TerrainType {
+    if (ridge > 0.34 || elevation > 0.79) return TerrainType.MOUNTAIN;
+    if (temperature < -12 || (temperature < -5 && elevation > 0.58)) return TerrainType.SNOW;
+    if (temperature < 3) return TerrainType.TUNDRA;
+    if ((wetland > 0.3 || moisture > 0.8) && elevation < 0.52) return TerrainType.SWAMP;
+    if (moisture < 0.23 && temperature > 14) return TerrainType.SAND;
+    if (moisture < 0.39 && temperature > 18) return TerrainType.SAVANNA;
+    if ((forest > 0.28 && moisture > 0.43) || moisture > 0.69) return TerrainType.FOREST;
+    if (oceanDistance <= 3 && moisture > 0.48 && elevation < 0.46) return TerrainType.SOIL;
+    return TerrainType.GRASS;
+  }
+
+  private static fertilityFor(type: TerrainType, moisture: number): number {
+    const base: Partial<Record<TerrainType, number>> = {
+      [TerrainType.GRASS]: 0.88, [TerrainType.SOIL]: 0.92, [TerrainType.FOREST]: 0.66,
+      [TerrainType.SAVANNA]: 0.48, [TerrainType.SWAMP]: 0.56, [TerrainType.SAND]: 0.16,
+      [TerrainType.TUNDRA]: 0.25, [TerrainType.SNOW]: 0.08, [TerrainType.MOUNTAIN]: 0.04,
+      [TerrainType.SHALLOW_WATER]: 0.08, [TerrainType.DEEP_OCEAN]: 0
+    };
+    const moistureFit = 1 - Math.min(0.68, Math.abs(moisture - 0.58) * 0.9);
+    return this.clamp((base[type] ?? 0.4) * moistureFit, 0.01, 1);
+  }
+
+  /** Multi-source breadth-first distance from the original sea, O(width*height). */
+  private static buildOceanDistance(grid: Tile[][], width: number, height: number): Int32Array {
+    const distances = new Int32Array(width * height);
+    distances.fill(-1);
+    const queue = new Int32Array(width * height);
+    let head = 0;
+    let tail = 0;
+    for (let x = 0; x < width; x++) for (let y = 0; y < height; y++) {
+      if (!this.isWaterType(grid[x][y].type)) continue;
+      const index = x * height + y;
+      distances[index] = 0;
+      queue[tail++] = index;
+    }
+    while (head < tail) {
+      const index = queue[head++];
+      const x = Math.floor(index / height);
+      const y = index % height;
+      const nextDistance = distances[index] + 1;
+      for (const [dx, dy] of CARDINALS) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        const next = nx * height + ny;
+        if (distances[next] >= 0) continue;
+        distances[next] = nextDistance;
+        queue[tail++] = next;
+      }
+    }
+    return distances;
+  }
+
+  private static carveRiverSystems(
+    grid: Tile[][],
+    width: number,
+    height: number,
+    rng: RandomService,
+    oceanDistance: Int32Array
+  ): void {
+    const minSize = Math.min(width, height);
+    const candidates: Array<{ x: number; y: number; score: number }> = [];
+    for (let x = 2; x < width - 2; x++) for (let y = 2; y < height - 2; y++) {
+      const tile = grid[x][y];
+      const distance = oceanDistance[x * height + y];
+      if (tile.height < 0.68 || distance < Math.max(8, minSize * 0.07)) continue;
+      if (tile.type !== TerrainType.MOUNTAIN && tile.height < 0.75) continue;
+      candidates.push({ x, y, score: distance * 2.4 + tile.height * 80 + rng.next() * 4 });
+    }
+    candidates.sort((a, b) => b.score - a.score);
+
+    const targetRivers = Math.max(3, Math.min(16, Math.round(minSize / 34)));
+    const sourceSpacing = Math.max(14, minSize / 13);
+    const sources: Array<{ x: number; y: number }> = [];
+    for (const candidate of candidates) {
+      if (sources.every(source => Math.hypot(source.x - candidate.x, source.y - candidate.y) >= sourceSpacing)) {
+        sources.push(candidate);
+        if (sources.length >= targetRivers) break;
+      }
+    }
+
+    const riverMask = new Uint8Array(width * height);
+    let maxOceanDistance = 1;
+    for (const distance of oceanDistance) maxOceanDistance = Math.max(maxOceanDistance, distance);
+    for (const source of sources) {
+      let x = source.x;
+      let y = source.y;
+      let previousDx = 0;
+      let previousDy = 0;
+      let previousX = -1;
+      let previousY = -1;
+      let lakeBudget = 2;
+      const maxSteps = width + height + Math.round(minSize * 0.75);
+
+      for (let step = 0; step < maxSteps; step++) {
+        const index = x * height + y;
+        if (oceanDistance[index] === 0) break;
+        if (riverMask[index] && step > 0) break;
+        riverMask[index] = 1;
+        const current = grid[x][y];
+        current.type = TerrainType.SHALLOW_WATER;
+        current.moisture = 1;
+        current.fertility = 0.12;
+        this.fertiliseBanks(grid, x, y, width, height);
+
+        let best: { x: number; y: number; dx: number; dy: number; score: number; height: number } | null = null;
+        for (const [dx, dy] of DIRECTIONS) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          if (nx === previousX && ny === previousY) continue;
+          const nextIndex = nx * height + ny;
+          const next = grid[nx][ny];
+          const descent = next.height - current.height;
+          const directionLength = Math.hypot(dx, dy);
+          const alignment = previousDx === 0 && previousDy === 0
+            ? 0
+            : (dx * previousDx + dy * previousDy) / (directionLength * Math.hypot(previousDx, previousDy));
+          const meander = this.coordinateHash(nx, ny, source.x * 73856093 ^ source.y * 19349663) * 0.035;
+          let score = next.height * 1.45
+            + (oceanDistance[nextIndex] / maxOceanDistance) * 0.82
+            + Math.max(0, descent) * 0.5
+            - alignment * 0.045
+            + meander;
+          if (oceanDistance[nextIndex] >= oceanDistance[index]) {
+            score += 0.08 + (oceanDistance[nextIndex] - oceanDistance[index]) * 0.025;
+          }
+          if (oceanDistance[nextIndex] === 0) score -= 2;
+          if (riverMask[nextIndex]) score += 1.2;
+          if (!best || score < best.score) best = { x: nx, y: ny, dx, dy, score, height: next.height };
+        }
+        if (!best) break;
+
+        const trapped = best.height >= current.height - 0.001;
+        if (trapped && lakeBudget > 0 && oceanDistance[index] > Math.max(7, minSize * 0.035)) {
+          this.carveLake(grid, width, height, x, y, Math.max(2, Math.round(minSize / 170)), current.height);
+          lakeBudget--;
+        }
+
+        // A shallow spill notch guarantees eventual drainage while retaining the
+        // original broad relief everywhere away from the one-tile river channel.
+        const nextTile = grid[best.x][best.y];
+        if (nextTile.height >= current.height) nextTile.height = Math.max(0.3, current.height - 0.0015);
+        previousX = x;
+        previousY = y;
+        previousDx = best.dx;
+        previousDy = best.dy;
+        x = best.x;
+        y = best.y;
+      }
+    }
+  }
+
+  private static carveLake(
+    grid: Tile[][],
+    width: number,
+    height: number,
+    cx: number,
+    cy: number,
+    radius: number,
+    level: number
+  ): void {
+    for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) {
+      const x = cx + dx;
+      const y = cy + dy;
+      if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) continue;
+      const irregularity = this.coordinateHash(x, y, cx * 31 + cy * 17) * 0.55;
+      if (Math.hypot(dx, dy) > radius - irregularity) continue;
+      const tile = grid[x][y];
+      if (tile.type === TerrainType.MOUNTAIN || this.isWaterType(tile.type)) continue;
+      tile.height = Math.min(tile.height, level - 0.002);
+      tile.type = TerrainType.SHALLOW_WATER;
+      tile.moisture = 1;
+      tile.fertility = 0.1;
+      this.fertiliseBanks(grid, x, y, width, height);
+    }
+  }
+
+  private static fertiliseBanks(grid: Tile[][], cx: number, cy: number, width: number, height: number): void {
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const x = cx + dx;
+      const y = cy + dy;
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const tile = grid[x][y];
+      if (this.isWaterType(tile.type) || tile.type === TerrainType.MOUNTAIN) continue;
+      tile.moisture = Math.min(1, tile.moisture + 0.22);
+      tile.fertility = Math.min(1, tile.fertility + 0.28);
+      if (tile.type === TerrainType.SAND || tile.type === TerrainType.SAVANNA) tile.type = TerrainType.GRASS;
+    }
+  }
+
+  /** Two immutable cellular passes remove tiny biome flecks without eroding relief. */
+  private static smoothBiomes(grid: Tile[][], width: number, height: number, passes: number): void {
+    for (let pass = 0; pass < passes; pass++) {
+      const next = new Array<TerrainType>(width * height);
+      for (let chunkX = 0; chunkX < Math.ceil(width / WORLD_CHUNK_SIZE); chunkX++) {
+        for (let chunkY = 0; chunkY < Math.ceil(height / WORLD_CHUNK_SIZE); chunkY++) {
+          const maxX = Math.min(width - 1, (chunkX + 1) * WORLD_CHUNK_SIZE);
+          const maxY = Math.min(height - 1, (chunkY + 1) * WORLD_CHUNK_SIZE);
+          for (let x = Math.max(1, chunkX * WORLD_CHUNK_SIZE); x < maxX; x++) {
+            for (let y = Math.max(1, chunkY * WORLD_CHUNK_SIZE); y < maxY; y++) {
+              const tile = grid[x][y];
+              if (this.isWaterType(tile.type) || tile.type === TerrainType.MOUNTAIN || tile.type === TerrainType.SNOW) continue;
+              const counts = new Map<TerrainType, number>();
+              for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const type = grid[x + dx][y + dy].type;
+                if (this.isWaterType(type) || type === TerrainType.MOUNTAIN) continue;
+                counts.set(type, (counts.get(type) ?? 0) + 1);
+              }
+              let dominant: TerrainType = tile.type;
+              let count = 0;
+              for (const [type, value] of counts) if (value > count) { dominant = type; count = value; }
+              if (dominant !== tile.type && count >= 6) next[x * height + y] = dominant;
+            }
+          }
         }
       }
-      usedCenters.push(center);
-
-      // Grow a blob using the low-frequency magic noise so edges feather into
-      // the surrounding biome rather than cutting a hard circle.
-      const radius = rng.rangeInt(4, 7);
-      for (let dx = -radius; dx <= radius; dx++) {
-        for (let dy = -radius; dy <= radius; dy++) {
-          const x = center.x + dx;
-          const y = center.y + dy;
-          if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) continue;
-          const dist = Math.hypot(dx, dy);
-          if (dist > radius) continue;
-          const tile = grid[x][y];
-          if (this.isWaterType(tile.type) || tile.type === TerrainType.MOUNTAIN) continue;
-          const fall = 1 - dist / (radius + 0.5);
-          // Combine radial falloff with magic noise for organic feathering.
-          const m = noiseMagic.octave2D(x, y, 3, 0.5, 0.05);
-          const chance = Math.min(0.95, 0.62 + fall * 0.3 + m * 0.15);
-          if (!rng.chance(chance)) continue;
-          tile.type = isArcane[i] ? TerrainType.ARCANE : TerrainType.CORRUPTED;
-        }
+      for (let x = 1; x < width - 1; x++) for (let y = 1; y < height - 1; y++) {
+        const type = next[x * height + y];
+        if (!type) continue;
+        const tile = grid[x][y];
+        tile.type = type;
+        tile.fertility = this.fertilityFor(type, tile.moisture);
       }
     }
   }
@@ -224,164 +453,13 @@ export class WorldGenerator {
     return type === TerrainType.DEEP_OCEAN || type === TerrainType.SHALLOW_WATER;
   }
 
-  /**
-   * Carves rivers from mountain peaks down to the sea.
-   *
-   * Flow follows the steepest descent. When a local minimum is reached (a closed
-   * basin), the tile becomes a lake (SHALLOW_WATER) and the river carves an
-   * overflow notch toward the lowest ridge neighbour, continuing onward — so a
-   * river always terminates at the ocean rather than dying after an arbitrary
-   * step count. Banks along the course are made fertile.
-   */
-  private static carveRivers(grid: Tile[][], width: number, height: number, rng: RandomService): void {
-    const mountainTiles: Array<{ x: number; y: number }> = [];
-    for (let x = 2; x < width - 2; x++) {
-      for (let y = 2; y < height - 2; y++) {
-        if (grid[x][y].type === TerrainType.MOUNTAIN && grid[x][y].height > 0.82) {
-          mountainTiles.push({ x, y });
-        }
-      }
-    }
-
-    if (mountainTiles.length === 0) return;
-
-    const riverCount = Math.min(6, Math.max(2, Math.floor(mountainTiles.length / 15)));
-    const selectedSources: Array<{ x: number; y: number }> = [];
-    const pool = [...mountainTiles];
-    while (selectedSources.length < riverCount && pool.length > 0) {
-      const idx = Math.floor(rng.next() * pool.length);
-      selectedSources.push(pool.splice(idx, 1)[0]);
-    }
-
-    const DIRS = [
-      { x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 },
-      { x: 1, y: 1 }, { x: -1, y: -1 }, { x: 1, y: -1 }, { x: -1, y: 1 }
-    ];
-
-    for (const source of selectedSources) {
-      let currX = source.x;
-      let currY = source.y;
-      let steps = 0;
-      // Hard ceiling far above any realistic path length — only guards against
-      // pathological loops. Real termination is reaching the sea.
-      let lakeBudget = 6;
-
-      while (steps < width * 2 + height * 2) {
-        steps++;
-        const currTile = grid[currX][currY];
-        if (this.isWaterType(currTile.type)) break; // Reached the sea
-
-        if (currTile.type !== TerrainType.MOUNTAIN) {
-          currTile.type = TerrainType.SHALLOW_WATER;
-          currTile.moisture = 0.95;
-          currTile.fertility = 0.95;
-        }
-
-        this.fertiliseBanks(grid, currX, currY, width, height);
-
-        let lowestX = currX;
-        let lowestY = currY;
-        let lowestHeight = currTile.height;
-        const ridgeX = currX;
-        let lowestRidgeHeight = Infinity;
-        let lowestRidgeX = -1;
-        let lowestRidgeY = -1;
-
-        for (const d of DIRS) {
-          const nx = currX + d.x;
-          const ny = currY + d.y;
-          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-          const neighbor = grid[nx][ny];
-          if (neighbor.height < lowestHeight) {
-            lowestHeight = neighbor.height;
-            lowestX = nx;
-            lowestY = ny;
-          }
-          // Track the lowest ridge exit (neighbour not lower than current) for
-          // overflow when stuck in a closed basin.
-          if (neighbor.height >= currTile.height && neighbor.height < lowestRidgeHeight) {
-            lowestRidgeHeight = neighbor.height;
-            lowestRidgeX = nx;
-            lowestRidgeY = ny;
-          }
-        }
-
-        if (lowestX === currX && lowestY === currY) {
-          // Local minimum: form a lake and overflow toward the lowest rim.
-          if (lakeBudget <= 0) break; // Avoid infinite lake carving
-          lakeBudget--;
-          if (lowestRidgeX >= 0) {
-            // Carve the rim down to this lake's level so flow can continue.
-            const rim = grid[lowestRidgeX][lowestRidgeY];
-            rim.height = currTile.height - 0.001;
-            if (rim.type !== TerrainType.MOUNTAIN) {
-              rim.type = TerrainType.SHALLOW_WATER;
-              rim.moisture = 0.95;
-            }
-            currX = lowestRidgeX;
-            currY = lowestRidgeY;
-          } else {
-            break; // No escape (single-tile map edge): give up.
-          }
-        } else {
-          currX = lowestX;
-          currY = lowestY;
-        }
-      }
-    }
+  private static coordinateHash(x: number, y: number, seed: number): number {
+    let value = Math.imul(x ^ seed, 0x45d9f3b) ^ Math.imul(y + seed, 0x119de1f3);
+    value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+    return ((value ^ (value >>> 16)) >>> 0) / 4294967296;
   }
 
-  /** Promote banks around a river cell to fertile grass (any land type). */
-  private static fertiliseBanks(grid: Tile[][], cx: number, cy: number, width: number, height: number): void {
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const nx = cx + dx;
-        const ny = cy + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-        const b = grid[nx][ny];
-        // River banks are the best farmland there is, in either biome.
-        if (b.type === TerrainType.GRASS || b.type === TerrainType.FOREST) {
-          b.moisture = Math.min(1, b.moisture + 0.3);
-          b.fertility = Math.min(1, b.fertility + 0.35);
-        }
-      }
-    }
-  }
-
-  /** Smooths isolated 1x1 terrain pixels for cohesive biomes across all terrestrial biomes. */
-  private static smoothBiomes(grid: Tile[][], width: number, height: number): void {
-    for (let x = 1; x < width - 1; x++) {
-      for (let y = 1; y < height - 1; y++) {
-        const tile = grid[x][y];
-        // Water and mountains are kept crisp (coastlines and peaks stay sharp);
-        // every other biome is eligible for single-pixel cleanup.
-        if (tile.type === TerrainType.DEEP_OCEAN || tile.type === TerrainType.MOUNTAIN) continue;
-
-        let landNeighbors = 0;
-        const counts: Record<string, number> = {};
-        for (let dx = -1; dx <= 1; dx++) {
-          for (let dy = -1; dy <= 1; dy++) {
-            if (dx === 0 && dy === 0) continue;
-            const nType = grid[x + dx][y + dy].type;
-            counts[nType] = (counts[nType] ?? 0) + 1;
-            if (nType !== TerrainType.DEEP_OCEAN && nType !== TerrainType.SHALLOW_WATER) landNeighbors++;
-          }
-        }
-        // Only replace a truly isolated tile (surrounded by a different dominant
-        // type) — prevents eating valid coastline specks.
-        let dominant: string | null = null;
-        let dominantCount = 0;
-        for (const [t, c] of Object.entries(counts)) {
-          if (t === tile.type) continue;
-          if (c > dominantCount) { dominantCount = c; dominant = t; }
-        }
-        if (dominant && dominantCount >= 6 && dominant !== TerrainType.MOUNTAIN) {
-          // Don't let land noise overwrite deep ocean (creates island specks).
-          if (tile.type === TerrainType.SHALLOW_WATER && dominant === TerrainType.SHALLOW_WATER) continue;
-          tile.type = dominant as TerrainType;
-        }
-        void landNeighbors;
-      }
-    }
+  private static clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
   }
 }

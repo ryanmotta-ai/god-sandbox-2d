@@ -7,10 +7,10 @@ import type { GameContext } from '../core/GameContext';
 type Tab = 'audio' | 'graphics' | 'interface' | 'simulation';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'graphics', label: 'Graphics', icon: '🎨' },
+  { id: 'graphics', label: 'Gráficos', icon: '🎨' },
   { id: 'interface', label: 'Interface', icon: '🖥️' },
-  { id: 'audio', label: 'Audio', icon: '🔊' },
-  { id: 'simulation', label: 'Simulation', icon: '⚙️' }
+  { id: 'audio', label: 'Áudio', icon: '🔊' },
+  { id: 'simulation', label: 'Simulação', icon: '⚙️' }
 ];
 
 /** Settings screen. Every change applies immediately and persists to localStorage. */
@@ -32,17 +32,17 @@ export class SettingsScreen implements Screen {
     const layout = el('div', { class: 'screen-panel narrow' }, [
       el('header', { class: 'screen-head' }, [
         el('div', {}, [
-          el('h2', { class: 'screen-title', text: '⚙️ Settings' }),
-          el('p', { class: 'screen-sub', text: 'Changes apply instantly and are remembered between sessions.' })
+          el('h2', { class: 'screen-title', text: '⚙️ Configurações' }),
+          el('p', { class: 'screen-sub', text: 'Alterações aplicam-se instantaneamente e são lembradas entre sessões.' })
         ]),
         el('div', { class: 'head-actions' }, [
-          button('Reset to defaults', () => {
+          button('Restaurar padrões', () => {
             settings.reset();
             ctx.applySettings();
             this.renderTab();
-            ctx.toast('Settings restored to defaults', 'info');
+            ctx.toast('Configurações restauradas', 'info');
           }, { icon: '↩️' }),
-          button('Close', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
+          button('Fechar', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
         ])
       ]),
       this.tabsEl,
@@ -85,15 +85,15 @@ export class SettingsScreen implements Screen {
   private renderGraphics(): void {
     this.bodyEl.appendChild(
       el('section', { class: 'panel' }, [
-        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'World Rendering' })]),
+        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Renderização do Mundo' })]),
         el('div', { class: 'panel-body' }, [
-          this.toggle('showGrid', 'Tile grid', 'Draw a faint grid over the terrain.'),
-          this.toggle('showCityNames', 'City name labels', 'Show settlement names floating above towns.'),
-          this.toggle('showKingdomBadges', 'Kingdom banners', 'Floating name badges over each realm’s territory.'),
-          this.toggle('showHealthBars', 'Health bars', 'Show HP bars above wounded creatures.'),
-          this.toggle('showParticles', 'Particle effects', 'Smoke, sparks, damage numbers and magic.'),
-          this.toggle('showBrushCursor', 'Brush cursor ring', 'The dashed circle that previews your brush size.'),
-          this.toggle('screenShake', 'Screen shake', 'Camera shake on meteors, earthquakes and lightning.')
+          this.toggle('showGrid', 'Grade de blocos', 'Desenhar uma grade suave sobre o terreno.'),
+          this.toggle('showCityNames', 'Rótulos de nomes de cidades', 'Mostrar nomes de assentamentos flutuando sobre as cidades.'),
+          this.toggle('showKingdomBadges', 'Bandeiras dos reinos', 'Emblemas de nomes flutuantes sobre o território de cada reino.'),
+          this.toggle('showHealthBars', 'Barras de vida', 'Mostrar barras de HP acima das criaturas feridas.'),
+          this.toggle('showParticles', 'Efeitos de partículas', 'Fumaça, faíscas, números de dano e magia.'),
+          this.toggle('showBrushCursor', 'Anel de cursor do pincel', 'O círculo tracejado que prevê o tamanho do seu pincel.'),
+          this.toggle('screenShake', 'Tremor de tela', 'Tremor de câmera em meteoros, terremotos e raios.')
         ])
       ])
     );
@@ -104,20 +104,20 @@ export class SettingsScreen implements Screen {
       el('section', { class: 'panel' }, [
         el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Heads-up Display' })]),
         el('div', { class: 'panel-body' }, [
-          this.toggle('showMinimap', 'Minimap', 'The world map in the bottom-right corner.'),
-          this.toggle('showTooltips', 'Detailed tooltips', 'Longer descriptions when hovering powers.'),
-          this.toggle('compactToolbar', 'Compact power dock', 'Smaller power buttons — more world visible.'),
-          this.slider('uiScale', 'Interface scale', 0.85, 1.2, 0.05, v => `${Math.round(v * 100)}%`)
+          this.toggle('showMinimap', 'Minimapa', 'O mapa do mundo no canto inferior direito.'),
+          this.toggle('showTooltips', 'Dicas detalhadas', 'Descrições mais longas ao passar o mouse sobre os poderes.'),
+          this.toggle('compactToolbar', 'Doca de poderes compacta', 'Botões de poder menores — mais do mundo visível.'),
+          this.slider('uiScale', 'Escala da interface', 0.85, 1.2, 0.05, v => `${Math.round(v * 100)}%`)
         ])
       ])
     );
 
     this.bodyEl.appendChild(
       el('section', { class: 'panel' }, [
-        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Shortcuts' })]),
+        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Atalhos' })]),
         el('div', { class: 'panel-body' }, [
-          el('p', { class: 'muted small', text: 'The full control reference lives in the How to Play screen.' }),
-          button('Open How to Play', () => this.ctx.screens.open('help'), { icon: '❓' })
+          el('p', { class: 'muted small', text: 'A referência completa de controles está na tela Como Jogar.' }),
+          button('Abrir Como Jogar', () => this.ctx.screens.open('help'), { icon: '❓' })
         ])
       ])
     );
@@ -126,12 +126,12 @@ export class SettingsScreen implements Screen {
   private renderAudio(): void {
     this.bodyEl.appendChild(
       el('section', { class: 'panel' }, [
-        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Sound' })]),
+        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Som' })]),
         el('div', { class: 'panel-body' }, [
-          this.toggle('soundEnabled', 'Sound effects', 'Synthesized clicks, thunder and explosions.'),
-          this.slider('masterVolume', 'Master volume', 0, 1, 0.05, v => `${Math.round(v * 100)}%`),
+          this.toggle('soundEnabled', 'Efeitos sonoros', 'Cliques, trovões e explosões sintetizados.'),
+          this.slider('masterVolume', 'Volume principal', 0, 1, 0.05, v => `${Math.round(v * 100)}%`),
           el('div', { class: 'action-row' }, [
-            button('Test sound', () => {
+            button('Testar som', () => {
               this.ctx.applySettings();
               sound.playMagic();
             }, { icon: '🎵' })
@@ -143,18 +143,18 @@ export class SettingsScreen implements Screen {
 
   private renderSimulation(): void {
     const freqOptions: { value: DisasterFrequency; label: string; detail: string }[] = [
-      { value: 'none', label: 'None', detail: 'Only disasters you cast yourself' },
-      { value: 'rare', label: 'Rare', detail: 'The occasional catastrophe' },
-      { value: 'normal', label: 'Normal', detail: 'Balanced natural chaos' },
-      { value: 'chaos', label: 'Chaos', detail: 'The world is actively trying to die' }
+      { value: 'none', label: 'Nenhum', detail: 'Apenas desastres que você mesmo conjura' },
+      { value: 'rare', label: 'Raro', detail: 'A catástrofe ocasional' },
+      { value: 'normal', label: 'Normal', detail: 'Caos natural equilibrado' },
+      { value: 'chaos', label: 'Caos', detail: 'O mundo está ativamente tentando morrer' }
     ];
 
     this.bodyEl.appendChild(
       el('section', { class: 'panel' }, [
-        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'World Rules' })]),
+        el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Regras do Mundo' })]),
         el('div', { class: 'panel-body' }, [
-          this.choice('disasterFrequency', 'Natural disasters', 'How often the world spawns its own catastrophes.', freqOptions),
-          this.slider('defaultSpeed', 'Default simulation speed', 0, 10, 1, v => (v === 0 ? 'Paused' : `${v}×`))
+          this.choice('disasterFrequency', 'Desastres naturais', 'Com que frequência o mundo gera seus próprios cataclismos.', freqOptions),
+          this.slider('defaultSpeed', 'Velocidade de simulação padrão', 0, 10, 1, v => (v === 0 ? 'Pausado' : `${v}×`))
         ])
       ])
     );
@@ -163,8 +163,8 @@ export class SettingsScreen implements Screen {
       el('section', { class: 'panel' }, [
         el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Autosave' })]),
         el('div', { class: 'panel-body' }, [
-          this.toggle('autosaveEnabled', 'Enable autosave', 'Automatically writes to the autosave slot.'),
-          this.slider('autosaveIntervalYears', 'Autosave every', 5, 100, 5, v => `${v} years`)
+          this.toggle('autosaveEnabled', 'Ativar autosave', 'Salva automaticamente no slot de autosave.'),
+          this.slider('autosaveIntervalYears', 'Autosave a cada', 5, 100, 5, v => `${v} anos`)
         ])
       ])
     );

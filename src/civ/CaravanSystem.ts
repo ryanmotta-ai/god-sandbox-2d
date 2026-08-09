@@ -8,6 +8,7 @@ import { ParticleManager } from '../renderer/Particles';
 import { SimplePathfinder, ROAD_SPEED_BONUS } from '../ai/Pathfinding';
 import { hashString } from '../core/Random';
 import { fundUpgrade, upgradeCost } from './RoadEngineering';
+import { SpatialHash } from '../core/SpatialHash';
 
 export type CaravanType = 'donkey' | 'camel' | 'cart';
 
@@ -98,12 +99,20 @@ const ROAD_TRAFFIC_DECAY = 0.92;
 
 export class CaravanSystem {
   public activeCaravans: Map<string, OverlandCaravan> = new Map();
+  private readonly renderIndex = new SpatialHash<OverlandCaravan>(16);
+
+  public [Symbol.iterator](): Iterator<OverlandCaravan> { return this.activeCaravans.values(); }
+  public queryRect(minX: number, minY: number, maxX: number, maxY: number, result: OverlandCaravan[] = []): OverlandCaravan[] {
+    if (this.renderIndex.size !== this.activeCaravans.size) this.renderIndex.rebuild(this.activeCaravans.values());
+    return this.renderIndex.queryRect(minX, minY, maxX, maxY, result);
+  }
 
   /**
    * Called once per year to decay road traffic across the entire map.
    * Roads that are no longer used will gradually degrade.
    */
   public decayRoadTraffic(tileMap: TileMap): void {
+    let topologyChanged = false;
     for (let x = 0; x < tileMap.width; x++) {
       for (let y = 0; y < tileMap.height; y++) {
         const tile = tileMap.grid[x][y];
@@ -113,14 +122,21 @@ export class CaravanSystem {
           // Degrade road level if traffic drops too low
           if (tile.roadLevel === 3 && tile.roadTraffic < ROAD_UPGRADE_THRESHOLDS.imperial * ROAD_DEGRADE_FRACTION) {
             tile.roadLevel = 2;
+            tileMap.markRenderDirty(tile.x, tile.y); tileMap.markRoadNetworkChanged(tile.x, tile.y);
+            topologyChanged = true;
           } else if (tile.roadLevel === 2 && tile.roadTraffic < ROAD_UPGRADE_THRESHOLDS.stone * ROAD_DEGRADE_FRACTION) {
             tile.roadLevel = 1;
+            tileMap.markRenderDirty(tile.x, tile.y); tileMap.markRoadNetworkChanged(tile.x, tile.y);
+            topologyChanged = true;
           } else if (tile.roadLevel === 1 && tile.roadTraffic < ROAD_UPGRADE_THRESHOLDS.dirt * ROAD_DEGRADE_FRACTION) {
             tile.roadLevel = 0;
+            tileMap.markRenderDirty(tile.x, tile.y); tileMap.markRoadNetworkChanged(tile.x, tile.y);
+            topologyChanged = true;
           }
         }
       }
     }
+    void topologyChanged;
   }
 
   public updateCaravans(
@@ -259,6 +275,7 @@ export class CaravanSystem {
         this.activeCaravans.delete(id);
       }
     }
+    this.renderIndex.rebuild(this.activeCaravans.values());
   }
 
   /**
@@ -318,14 +335,20 @@ export class CaravanSystem {
       if (tile.roadDamage > 0) continue;
       if (tile.roadLevel === 0 && tile.roadTraffic >= ROAD_UPGRADE_THRESHOLDS.dirt) {
         tile.roadLevel = 1; // Dirt Trail — worn by wheels alone
+        tileMap.markRenderDirty(tile.x, tile.y);
+        tileMap.markRoadNetworkChanged(tile.x, tile.y);
       } else if (upgradesLeft > 0 && tile.roadLevel === 1 && tile.roadTraffic >= ROAD_UPGRADE_THRESHOLDS.stone && hasRoadsTech) {
         if (fundUpgrade(city, upgradeCost(tileMap, tile, 2))) {
           tile.roadLevel = 2; // Stone Road — quarried and laid
+          tileMap.markRenderDirty(tile.x, tile.y);
+          tileMap.markRoadNetworkChanged(tile.x, tile.y);
           upgradesLeft--;
         }
       } else if (upgradesLeft > 0 && tile.roadLevel === 2 && tile.roadTraffic >= ROAD_UPGRADE_THRESHOLDS.imperial && hasEngineering) {
         if (fundUpgrade(city, upgradeCost(tileMap, tile, 3))) {
           tile.roadLevel = 3; // Paved Imperial Highway
+          tileMap.markRenderDirty(tile.x, tile.y);
+          tileMap.markRoadNetworkChanged(tile.x, tile.y);
           upgradesLeft--;
         }
       }

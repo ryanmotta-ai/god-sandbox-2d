@@ -262,6 +262,8 @@ export function layRoad(
       for (const deck of crossing) {
         if (deck.roadLevel < level) {
           deck.roadLevel = level;
+          tileMap.markRenderDirty(deck.x, deck.y);
+          tileMap.markRoadNetworkChanged(deck.x, deck.y);
           works.spansBuilt++;
           raised++;
         }
@@ -293,6 +295,8 @@ export function layRoad(
       works.spent.stone += full.stone;
       works.spent.wood += full.wood;
       tile.roadLevel = level;
+      tileMap.markRenderDirty(tile.x, tile.y);
+      tileMap.markRoadNetworkChanged(tile.x, tile.y);
       works.tilesLaid++;
       works.tilesAtGrade++;
       previous = tile;
@@ -309,7 +313,11 @@ export function layRoad(
     pay(city, trail);
     works.spent.stone += trail.stone;
     works.spent.wood += trail.wood;
-    if (tile.roadLevel < 1) tile.roadLevel = 1;
+    if (tile.roadLevel < 1) {
+      tile.roadLevel = 1;
+      tileMap.markRenderDirty(tile.x, tile.y);
+      tileMap.markRoadNetworkChanged(tile.x, tile.y);
+    }
     works.tilesLaid++;
     previous = tile;
   }

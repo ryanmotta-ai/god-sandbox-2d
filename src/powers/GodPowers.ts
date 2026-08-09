@@ -46,7 +46,7 @@ export const ALL_POWERS: PowerDefinition[] = [
   { id: 'spawn_deer', name: 'Gerar Veado', category: 'life', icon: '🦌', description: 'Cervo selvagem pacífico' },
   { id: 'spawn_wolf', name: 'Gerar Lobo', category: 'life', icon: '🐺', description: 'Predador caçador em matilha' },
   { id: 'spawn_bear', name: 'Gerar Urso', category: 'life', icon: '🐻', description: 'Urso territorial solitário' },
-  { id: 'spawn_dragon', name: 'Gerar Dragão Ancião', category: 'life', icon: '🐉', description: 'Monstro Boss lendário cuspidor de fogo' },
+  { id: 'spawn_dragon', name: 'Gerar Dragão Ancião', category: 'life', icon: '🐉', description: 'Monstro Chefe lendário cuspidor de fogo' },
   { id: 'spawn_boar', name: 'Gerar Javali', category: 'life', icon: '🐗', description: 'Javali selvagem florestal agressivo' },
   { id: 'spawn_eagle', name: 'Gerar Águia', category: 'life', icon: '🦅', description: 'Predador voador dos cumes' },
   { id: 'spawn_mammoth', name: 'Gerar Mamute', category: 'life', icon: '🦣', description: 'Gigante ancião da tundra gelada' },

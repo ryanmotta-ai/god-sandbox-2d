@@ -1171,6 +1171,7 @@ input:checked ~ .switch-track .switch-knob { transform: translateX(18px); backgr
 
 .option-grid { display: grid; gap: 9px; }
 .option-grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.option-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .option-card {
   display: flex;
   flex-direction: column;

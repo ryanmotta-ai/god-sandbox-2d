@@ -9,6 +9,7 @@ import { SimplePathfinder } from '../ai/Pathfinding';
 import { hashString } from '../core/Random';
 import { events } from '../core/EventBus';
 import { chronicle } from './Chronicle';
+import { SpatialHash } from '../core/SpatialHash';
 
 export interface ShipTierConfig {
   tier: number;
@@ -104,6 +105,13 @@ export interface Ship {
 
 export class NavalSystem {
   public activeShips: Map<string, Ship> = new Map();
+  private readonly renderIndex = new SpatialHash<Ship>(16);
+
+  public [Symbol.iterator](): Iterator<Ship> { return this.activeShips.values(); }
+  public queryRect(minX: number, minY: number, maxX: number, maxY: number, result: Ship[] = []): Ship[] {
+    if (this.renderIndex.size !== this.activeShips.size) this.renderIndex.rebuild(this.activeShips.values());
+    return this.renderIndex.queryRect(minX, minY, maxX, maxY, result);
+  }
 
   /**
    * Determines ship tier based on ACTUAL kingdom technology, not global year.
@@ -285,6 +293,7 @@ export class NavalSystem {
         this.dockShip(ship, ship.fromCityName, ship.fromKingdomId, ship.toKingdomId, ship.toKingdomId, kingdoms, particles);
       }
     }
+    this.renderIndex.rebuild(this.activeShips.values());
   }
 
   private dockShip(

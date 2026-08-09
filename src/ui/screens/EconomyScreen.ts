@@ -64,6 +64,8 @@ export interface EconomyScreenHost {
   openRealm(kingdomId: string): void;
   /** Closes the screen and centres the camera. */
   goToMap(x: number, y: number, zoom?: number): void;
+  /** Opens the shared map intelligence view for one good. */
+  showGoodOnMap(good: GoodId): void;
 
   /** One realm's own price for a good, anchored to the world price. */
   localPrice(kingdomId: string, good: GoodId, worldPrice: number): number;
@@ -334,6 +336,11 @@ export class EconomyScreen implements Screen, EconomyScreenHost {
   public goToMap(x: number, y: number, zoom = 1.6): void {
     this.ctx.screens.closeAll();
     this.ctx.focusOn(x, y, zoom);
+  }
+
+  public showGoodOnMap(good: GoodId): void {
+    this.ctx.overlays.open({ mode: 'resources', layers: ['trade'], good });
+    this.ctx.screens.closeAll();
   }
 
   /**

@@ -144,6 +144,10 @@ export class Entity implements HasPosition {
   public isFavorite: boolean = false;
   public inventory: Record<string, number> = { wood: 0, stone: 0, food: 0 };
   public equipment: { weapon?: any; armor?: any } = {};
+  /** Hunter id is retained until the death pass turns a carcass into food. */
+  public huntedById: string | null = null;
+  /** 0..1 annual environmental food stress, managed by ECO-V3. */
+  public ecologyHunger: number = 0;
 
   constructor(id: string, species: SpeciesType, x: number, y: number, name?: string) {
     this.id = id;
@@ -299,13 +303,13 @@ export class Entity implements HasPosition {
       return rng.pick(HUMAN_GIVEN_NAMES);
     }
     const prefixes: Partial<Record<SpeciesType, string[]>> = {
-      [SpeciesType.DEER]: ['Bambi', 'Stag'],
-      [SpeciesType.WOLF]: ['Fang', 'Shadow'],
-      [SpeciesType.BEAR]: ['Grizz', 'Baloo'],
+      [SpeciesType.DEER]: ['Bambi', 'Cervo'],
+      [SpeciesType.WOLF]: ['Presa', 'Sombra'],
+      [SpeciesType.BEAR]: ['Garra', 'Urso'],
       [SpeciesType.DRAGON]: ['Ignis', 'Pyroth'],
-      [SpeciesType.BOAR]: ['Gore', 'Tusk'],
-      [SpeciesType.EAGLE]: ['Aquila', 'Swoop'],
-      [SpeciesType.MAMMOTH]: ['Tusk', 'Frost']
+      [SpeciesType.BOAR]: ['Chifre', 'Marfim'],
+      [SpeciesType.EAGLE]: ['Águia', 'Rasante'],
+      [SpeciesType.MAMMOTH]: ['Marfim', 'Gelo']
     };
     const suffixes = ['is', 'or', 'an', 'us', 'ia', 'en', 'os', 'th', 'ar'];
     const p = rng.pick(prefixes[species] ?? ['An']);

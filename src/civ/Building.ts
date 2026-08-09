@@ -1,4 +1,6 @@
 import { GoodId } from './Goods';
+import type { BuildingArchitecturalStamp } from './ArchitecturalProfile';
+import type { BuildingUrbanContext } from './UrbanDistricts';
 
 /**
  * Everything a settlement can build.
@@ -94,7 +96,7 @@ export interface BuildingDefinition {
 export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
   town_center: {
     type: 'town_center',
-    name: 'Town Center',
+    name: 'Centro da Vila',
     icon: '🏛️',
     category: 'core',
     maxHp: 500,
@@ -103,22 +105,22 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     storage: 200,
     produces: { food: 2 },
     unique: true,
-    description: 'The heart of the settlement. Where the first fire was lit.'
+    description: 'O coração do assentamento. Onde o primeiro fogo foi aceso.'
   },
   house: {
     type: 'house',
-    name: 'House',
+    name: 'Casa',
     icon: '🏠',
     category: 'core',
     maxHp: 150,
     cost: { wood: 20 },
     housing: 4,
-    description: 'Shelter. Every citizen needs one or the settlement stops growing.'
+    description: 'Abrigo. Cada cidadão precisa de um ou o assentamento para de crescer.'
   },
 
   farm: {
     type: 'farm',
-    name: 'Farm',
+    name: 'Fazenda',
     icon: '🌾',
     category: 'food',
     maxHp: 100,
@@ -128,11 +130,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     resourceTargets: ['food', 'cotton', 'spices'],
     resourceMode: 'preferred',
     extractionRate: 3,
-    description: 'Tilled fields. Food first; fertile regions may also specialise in cotton or spices.'
+    description: 'Campos lavrados. Comida primeiro; regiões férteis também podem se especializar em algodão ou especiarias.'
   },
   granary: {
     type: 'granary',
-    name: 'Granary',
+    name: 'Celeiro',
     icon: '🏚️',
     category: 'food',
     maxHp: 180,
@@ -140,11 +142,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     storage: 250,
     produces: { food: 3 },
     unique: true,
-    description: 'Stored surplus. A settlement with a granary survives a bad winter.'
+    description: 'Excedente armazenado. Um assentamento com um celeiro sobrevive a um inverno rigoroso.'
   },
   pasture: {
     type: 'pasture',
-    name: 'Pasture',
+    name: 'Pastagem',
     icon: '🐄',
     category: 'food',
     maxHp: 120,
@@ -154,12 +156,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     resourceTargets: ['horses', 'furs'],
     resourceMode: 'preferred',
     extractionRate: 2.5,
-    description: 'Herds, corrals and managed hunting grounds. Horse and fur regions become real economic specialities.'
+    description: 'Rebanhos, currais e áreas de caça manejadas. Regiões de cavalos e peles tornam-se verdadeiras especialidades econômicas.'
   },
 
   lumber_camp: {
     type: 'lumber_camp',
-    name: 'Lumber Camp',
+    name: 'Acampamento Madeireiro',
     icon: '🪵',
     category: 'extraction',
     maxHp: 120,
@@ -169,11 +171,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     resourceTargets: ['wood', 'rubber'],
     resourceMode: 'required',
     extractionRate: 8,
-    description: 'Organised forestry. Timber forests and tropical rubber stands become productive sites.'
+    description: 'Silvicultura organizada. Florestas de madeira e seringais tropicais tornam-se locais produtivos.'
   },
   quarry: {
     type: 'quarry',
-    name: 'Quarry',
+    name: 'Pedreira',
     icon: '🪨',
     category: 'extraction',
     maxHp: 200,
@@ -186,11 +188,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     resourceTargets: ['stone', 'clay'],
     resourceMode: 'required',
     extractionRate: 7,
-    description: 'Stone and clay workings. Durable architecture begins with a real deposit under the site.'
+    description: 'Extração de pedra e argila. A arquitetura durável começa com um depósito real sob o local.'
   },
   mine: {
     type: 'mine',
-    name: 'Mine',
+    name: 'Mina',
     icon: '⛏️',
     category: 'extraction',
     maxHp: 220,
@@ -201,12 +203,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     resourceTargets: ['copper', 'tin', 'iron', 'coal', 'salt', 'gold', 'gems', 'saltpeter', 'uranium'],
     resourceMode: 'required',
     extractionRate: 6,
-    description: 'A shaft sunk into a mineral vein. The mine extracts whatever geology is really underneath it.'
+    description: 'Um poço escavado em um veio mineral. A mina extrai qualquer geologia que esteja realmente sob ela.'
   },
 
   workshop: {
     type: 'workshop',
-    name: 'Workshop',
+    name: 'Oficina',
     icon: '🪡',
     category: 'craft',
     maxHp: 160,
@@ -214,11 +216,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     produces: { cloth: 4 },
     jobs: 3,
     craftCapacity: 3,
-    description: 'Artisans and weavers. Recipes in Goods.ts decide what this workshop can actually manufacture.'
+    description: 'Artesãos e tecelões. Receitas em Goods.ts decidem o que esta oficina pode realmente fabricar.'
   },
   smithy: {
     type: 'smithy',
-    name: 'Smithy',
+    name: 'Forja',
     icon: '⚒️',
     category: 'craft',
     maxHp: 200,
@@ -226,11 +228,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     produces: { tools: 4 },
     jobs: 4,
     craftCapacity: 2.6,
-    description: 'Smelters and smiths. Bronze, steel, tools and gunpowder all compete for the same skilled capacity.'
+    description: 'Fundidores e ferreiros. Bronze, aço, ferramentas e pólvora competem pela mesma capacidade especializada.'
   },
   factory: {
     type: 'factory',
-    name: 'Factory',
+    name: 'Fábrica',
     icon: '🏭',
     category: 'craft',
     maxHp: 400,
@@ -238,12 +240,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     produces: { machinery: 12 },
     jobs: 12,
     craftCapacity: 5.5,
-    description: 'Mass production. Its output is recipe-driven; without steel, rubber and fuel the machines fall silent.'
+    description: 'Produção em massa. Sua produção é baseada em receitas; sem aço, borracha e combustível, as máquinas silenciam.'
   },
 
   oil_well: {
     type: 'oil_well',
-    name: 'Oil Well',
+    name: 'Poço de Petróleo',
     icon: '🛢️',
     category: 'extraction',
     maxHp: 260,
@@ -253,11 +255,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     resourceTargets: ['oil'],
     resourceMode: 'required',
     extractionRate: 12,
-    description: 'A derrick sunk into a real petroleum basin. No basin, no well; no oil, no industrial logistics.'
+    description: 'Uma torre de perfuração em uma verdadeira bacia de petróleo. Sem bacia, sem poço; sem óleo, sem logística industrial.'
   },
   refinery: {
     type: 'refinery',
-    name: 'Refinery',
+    name: 'Refinaria',
     icon: '⛽',
     category: 'craft',
     maxHp: 320,
@@ -265,12 +267,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     produces: { fuel: 9 },
     jobs: 7,
     craftCapacity: 4.5,
-    description: 'Cracks crude oil into fuel using the recipe system. Modern fleets now depend on actual refining capacity.'
+    description: 'Refina petróleo bruto em combustível usando o sistema de receitas. Frotas modernas agora dependem da capacidade real de refino.'
   },
 
   library: {
     type: 'library',
-    name: 'Library',
+    name: 'Biblioteca',
     icon: '📚',
     category: 'knowledge',
     maxHp: 180,
@@ -278,11 +280,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     research: 6,
     jobs: 2,
     unique: true,
-    description: 'Accumulated writing. Knowledge that outlives the people who found it.'
+    description: 'Escrita acumulada. Conhecimento que sobrevive às pessoas que o descobriram.'
   },
   academy: {
     type: 'academy',
-    name: 'Academy',
+    name: 'Academia',
     icon: '🎓',
     category: 'knowledge',
     maxHp: 260,
@@ -291,11 +293,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     consumes: { food: 6 },
     jobs: 5,
     unique: true,
-    description: 'Scholars paid to think. Expensive, and the only way to reach the modern age.'
+    description: 'Acadêmicos pagos para pensar. Caro, e a única maneira de alcançar a era moderna.'
   },
   temple: {
     type: 'temple',
-    name: 'Temple',
+    name: 'Templo',
     icon: '⛩️',
     category: 'knowledge',
     maxHp: 300,
@@ -303,12 +305,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     research: 3,
     jobs: 2,
     unique: true,
-    description: 'A place to petition whoever is holding the brush.'
+    description: 'Um lugar para fazer petições a quem estiver segurando o pincel.'
   },
 
   market: {
     type: 'market',
-    name: 'Market',
+    name: 'Mercado',
     icon: '🏪',
     category: 'commerce',
     maxHp: 200,
@@ -316,11 +318,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     produces: { gold: 5 },
     jobs: 3,
     unique: true,
-    description: 'Where surplus becomes coin, and coin becomes a reason to build roads.'
+    description: 'Onde o excedente se torna moeda, e a moeda se torna uma razão para construir estradas.'
   },
   harbor: {
     type: 'harbor',
-    name: 'Harbor',
+    name: 'Porto Costeiro',
     icon: '⚓',
     category: 'commerce',
     maxHp: 250,
@@ -329,11 +331,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     jobs: 4,
     requiresCoast: true,
     unique: true,
-    description: 'A coastal harbor for fishing and early maritime commerce. It is now required before sea trade can begin.'
+    description: 'Um porto costeiro para pesca e comércio marítimo inicial. Agora é necessário antes que o comércio marítimo possa começar.'
   },
   bank: {
     type: 'bank',
-    name: 'Bank',
+    name: 'Banco',
     icon: '🏦',
     category: 'commerce',
     maxHp: 280,
@@ -341,11 +343,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     produces: { gold: 16 },
     jobs: 4,
     unique: true,
-    description: 'Deposits, loans and interest. Wealth begins to compound.'
+    description: 'Depósitos, empréstimos e juros. A riqueza começa a se multiplicar.'
   },
   stock_exchange: {
     type: 'stock_exchange',
-    name: 'Stock Exchange',
+    name: 'Bolsa de Valores',
     icon: '📈',
     category: 'commerce',
     maxHp: 320,
@@ -353,11 +355,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     produces: { gold: 40 },
     jobs: 6,
     unique: true,
-    description: 'Ownership traded as paper. Growth accelerates, and so do the crashes.'
+    description: 'Propriedade negociada como papel. O crescimento acelera, assim como as crises.'
   },
   collective: {
     type: 'collective',
-    name: 'Collective',
+    name: 'Coletiva',
     icon: '☭',
     category: 'commerce',
     maxHp: 320,
@@ -365,12 +367,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     produces: { food: 20 },
     jobs: 10,
     unique: true,
-    description: 'Food and basic output pooled by plan. Crafted tools still require real smithing inputs and industrial capacity.'
+    description: 'Comida e produção básica agrupadas por plano. Ferramentas fabricadas ainda exigem insumos reais de forja e capacidade industrial.'
   },
 
   aqueduct: {
     type: 'aqueduct',
-    name: 'Aqueduct',
+    name: 'Aqueduto',
     icon: '🌊',
     category: 'infrastructure',
     maxHp: 350,
@@ -378,21 +380,21 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     housing: 12,
     produces: { food: 4 },
     unique: true,
-    description: 'Fresh water at scale. Cities can finally grow past their wells.'
+    description: 'Água doce em escala. As cidades podem finalmente crescer além de seus poços.'
   },
   wall: {
     type: 'wall',
-    name: 'Wall',
+    name: 'Muralha',
     icon: '🧱',
     category: 'infrastructure',
     maxHp: 400,
     cost: { stone: 40 },
     defense: 1.25,
-    description: 'Dressed stone between your people and everyone else’s ambitions.'
+    description: 'Pedra lavrada entre o seu povo e as ambições de todos os outros.'
   },
   port: {
     type: 'port',
-    name: 'Port',
+    name: 'Porto',
     icon: '🚢',
     category: 'infrastructure',
     maxHp: 250,
@@ -401,12 +403,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     jobs: 6,
     requiresCoast: true,
     unique: true,
-    description: 'Deep-water docks, cranes and warehouses. Advanced steam and industrial shipping requires a real port.'
+    description: 'Docas de águas profundas, guindastes e armazéns. Navegação a vapor e industrial avançada requerem um porto de verdade.'
   },
 
   barracks: {
     type: 'barracks',
-    name: 'Barracks',
+    name: 'Quartel',
     icon: '🏯',
     category: 'power',
     maxHp: 300,
@@ -414,11 +416,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     consumes: { food: 5 },
     defense: 1.4,
     jobs: 4,
-    description: 'Professional soldiers, fed year-round whether or not there is a war.'
+    description: 'Soldados profissionais, alimentados o ano todo, haja ou não uma guerra.'
   },
   keep: {
     type: 'keep',
-    name: 'Keep',
+    name: 'Forte',
     icon: '🏰',
     category: 'power',
     maxHp: 600,
@@ -427,11 +429,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     housing: 6,
     consumes: { food: 6 },
     unique: true,
-    description: 'A lord’s fortified seat. The physical form of feudal authority.'
+    description: 'A sede fortificada de um lorde. A forma física da autoridade feudal.'
   },
   palace: {
     type: 'palace',
-    name: 'Palace',
+    name: 'Palácio',
     icon: '🏛️',
     category: 'power',
     maxHp: 700,
@@ -442,12 +444,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     consumes: { food: 10 },
     research: 4,
     unique: true,
-    description: 'The seat of a crown that rules rather than merely reigns.'
+    description: 'A sede de uma coroa que governa em vez de apenas reinar.'
   },
 
   monument: {
     type: 'monument',
-    name: 'Statue of the Founder',
+    name: 'Estátua do Fundador',
     icon: '🗿',
     category: 'infrastructure',
     maxHp: 1000,
@@ -455,22 +457,22 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     housing: 10,
     produces: { gold: 15 },
     unique: true,
-    description: 'A colossal monument financed by a Great Builder. Grants +30% Kingdom Stability.'
+    description: 'Um monumento colossal financiado por um Grande Construtor. Concede +30% de Estabilidade do Reino.'
   },
   great_library: {
     type: 'great_library',
-    name: 'Great Library of Wisdom',
+    name: 'Grande Biblioteca da Sabedoria',
     icon: '📚',
     category: 'knowledge',
     maxHp: 900,
     cost: { stone: 150, wood: 150, gold: 80 },
     research: 50,
     unique: true,
-    description: 'A world wonder storing centuries of scientific and historical knowledge.'
+    description: 'Uma maravilha mundial armazenando séculos de conhecimento científico e histórico.'
   },
   grand_aqueduct: {
     type: 'grand_aqueduct',
-    name: 'Grand Aqueduct of Nations',
+    name: 'Grande Aqueduto das Nações',
     icon: '🌊',
     category: 'infrastructure',
     maxHp: 850,
@@ -478,11 +480,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     housing: 30,
     produces: { food: 20 },
     unique: true,
-    description: 'A engineering wonder supplying endless fresh water to the city.'
+    description: 'Uma maravilha da engenharia fornecendo água doce infinita para a cidade.'
   },
   colosseum: {
     type: 'colosseum',
-    name: 'Grand Colosseum of Legends',
+    name: 'Grande Coliseu das Lendas',
     icon: '🏛️',
     category: 'power',
     maxHp: 1200,
@@ -490,7 +492,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     defense: 2.0,
     housing: 15,
     unique: true,
-    description: 'A legendary arena inspiring military morale and quelling civil unrest.'
+    description: 'Uma arena lendária inspirando a moral militar e sufocando a agitação civil.'
   }
 };
 
@@ -498,6 +500,28 @@ export const ALL_BUILDING_TYPES: BuildingType[] = Object.keys(BUILDINGS) as Buil
 
 /** Buildings available with no technology at all — every settlement starts with these. */
 export const BASE_BUILDINGS: BuildingType[] = ['town_center', 'house'];
+
+export type UrbanHistoricalPhase = 'settlement' | 'village' | 'city' | 'great_city' | 'metropolis';
+
+export type BuildingLifecycleState =
+  | 'construction'
+  | 'normal'
+  | 'damaged'
+  | 'abandoned'
+  | 'ruin'
+  | 'reconstruction';
+
+export type BuildingDamageCause = 'fire' | 'war' | 'disaster' | 'abandonment' | 'unknown';
+
+export interface BuildingLifecycleTransition {
+  from: BuildingLifecycleState;
+  to: BuildingLifecycleState;
+  year: number;
+  cause: BuildingDamageCause | 'construction' | 'recovery' | 'repair';
+}
+
+/** CITY-V4 physical role. Every piece still uses the ordinary wall gameplay type. */
+export type FortificationRole = 'segment' | 'corner' | 'tower' | 'gate';
 
 export interface BuildingData {
   id: string;
@@ -508,6 +532,24 @@ export interface BuildingData {
   hp: number;
   maxHp: number;
   cityId: string;
+  builtYear: number;
+  originPhase: UrbanHistoricalPhase;
+  originGeneration: number;
+  renovatedYear: number | null;
+  visualPhase: UrbanHistoricalPhase;
+  architecture: BuildingArchitecturalStamp | null;
+  fortificationRole: FortificationRole | null;
+  fortificationLineId: string | null;
+  urbanContext: BuildingUrbanContext | null;
+  lifecycleState: BuildingLifecycleState;
+  lifecycleProgress: number;
+  stateSinceYear: number;
+  lastLifecycleYear: number;
+  abandonmentYears: number;
+  natureReclaim: number;
+  lastDamageYear: number | null;
+  lastDamageCause: BuildingDamageCause | null;
+  lifecycleHistory: BuildingLifecycleTransition[];
 }
 
 export class Building implements BuildingData {
@@ -519,6 +561,29 @@ export class Building implements BuildingData {
   public hp: number;
   public maxHp: number;
   public cityId: string;
+  /** CITY-V2 provenance. These are durable facts, not renderer caches. */
+  public builtYear: number = 0;
+  public originPhase: UrbanHistoricalPhase = 'settlement';
+  public originGeneration: number = 0;
+  public renovatedYear: number | null = null;
+  public visualPhase: UrbanHistoricalPhase = 'settlement';
+  /** CITY-V3 historical visual identity. It survives conquest and later eras. */
+  public architecture: BuildingArchitecturalStamp | null = null;
+  /** CITY-V4 metadata used by routing, defence and the asset resolver. */
+  public fortificationRole: FortificationRole | null = null;
+  public fortificationLineId: string | null = null;
+  /** CITY-V5 district/land-value context at construction or last renovation. */
+  public urbanContext: BuildingUrbanContext | null = null;
+  /** CITY-V6 durable physical state. It advances periodically, never per frame. */
+  public lifecycleState: BuildingLifecycleState = 'normal';
+  public lifecycleProgress: number = 1;
+  public stateSinceYear: number = 0;
+  public lastLifecycleYear: number = 0;
+  public abandonmentYears: number = 0;
+  public natureReclaim: number = 0;
+  public lastDamageYear: number | null = null;
+  public lastDamageCause: BuildingDamageCause | null = null;
+  public lifecycleHistory: BuildingLifecycleTransition[] = [];
   /** Set for mines and camps: what the tile underneath actually yields. */
   public extractedGood: GoodId | null = null;
   /** 0..1 — how well staffed the building is. Scales its output. */
@@ -530,7 +595,7 @@ export class Building implements BuildingData {
 
   /** People this building can still take in, accounting for its level. */
   public freeHousing(): number {
-    const capacity = (BUILDINGS[this.type]?.housing ?? 0) * this.level;
+    const capacity = (BUILDINGS[this.type]?.housing ?? 0) * this.level * this.operationalFactor();
     return Math.max(0, capacity - this.residentIds.size);
   }
 
@@ -551,7 +616,73 @@ export class Building implements BuildingData {
 
   /** Output scales with level and staffing. */
   public outputMultiplier(): number {
-    return (1 + (this.level - 1) * 0.55) * this.staffing;
+    return (1 + (this.level - 1) * 0.55) * this.staffing * this.operationalFactor();
+  }
+
+  /** A damaged building works poorly; an unfinished, empty or ruined one does not work at all. */
+  public operationalFactor(): number {
+    if (this.lifecycleState !== 'normal' && this.lifecycleState !== 'damaged') return 0;
+    const health = Math.max(0, Math.min(1, this.hp / Math.max(1, this.maxHp)));
+    return this.lifecycleState === 'damaged' ? Math.max(.15, health) : Math.max(.45, health);
+  }
+
+  public isOperational(): boolean { return this.operationalFactor() > 0; }
+
+  public countsTowardBuildingSlots(): boolean {
+    return this.lifecycleState !== 'abandoned' && this.lifecycleState !== 'ruin';
+  }
+
+  public beginConstruction(year: number): void {
+    this.transitionLifecycle('construction', year, 'construction');
+    this.lifecycleProgress = .12;
+    this.hp = Math.max(1, this.maxHp * .18);
+  }
+
+  public beginReconstruction(year: number): void {
+    this.transitionLifecycle('reconstruction', year, 'recovery');
+    this.lifecycleProgress = .12;
+    this.hp = Math.max(1, this.maxHp * .16);
+    this.natureReclaim = 0;
+  }
+
+  public completeConstruction(year: number): void {
+    this.lifecycleProgress = 1;
+    this.hp = this.maxHp;
+    this.abandonmentYears = 0;
+    this.natureReclaim = 0;
+    this.transitionLifecycle('normal', year, 'recovery');
+  }
+
+  public applyDamage(amount: number, year: number, cause: BuildingDamageCause): void {
+    if (amount <= 0) return;
+    const activeProject = this.lifecycleState === 'construction' || this.lifecycleState === 'reconstruction';
+    this.hp = Math.max(0, this.hp - amount);
+    this.lastDamageYear = year;
+    this.lastDamageCause = cause;
+    const ratio = this.hp / Math.max(1, this.maxHp);
+    if (ratio <= .12) {
+      this.hp = Math.max(1, this.maxHp * .08);
+      this.lifecycleProgress = 0;
+      this.transitionLifecycle('ruin', year, cause);
+    } else if (activeProject) {
+      this.lifecycleProgress = Math.min(this.lifecycleProgress, Math.max(.05, ratio));
+    } else if (this.lifecycleState !== 'abandoned') {
+      this.transitionLifecycle('damaged', year, cause);
+    }
+  }
+
+  public transitionLifecycle(
+    next: BuildingLifecycleState,
+    year: number,
+    cause: BuildingLifecycleTransition['cause']
+  ): boolean {
+    if (this.lifecycleState === next) return false;
+    this.lifecycleHistory.push({ from: this.lifecycleState, to: next, year, cause });
+    if (this.lifecycleHistory.length > 8) this.lifecycleHistory.shift();
+    this.lifecycleState = next;
+    this.stateSinceYear = year;
+    this.lastLifecycleYear = year;
+    return true;
   }
 
   public upgrade(): void {
@@ -561,6 +692,20 @@ export class Building implements BuildingData {
       this.hp = this.maxHp;
     }
   }
+
+  public recordUrbanOrigin(year: number, phase: UrbanHistoricalPhase, generation: number): void {
+    this.builtYear = year;
+    this.originPhase = phase;
+    this.originGeneration = generation;
+    this.visualPhase = phase;
+  }
+
+  public recordRenovation(year: number, phase: UrbanHistoricalPhase): void {
+    this.renovatedYear = year;
+    this.visualPhase = phase;
+  }
+
+  public recordArchitecture(stamp: BuildingArchitecturalStamp): void { this.architecture = stamp; }
 
   /** Cost to raise this building one level. */
   public upgradeCost(): Partial<Record<GoodId, number>> {

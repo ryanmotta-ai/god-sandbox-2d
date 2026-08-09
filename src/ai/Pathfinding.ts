@@ -2,6 +2,8 @@ import { rng, hashToUnit } from '../core/Random';
 import { TileMap } from '../world/TileMap';
 import { TERRAINS, TerrainType } from '../world/Biomes';
 import { crossingSpan, gradePenalty, groundworkFactor, roadGrade } from '../world/RoadTerrain';
+import { perfProfiler } from '../perf/PerformanceProfiler';
+import { isFortificationBarrierId } from '../civ/FortificationPlanner';
 
 /**
  * Binary Min-Heap priority queue for A* pathfinding.
@@ -113,6 +115,30 @@ export const ROAD_SPEED_BONUS: Record<number, number> = {
 };
 
 export class SimplePathfinder {
+  private static readonly PATH_CACHE_LIMIT = 256;
+  private static readonly pathCache = new Map<string, { path: { x: number; y: number }[]; version: string }>();
+  private static readonly mapIds = new WeakMap<TileMap, number>();
+  private static nextMapId = 1;
+  private static cacheEnabled = true;
+  private static cacheHits = 0;
+  private static cacheMisses = 0;
+
+  /** Benchmark/debug switch. Production keeps the bounded cache enabled. */
+  public static configureCache(enabled: boolean): void {
+    this.cacheEnabled = enabled;
+    if (!enabled) this.pathCache.clear();
+  }
+
+  public static clearPathCache(): void {
+    this.pathCache.clear();
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+  }
+
+  public static cacheStats(): { size: number; limit: number; hits: number; misses: number } {
+    return { size: this.pathCache.size, limit: this.PATH_CACHE_LIMIT, hits: this.cacheHits, misses: this.cacheMisses };
+  }
+
   /**
    * When stuck, try 8 lateral directions to escape congestion rather than
    * immediately aborting the current task. Returns null if completely boxed in.
@@ -126,7 +152,7 @@ export class SimplePathfinder {
       const nx = x + dx * step;
       const ny = y + dy * step;
       const tile = tileMap.getTile(Math.floor(nx), Math.floor(ny));
-      if (tile && !TERRAINS[tile.type].isWater && TERRAINS[tile.type].isWalkable) {
+      if (tile && !TERRAINS[tile.type].isWater && TERRAINS[tile.type].isWalkable && !isFortificationBarrierId(tile.buildingId)) {
         return { x: nx, y: ny };
       }
     }
@@ -167,7 +193,7 @@ export class SimplePathfinder {
 
     // Check walkability of target tile (MUST NOT BE WATER & MUST BE WALKABLE)
     const tileAtNew = tileMap.getTile(Math.floor(newX), Math.floor(newY));
-    if (tileAtNew && !TERRAINS[tileAtNew.type].isWater && TERRAINS[tileAtNew.type].isWalkable) {
+    if (tileAtNew && !TERRAINS[tileAtNew.type].isWater && TERRAINS[tileAtNew.type].isWalkable && !isFortificationBarrierId(tileAtNew.buildingId)) {
       const moveCost = TERRAINS[tileAtNew.type].moveCost;
       const costFactor = 1 / Math.max(0.5, moveCost);
       return {
@@ -183,13 +209,13 @@ export class SimplePathfinder {
 
     // Try horizontal slide
     const tileH = tileMap.getTile(Math.floor(slideX), Math.floor(startY));
-    if (tileH && !TERRAINS[tileH.type].isWater && TERRAINS[tileH.type].isWalkable) {
+    if (tileH && !TERRAINS[tileH.type].isWater && TERRAINS[tileH.type].isWalkable && !isFortificationBarrierId(tileH.buildingId)) {
       return { x: slideX, y: startY, blocked: false };
     }
 
     // Try vertical slide
     const tileV = tileMap.getTile(Math.floor(startX), Math.floor(slideY));
-    if (tileV && !TERRAINS[tileV.type].isWater && TERRAINS[tileV.type].isWalkable) {
+    if (tileV && !TERRAINS[tileV.type].isWater && TERRAINS[tileV.type].isWalkable && !isFortificationBarrierId(tileV.buildingId)) {
       return { x: startX, y: slideY, blocked: false };
     }
 
@@ -199,7 +225,7 @@ export class SimplePathfinder {
       const jx = startX + Math.cos(angle) * speed;
       const jy = startY + Math.sin(angle) * speed;
       const jTile = tileMap.getTile(Math.floor(jx), Math.floor(jy));
-      if (jTile && !TERRAINS[jTile.type].isWater && TERRAINS[jTile.type].isWalkable) {
+      if (jTile && !TERRAINS[jTile.type].isWater && TERRAINS[jTile.type].isWalkable && !isFortificationBarrierId(jTile.buildingId)) {
         return { x: jx, y: jy, blocked: false };
       }
     }
@@ -223,7 +249,7 @@ export class SimplePathfinder {
       const tx = Math.floor(centerX + Math.cos(angle) * dist);
       const ty = Math.floor(centerY + Math.sin(angle) * dist);
       const tile = tileMap.getTile(tx, ty);
-      if (tile && !TERRAINS[tile.type].isWater && TERRAINS[tile.type].isWalkable) {
+      if (tile && !TERRAINS[tile.type].isWater && TERRAINS[tile.type].isWalkable && !isFortificationBarrierId(tile.buildingId)) {
         return { x: tx + 0.5, y: ty + 0.5 };
       }
     }
@@ -243,7 +269,7 @@ export class SimplePathfinder {
     const startTx = Math.floor(x);
     const startTy = Math.floor(y);
     const startTile = tileMap.getTile(startTx, startTy);
-    if (startTile && !TERRAINS[startTile.type].isWater && TERRAINS[startTile.type].isWalkable) {
+    if (startTile && !TERRAINS[startTile.type].isWater && TERRAINS[startTile.type].isWalkable && !isFortificationBarrierId(startTile.buildingId)) {
       let safeX = x;
       let safeY = y;
       const fracX = x - startTx;
@@ -273,7 +299,7 @@ export class SimplePathfinder {
           const tx = startTx + dx;
           const ty = startTy + dy;
           const tile = tileMap.getTile(tx, ty);
-          if (tile && !TERRAINS[tile.type].isWater && TERRAINS[tile.type].isWalkable) {
+          if (tile && !TERRAINS[tile.type].isWater && TERRAINS[tile.type].isWalkable && !isFortificationBarrierId(tile.buildingId)) {
             return { x: tx + 0.5, y: ty + 0.5 };
           }
         }
@@ -327,6 +353,118 @@ export class SimplePathfinder {
     tileMap: TileMap,
     mode: 'land' | 'sea' | 'road',
     maxNodes: number = 3000,
+    agentSeed: number = 0
+  ): { x: number; y: number }[] {
+    let mapId = this.mapIds.get(tileMap);
+    if (mapId === undefined) {
+      mapId = this.nextMapId++;
+      this.mapIds.set(tileMap, mapId);
+    }
+    const cacheKey = `${mapId}:${mode}:${Math.floor(startX)},${Math.floor(startY)}:${Math.floor(targetX)},${Math.floor(targetY)}:${maxNodes}:${agentSeed}`;
+    const started = performance.now();
+
+    if (this.cacheEnabled) {
+      const cached = this.pathCache.get(cacheKey);
+      if (cached !== undefined && tileMap.pathVersionFor(cached.path, mode) === cached.version) {
+        this.pathCache.delete(cacheKey);
+        this.pathCache.set(cacheKey, cached);
+        this.cacheHits++;
+        perfProfiler.increment('pathCalls');
+        perfProfiler.increment('pathCacheHits');
+        perfProfiler.record('pathfinding', performance.now() - started);
+        return cached.path.map(point => ({ ...point }));
+      }
+      if (cached !== undefined) this.pathCache.delete(cacheKey);
+    }
+
+    this.cacheMisses++;
+    const distance = Math.hypot(targetX - startX, targetY - startY);
+    const path = distance > tileMap.chunkSize * 2
+      ? this.findHierarchicalPath(startX, startY, targetX, targetY, tileMap, mode, maxNodes, agentSeed)
+      : this.findPathUncached(startX, startY, targetX, targetY, tileMap, mode, maxNodes, agentSeed);
+    if (this.cacheEnabled) {
+      const stored = path.map(point => ({ ...point }));
+      this.pathCache.set(cacheKey, { path: stored, version: tileMap.pathVersionFor(stored, mode) });
+      while (this.pathCache.size > this.PATH_CACHE_LIMIT) {
+        const oldest = this.pathCache.keys().next().value as string | undefined;
+        if (oldest === undefined) break;
+        this.pathCache.delete(oldest);
+      }
+    }
+    perfProfiler.increment('pathCalls');
+    perfProfiler.increment('pathCacheMisses');
+    perfProfiler.record('pathfinding', performance.now() - started);
+    return path;
+  }
+
+  /** Chunk-level A* followed by bounded local A* legs through seam portals. */
+  private static findHierarchicalPath(
+    startX: number, startY: number, targetX: number, targetY: number,
+    tileMap: TileMap, mode: 'land' | 'sea' | 'road', maxNodes: number, agentSeed: number
+  ): { x: number; y: number }[] {
+    interface MacroNode { cx: number; cy: number; g: number; f: number; parent: MacroNode | null; }
+    const sx = Math.floor(startX / tileMap.chunkSize), sy = Math.floor(startY / tileMap.chunkSize);
+    const tx = Math.floor(targetX / tileMap.chunkSize), ty = Math.floor(targetY / tileMap.chunkSize);
+    if (sx === tx && sy === ty) return this.findPathUncached(startX, startY, targetX, targetY, tileMap, mode, maxNodes, agentSeed);
+    const key = (cx: number, cy: number) => cx * tileMap.chunkStore.chunksY + cy;
+    const open = new MinHeap<MacroNode>((a, b) => a.f - b.f);
+    const best = new Map<number, number>();
+    open.insert({ cx: sx, cy: sy, g: 0, f: Math.abs(tx - sx) + Math.abs(ty - sy), parent: null }); best.set(key(sx, sy), 0);
+    let goal: MacroNode | null = null;
+    while (!open.isEmpty) {
+      const current = open.extractMin()!; const currentKey = key(current.cx, current.cy);
+      if (current.g > (best.get(currentKey) ?? Infinity)) continue;
+      if (current.cx === tx && current.cy === ty) { goal = current; break; }
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const cx = current.cx + dx, cy = current.cy + dy;
+        const cost = tileMap.chunkTraversalCost(cx, cy, mode); if (!Number.isFinite(cost)) continue;
+        const nextG = current.g + cost; const nextKey = key(cx, cy);
+        if (nextG >= (best.get(nextKey) ?? Infinity)) continue;
+        best.set(nextKey, nextG);
+        open.insert({ cx, cy, g: nextG, f: nextG + Math.abs(tx - cx) + Math.abs(ty - cy), parent: current });
+      }
+    }
+    if (!goal) return [];
+    const macro: Array<{ cx: number; cy: number }> = [];
+    for (let node: MacroNode | null = goal; node; node = node.parent) macro.unshift({ cx: node.cx, cy: node.cy });
+    const passable = (x: number, y: number): boolean => {
+      const tile = tileMap.getTile(x, y); if (!tile) return false; const terrain = TERRAINS[tile.type];
+      return mode === 'sea' ? terrain.isWater : mode === 'road'
+        ? tile.type !== TerrainType.DEEP_OCEAN && tile.type !== TerrainType.MOUNTAIN && tile.type !== TerrainType.LAVA && !isFortificationBarrierId(tile.buildingId)
+        : !terrain.isWater && terrain.isWalkable && !isFortificationBarrierId(tile.buildingId);
+    };
+    const portals: Array<{ x: number; y: number }> = [];
+    for (let i = 1; i < macro.length; i++) {
+      const from = macro[i - 1], to = macro[i]; let portal: { x: number; y: number } | null = null;
+      if (to.cx !== from.cx) {
+        const x = to.cx > from.cx ? to.cx * tileMap.chunkSize : from.cx * tileMap.chunkSize;
+        const minY = Math.max(from.cy, to.cy) * tileMap.chunkSize, maxY = Math.min(tileMap.height, minY + tileMap.chunkSize);
+        for (let y = minY; y < maxY; y++) if (passable(x - 1, y) && passable(x, y)) { portal = { x: x + (to.cx > from.cx ? .25 : -.25), y: y + .5 }; break; }
+      } else {
+        const y = to.cy > from.cy ? to.cy * tileMap.chunkSize : from.cy * tileMap.chunkSize;
+        const minX = Math.max(from.cx, to.cx) * tileMap.chunkSize, maxX = Math.min(tileMap.width, minX + tileMap.chunkSize);
+        for (let x = minX; x < maxX; x++) if (passable(x, y - 1) && passable(x, y)) { portal = { x: x + .5, y: y + (to.cy > from.cy ? .25 : -.25) }; break; }
+      }
+      if (!portal) return [];
+      portals.push(portal);
+    }
+    const waypoints = [...portals, { x: targetX, y: targetY }];
+    const result: Array<{ x: number; y: number }> = []; let fromX = startX, fromY = startY;
+    const localBudget = Math.max(4096, Math.min(maxNodes, tileMap.chunkSize * tileMap.chunkSize * 6));
+    for (const waypoint of waypoints) {
+      const leg = this.findPathUncached(fromX, fromY, waypoint.x, waypoint.y, tileMap, mode, localBudget, agentSeed);
+      if (leg.length === 0) return [];
+      if (result.length) leg.shift(); result.push(...leg); fromX = waypoint.x; fromY = waypoint.y;
+    }
+    return result;
+  }
+
+  private static findPathUncached(
+    startX: number, startY: number,
+    targetX: number, targetY: number,
+    tileMap: TileMap,
+    mode: 'land' | 'sea' | 'road',
+    maxNodes: number = 3000,
     /**
      * Stable per-traveller seed (e.g. a hashed route id). Nudges the cost of
      * each tile by up to 15%, deterministically, so two routes of otherwise
@@ -337,8 +475,8 @@ export class SimplePathfinder {
      */
     agentSeed: number = 0
   ): { x: number; y: number }[] {
-    const sx = Math.floor(startX);
-    const sy = Math.floor(startY);
+    let sx = Math.floor(startX);
+    let sy = Math.floor(startY);
     let tx = Math.floor(targetX);
     let ty = Math.floor(targetY);
 
@@ -356,7 +494,7 @@ export class SimplePathfinder {
       dy: number;
     }
 
-    const key = (x: number, y: number) => `${x},${y}`;
+    const key = (x: number, y: number) => x * tileMap.height + y;
     const heuristic = (x1: number, y1: number, x2: number, y2: number) => Math.hypot(x2 - x1, y2 - y1);
 
     const isPassable = (x: number, y: number): boolean => {
@@ -367,10 +505,11 @@ export class SimplePathfinder {
         // mountains and lava are engineering obstacles.
         return tile.type !== TerrainType.DEEP_OCEAN &&
           tile.type !== TerrainType.MOUNTAIN &&
-          tile.type !== TerrainType.LAVA;
+          tile.type !== TerrainType.LAVA &&
+          !isFortificationBarrierId(tile.buildingId);
       }
       const terrain = TERRAINS[tile.type];
-      return mode === 'land' ? (!terrain.isWater && terrain.isWalkable) : terrain.isWater;
+      return mode === 'land' ? (!terrain.isWater && terrain.isWalkable && !isFortificationBarrierId(tile.buildingId)) : terrain.isWater;
     };
 
     // If destination is impassable, snap to nearest passable tile
@@ -408,6 +547,8 @@ export class SimplePathfinder {
         }
       }
       if (!found) return []; // No passable start nearby
+      sx = nsx;
+      sy = nsy;
     }
 
     /**
@@ -440,7 +581,7 @@ export class SimplePathfinder {
     };
 
     const openHeap = new MinHeap<ANode>((a, b) => a.f - b.f);
-    const closedSet = new Set<string>();
+    const closedSet = new Set<number>();
     /**
      * Best cost known to reach each tile. This used to be a map of node
      * objects that were mutated in place and re-inserted when a cheaper route
@@ -451,7 +592,7 @@ export class SimplePathfinder {
      * ground. Entries are now immutable once queued: a better route inserts a
      * fresh one, and the stale entry is skipped when it pops.
      */
-    const bestCost = new Map<string, number>();
+    const bestCost = new Map<number, number>();
 
     const startNode: ANode = {
       x: sx,
@@ -499,6 +640,14 @@ export class SimplePathfinder {
 
         if (closedSet.has(nKey)) continue;
         if (!isPassable(nx, ny)) continue; // Strict passability — no destination bypass
+
+        if (mode !== 'sea' && dx !== 0 && dy !== 0) {
+          // A diagonal step must not squeeze through the seam between curtain
+          // pieces. Gates are deliberately not barriers and stay traversable.
+          const sideA = tileMap.getTile(current.x + dx, current.y);
+          const sideB = tileMap.getTile(current.x, current.y + dy);
+          if (isFortificationBarrierId(sideA?.buildingId ?? null) || isFortificationBarrierId(sideB?.buildingId ?? null)) continue;
+        }
 
         const baseDist = dx !== 0 && dy !== 0 ? 1.414 : 1.0;
         const moveCost = getMoveCost(nx, ny, current.x, current.y);

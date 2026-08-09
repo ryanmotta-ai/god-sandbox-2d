@@ -21,7 +21,7 @@ import { el } from '../core/Dom';
 import { icon, setIcon, withTooltip } from '../kit';
 import { ALL_POWERS } from '../../powers/GodPowers';
 import { sound } from '../../core/SoundSynth';
-import type { OverlayMode } from '../../renderer/Overlays';
+import type { MapLayer, OverlayMode } from '../../renderer/Overlays';
 import type { GameContext } from '../core/GameContext';
 
 interface MenuEntry {
@@ -43,13 +43,25 @@ interface DockGroup {
   entries: (ctx: GameContext) => MenuEntry[];
 }
 
-const OVERLAYS: { id: OverlayMode; label: string; icon: string; description: string }[] = [
-  { id: 'none', label: 'Natural', icon: 'map', description: 'O mundo como ele é, sem sobreposição.' },
-  { id: 'political', label: 'Político', icon: 'kingdom', description: 'Fronteiras e a extensão de cada reino.' },
-  { id: 'population', label: 'População', icon: 'population', description: 'Onde as pessoas realmente vivem.' },
-  { id: 'biome', label: 'Biomas', icon: 'biome', description: 'Classificação ecológica do terreno.' },
-  { id: 'temperature', label: 'Clima', icon: 'climate', description: 'Temperatura e umidade.' },
-  { id: 'resources', label: 'Recursos', icon: 'good', description: 'Depósitos de minério, madeira e ouro.' }
+const OVERLAYS: { id: OverlayMode; label: string; icon: string; description: string; shortcut?: string }[] = [
+  { id: 'none', label: 'Natural', icon: 'map', description: 'O mundo como ele é, sem sobreposição.', shortcut: 'Alt+1' },
+  { id: 'political', label: 'Político', icon: 'kingdom', description: 'Fronteiras e a extensão de cada reino.', shortcut: 'Alt+2' },
+  { id: 'population', label: 'População', icon: 'population', description: 'População urbana em escala logarítmica relativa.', shortcut: 'Alt+3' },
+  { id: 'economy', label: 'Economia', icon: 'economy', description: 'Prosperidade, produção, emprego ou alimento.', shortcut: 'Alt+4' },
+  { id: 'resources', label: 'Recursos', icon: 'good', description: 'Depósitos reais, com filtro por recurso.', shortcut: 'Alt+5' },
+  { id: 'war', label: 'Guerra', icon: 'war', description: 'Guerras, forças, cidades e infraestrutura afetada.', shortcut: 'Alt+6' },
+  { id: 'diplomacy', label: 'Diplomacia contextual', icon: 'diplomacy', description: 'Relações reais com o reino selecionado.' },
+  { id: 'politics', label: 'Pressão política', icon: 'politics', description: 'Estabilidade, revolta e risco de golpe por reino.' }
+];
+
+const LAYERS: { id: MapLayer; label: string; icon: string; description: string }[] = [
+  { id: 'trade', label: 'Rotas de comércio', icon: 'trade-route', description: 'Rotas por volume, direção e bem.' },
+  { id: 'roads', label: 'Estradas', icon: 'route', description: 'Níveis reais da rede rodoviária.' },
+  { id: 'road-traffic', label: 'Tráfego rodoviário', icon: 'trend', description: 'Intensidade de roadTraffic.' },
+  { id: 'rail', label: 'Ferrovias', icon: 'trade-route', description: 'Linhas e estações existentes.' },
+  { id: 'ports', label: 'Portos', icon: 'port', description: 'Portos operacionais e interrompidos.' },
+  { id: 'logistics', label: 'Problemas logísticos', icon: 'warning', description: 'Somente gargalos danificados, bloqueados ou congestionados.' },
+  { id: 'armies', label: 'Forças militares', icon: 'army', description: 'Soldados e governantes reais em campo.' }
 ];
 
 /**
@@ -83,13 +95,20 @@ const GROUPS: DockGroup[] = [
     label: 'Mundo',
     icon: 'map',
     description: 'Como o mapa é desenhado.',
-    entries: ctx => OVERLAYS.map(o => ({
-      label: o.label,
-      icon: o.icon,
-      description: o.description,
-      isActive: () => ctx.overlays.activeMode === o.id,
-      run: () => ctx.overlays.setMode(o.id)
-    }))
+    entries: ctx => [
+      ...OVERLAYS.map(o => ({
+        label: o.label, icon: o.icon, description: o.description, shortcut: o.shortcut,
+        isActive: () => ctx.overlays.activeMode === o.id,
+        run: () => o.id === 'diplomacy'
+          ? ctx.overlays.open({ mode: o.id, realmId: focusedRealm(ctx) ?? null })
+          : ctx.overlays.setMode(o.id)
+      })),
+      ...LAYERS.map(layer => ({
+        label: layer.label, icon: layer.icon, description: layer.description,
+        isActive: () => ctx.overlays.layers.has(layer.id),
+        run: () => ctx.overlays.toggleLayer(layer.id)
+      }))
+    ]
   },
   {
     id: 'civilization',
@@ -109,7 +128,7 @@ const GROUPS: DockGroup[] = [
       { label: 'Diplomacia', icon: 'diplomacy', description: 'Tratados, rivalidades e a opinião das cortes.', shortcut: 'L', run: () => ctx.screens.open('diplomacy') },
       { label: 'Dinastias', icon: 'dynasty', description: 'Linhagens, sucessões e casas governantes.', run: () => ctx.screens.open('dynasty') },
       { label: 'Infraestrutura', icon: 'trade-route', description: 'Estradas, ferrovias e rotas de comércio.', shortcut: 'N', run: () => ctx.screens.open('infrastructure') },
-      { label: 'Guerra', icon: 'war', description: 'Exércitos, cercos e o custo das campanhas.', shortcut: 'W', run: () => ctx.screens.open('warfare') }
+      { label: 'Guerra', icon: 'war', description: 'Exércitos, cercos e o custo das campanhas.', shortcut: 'U', run: () => ctx.screens.open('warfare') }
     ]
   },
   {

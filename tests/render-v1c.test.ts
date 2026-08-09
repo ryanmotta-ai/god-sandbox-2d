@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import { Camera } from '../src/renderer/Camera';
+import { RenderSnapshotBuilder } from '../src/renderer/webgpu/RenderSnapshot';
+import type { AtlasRegion } from '../src/renderer/webgpu/TextureAtlas';
+import { TerrainType } from '../src/world/Biomes';
+import { Tile } from '../src/world/Tile';
+import type { TileMap } from '../src/world/TileMap';
+
+const r = (page = 0): AtlasRegion => ({ page, u0: 0, v0: 0, u1: 1, v1: 1 });
+const regions = new Map<string, AtlasRegion>([['solid:white', r()], ['overlay:selection', r()]]);
+for (const terrain of Object.values(TerrainType)) regions.set(`terrain:${terrain}`, r());
+for (const direction of ['down', 'up', 'left', 'right']) for (const animation of ['idle', 'walk', 'attack', 'flee', 'heal', 'gather', 'build', 'carry', 'shoot', 'socialize', 'rest']) for (let frame = 0; frame < 4; frame++) regions.set(`entity:human:${direction}:${animation}:${frame}`, r(1));
+regions.set('vehicle:ship:1', r(1)); regions.set('vehicle:caravan:cart:side:0', r(1)); regions.set('vehicle:train', r(1));
+regions.set('building:house:stone:2:damaged', r(2));
+
+const size = 64;
+const grid = Array.from({ length: size }, (_, x) => Array.from({ length: size }, (_, y) => new Tile(x, y, TerrainType.GRASS, .5)));
+const map = { width: size, height: size, grid, terrainVersion: 1, roadNetworkVersion: 1, railNetworkVersion: 1, dirtyChunks: new Set<number>([0, 1, 2, 3]), getTile(x: number, y: number) { return x < 0 || y < 0 || x >= size || y >= size ? null : grid[x][y]; } } as TileMap;
+grid[10][10].railLevel = 1;
+const building = { id: 'house-1', type: 'house', x: 10, y: 10, level: 2, hp: 40, maxHp: 100 };
+const city = { id: 'city-1', x: 10, y: 10, kingdomId: null, buildings: new Map([[building.id, building]]) };
+const entity = { id: 'citizen-1', species: 'human', x: 10.5, y: 10.5, prevX: 10, prevY: 10.5, facing: 1, aiState: 'idle', attackCooldown: 0, energy: 100, renderWalked: .4, equipment: {}, carrying: null };
+const ship = { id: 'ship-1', x: 11, y: 10, tier: 1, kingdomColor: '#fbbf24' };
+const caravan = { id: 'caravan-1', x: 11, y: 11, headingX: 1, headingY: 0, caravanType: 'cart', progress: 0, routeTiles: 10 };
+const camera = new Camera(); camera.centerOn(10, 10, 1);
+const builder = new RenderSnapshotBuilder(regions);
+const input = { camera, tileMap: map, entities: [entity], cities: new Map([[city.id, city]]), kingdoms: new Map(), overlayMode: 'none' as const, selection: { x: 10, y: 10, radius: 1, color: '#fbbf24' }, ships: [ship], caravans: [caravan], railActive: true, viewportWidth: 480, viewportHeight: 320, devicePixelRatio: 1 } as any;
+const first = builder.build(input);
+assert.ok(first.staticInstances > 0, 'building is emitted into its resident chunk');
+assert.ok(first.dynamicInstances >= 5, 'citizen, ship, caravan, train and selection are batched dynamically');
+assert.ok(first.dynamicPageData.has(1), 'dynamic vehicle/entity sprites preserve atlas page batching');
+const steady = builder.build(input);
+assert.equal(steady.updatedChunks, 0, 'animation frames do not rebuild static building chunks');
+assert.ok(steady.dynamicInstances >= 5, 'animated instances remain visible without per-entity draw calls');
+console.log('RENDER-V1C parity snapshot tests passed');

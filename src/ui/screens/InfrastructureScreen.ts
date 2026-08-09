@@ -366,7 +366,9 @@ export class InfrastructureScreen implements Screen, LogisticsScreenHost {
    * route overlay to switch to, so this hands the map back rather than pretending
    * to draw one — and the button that calls it says exactly that in its tooltip.
    */
-  public requestOverlay(_kind: 'roads' | 'rail' | 'routes' | 'ports'): void {
+  public requestOverlay(kind: 'roads' | 'rail' | 'routes' | 'ports'): void {
+    const layers = kind === 'routes' ? ['trade'] as const : [kind] as const;
+    this.ctx.overlays.open({ mode: 'none', layers: [...layers] });
     this.ctx.screens.closeAll();
   }
 }

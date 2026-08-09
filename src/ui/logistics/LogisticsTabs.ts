@@ -43,13 +43,13 @@ export function buildOverview(m: LogisticsMetrics, host: LogisticsScreenHost): C
       statGrid([
         stat({
           label: 'Rede viária', value: m.roads.tiles > 0 ? `${m.roads.tiles}` : '—',
-          unit: m.roads.tiles > 0 ? 'tiles' : undefined, icon: 'route',
+          unit: m.roads.tiles > 0 ? 'blocos' : undefined, icon: 'route',
           status: m.roads.damagedTiles > 0 ? 'warning' : undefined,
           tooltip: m.roads.tiles > 0
             ? {
                 title: 'Rede viária',
-                value: `${m.roads.tiles} tiles`,
-                description: 'Tiles do mundo com alguma via aberta.',
+                value: `${m.roads.tiles} blocos`,
+                description: 'Blocos do mundo com alguma via aberta.',
                 rows: [
                   { label: ROAD_LEVEL_LABEL[1], value: `${m.roads.byLevel[1]}` },
                   { label: ROAD_LEVEL_LABEL[2], value: `${m.roads.byLevel[2]}` },
@@ -380,7 +380,7 @@ function buildRoadPanel(m: LogisticsMetrics, host: LogisticsScreenHost): HTMLEle
   return panel({
     title: 'Vias',
     icon: 'route',
-    subtitle: `${r.tiles} tiles · nível médio ${r.meanLevel?.toFixed(2) ?? '—'}`,
+    subtitle: `${r.tiles} blocos · nível médio ${r.meanLevel?.toFixed(2) ?? '—'}`,
     actions: [
       button('Ver no mapa', () => host.requestOverlay('roads'), {
         variant: 'ghost', size: 'sm', icon: 'map',
@@ -392,15 +392,15 @@ function buildRoadPanel(m: LogisticsMetrics, host: LogisticsScreenHost): HTMLEle
     ]
   }, [
     statGrid([
-      stat({ label: ROAD_LEVEL_LABEL[1], value: `${r.byLevel[1]}`, unit: 'tiles', icon: 'route' }),
-      stat({ label: ROAD_LEVEL_LABEL[2], value: `${r.byLevel[2]}`, unit: 'tiles', icon: 'route' }),
-      stat({ label: ROAD_LEVEL_LABEL[3], value: `${r.byLevel[3]}`, unit: 'tiles', icon: 'route' }),
+      stat({ label: ROAD_LEVEL_LABEL[1], value: `${r.byLevel[1]}`, unit: 'blocos', icon: 'route' }),
+      stat({ label: ROAD_LEVEL_LABEL[2], value: `${r.byLevel[2]}`, unit: 'blocos', icon: 'route' }),
+      stat({ label: ROAD_LEVEL_LABEL[3], value: `${r.byLevel[3]}`, unit: 'blocos', icon: 'route' }),
       stat({
-        label: 'Degradados', value: `${r.damagedTiles}`, unit: 'tiles', icon: 'warning',
+        label: 'Degradados', value: `${r.damagedTiles}`, unit: 'blocos', icon: 'warning',
         status: r.damagedTiles > 0 ? 'warning' : 'positive',
         tooltip: {
           title: 'Vias degradadas',
-          description: 'Tiles cujo nível efetivo caiu abaixo do que foi construído, por dano de guerra. Reduz a capacidade e encarece o transporte.'
+          description: 'Blocos cujo nível efetivo caiu abaixo do que foi construído, por dano de guerra. Reduz a capacidade e encarece o transporte.'
         }
       }),
       stat({
@@ -487,7 +487,7 @@ function buildRailPanel(m: LogisticsMetrics, host: LogisticsScreenHost): HTMLEle
                     ]))),
                   sortValue: l => l.stations.map(s => s.cityName).join(' ')
                 },
-                { key: 'tiles', header: 'Trilhos', align: 'right', width: '88px', cell: l => `${l.tiles}`, sortValue: l => l.tiles },
+                { key: 'blocos', header: 'Trilhos', align: 'right', width: '88px', cell: l => `${l.tiles}`, sortValue: l => l.tiles },
                 {
                   key: 'quality', header: 'Condição', align: 'right', width: '104px',
                   cell: l => formatPercent(l.quality),
@@ -519,7 +519,7 @@ function buildRailPanel(m: LogisticsMetrics, host: LogisticsScreenHost): HTMLEle
               ],
               rows: working,
               rowKey: l => l.id,
-              sortBy: 'tiles',
+              sortBy: 'blocos',
               onRowClick: l => host.goToMap(l.at.x, l.at.y),
               status: l => (LINK_STATUS[l.status].status === 'positive' ? undefined : LINK_STATUS[l.status].status),
               rowTooltip: l => ({
@@ -992,7 +992,7 @@ export function buildRouteTable(routes: RouteView[], host: LogisticsScreenHost):
         { label: 'Tarifa', value: formatPercent(r.tariffRate) },
         { label: 'Preço no destino', value: r.destPrice.toFixed(2) },
         { label: 'Margem por unidade', value: r.marginPerUnit.toFixed(2), status: r.marginPerUnit > 0 ? 'positive' : 'warning' },
-        { label: 'Distância', value: `${r.distance.toFixed(0)} tiles` },
+        { label: 'Distância', value: `${r.distance.toFixed(0)} blocos` },
         ...(r.avgRoadLevel !== null
           ? [{ label: 'Via média no caminho', value: ROAD_LEVEL_LABEL[Math.round(r.avgRoadLevel)] ?? r.avgRoadLevel.toFixed(2) }]
           : [])

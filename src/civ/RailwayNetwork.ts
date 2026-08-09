@@ -6,6 +6,7 @@ import { Kingdom } from './Kingdom';
 import { SimplePathfinder } from '../ai/Pathfinding';
 import { chronicle } from './Chronicle';
 import { GoodId } from './Goods';
+import { perfProfiler } from '../perf/PerformanceProfiler';
 
 /**
  * Railways (Phase I: logistics).
@@ -63,12 +64,24 @@ export class RailwayNetwork {
   public linesBuilt: number = 0;
 
   private constructions: Map<string, { from: string; to: string; path: { x: number; y: number }[]; cursor: number }> = new Map();
+  private cachedMap: TileMap | null = null;
+  private cachedVersion = -1;
+  private cachedRailTiles: Tile[] = [];
+  private cachedComponents: Tile[][] = [];
+  private stationComponents: Map<string, number> = new Map();
+  private readonly railChunks = new Map<number, { version: number; coordinates: Array<[number, number]> }>();
 
   public reset(): void {
     this.yearlyFreight = 0;
     this.yearlyConstructed = 0;
     this.linesBuilt = 0;
     this.constructions.clear();
+    this.cachedMap = null;
+    this.cachedVersion = -1;
+    this.cachedRailTiles = [];
+    this.cachedComponents = [];
+    this.stationComponents.clear();
+    this.railChunks.clear();
   }
 
   // ============================ TRACK ============================
@@ -82,6 +95,7 @@ export class RailwayNetwork {
     tile.railDamage = 0;
     tile.railOwnerId = ownerId;
     tileMap.markRenderDirty(tile.x, tile.y);
+    tileMap.markRailNetworkChanged(tile.x, tile.y);
     return true;
   }
 
@@ -93,18 +107,62 @@ export class RailwayNetwork {
     tile.railDamage = 0;
     tile.railOwnerId = null;
     tileMap.markRenderDirty(tile.x, tile.y);
+    tileMap.markRailNetworkChanged(tile.x, tile.y);
   }
 
   /** Every tile carrying rail, live or damaged (capacity uses all of them). */
   public railTiles(tileMap: TileMap): Tile[] {
+    this.ensureTopology(tileMap);
+    return this.cachedRailTiles;
+  }
+
+  private ensureTopology(tileMap: TileMap): void {
+    const chunksStable = this.cachedMap === tileMap && tileMap.chunkStore.chunks.every((chunk, key) => this.railChunks.get(key)?.version === chunk.railVersion);
+    if (chunksStable && this.cachedVersion === tileMap.railNetworkVersion) return;
     const tiles: Tile[] = [];
-    for (let x = 0; x < tileMap.width; x++) {
-      for (let y = 0; y < tileMap.height; y++) {
-        const t = tileMap.grid[x][y];
-        if (t.railLevel > 0) tiles.push(t);
+    for (let cx = 0; cx < tileMap.chunkStore.chunksX; cx++) for (let cy = 0; cy < tileMap.chunkStore.chunksY; cy++) {
+      const key = cx * tileMap.chunkStore.chunksY + cy;
+      const chunk = tileMap.chunkStore.chunks[key];
+      let cached = this.railChunks.get(key);
+      if (!cached || cached.version !== chunk.railVersion) {
+        const coordinates: Array<[number, number]> = [];
+        const minX = cx * tileMap.chunkSize, minY = cy * tileMap.chunkSize;
+        const maxX = Math.min(tileMap.width, minX + tileMap.chunkSize), maxY = Math.min(tileMap.height, minY + tileMap.chunkSize);
+        for (let x = minX; x < maxX; x++) for (let y = minY; y < maxY; y++) if (tileMap.getTile(x, y)!.railLevel > 0) coordinates.push([x, y]);
+        cached = { version: chunk.railVersion, coordinates };
+        this.railChunks.set(key, cached);
       }
+      for (const [x, y] of cached.coordinates) tiles.push(tileMap.getTile(x, y)!);
     }
-    return tiles;
+    const seen = new Set<number>();
+    const components: Tile[][] = [];
+    const stationComponents = new Map<string, number>();
+    for (const start of tiles) {
+      const key = start.x * tileMap.height + start.y;
+      if (seen.has(key) || start.railLevelEffective <= 0) continue;
+      const componentIndex = components.length;
+      const comp: Tile[] = [];
+      const queue = [start];
+      seen.add(key);
+      while (queue.length) {
+        const tile = queue.pop()!;
+        comp.push(tile);
+        if (tile.cityId && !stationComponents.has(tile.cityId)) stationComponents.set(tile.cityId, componentIndex);
+        for (const neighbor of tileMap.getNeighbors(tile.x, tile.y, true)) {
+          const neighborKey = neighbor.x * tileMap.height + neighbor.y;
+          if (neighbor.railLevelEffective <= 0 || seen.has(neighborKey)) continue;
+          seen.add(neighborKey);
+          queue.push(neighbor);
+        }
+      }
+      components.push(comp);
+    }
+    this.cachedMap = tileMap;
+    this.cachedVersion = tileMap.railNetworkVersion;
+    this.cachedRailTiles = tiles;
+    this.cachedComponents = components;
+    this.stationComponents = stationComponents;
+    perfProfiler.increment('networkRebuilds');
   }
 
   /**
@@ -113,33 +171,8 @@ export class RailwayNetwork {
    * two — cutting a single rail link stops every freight route across it.
    */
   public components(tileMap: TileMap): Tile[][] {
-    const seen = new Set<string>();
-    const components: Tile[][] = [];
-    for (const start of this.railTiles(tileMap)) {
-      const key = `${start.x},${start.y}`;
-      if (seen.has(key)) continue;
-      // A severed segment is not part of any working line. Seeding a search from
-      // one let a broken rail act as a bridge between the two halves it had just
-      // cut apart, so blowing up a line changed nothing.
-      if (start.railLevelEffective <= 0) continue;
-      const comp: Tile[] = [];
-      const queue = [start];
-      seen.add(key);
-      while (queue.length) {
-        const t = queue.pop()!;
-        comp.push(t);
-        // Diagonal adjacency counts: surveyed corridors step diagonally and a
-        // corner-touching turnout is still a working junction.
-        for (const n of tileMap.getNeighbors(t.x, t.y, true)) {
-          const nk = `${n.x},${n.y}`;
-          if (n.railLevelEffective <= 0 || seen.has(nk)) continue;
-          seen.add(nk);
-          queue.push(n);
-        }
-      }
-      components.push(comp);
-    }
-    return components;
+    this.ensureTopology(tileMap);
+    return this.cachedComponents;
   }
 
   /** 0..1 average condition of a line — capacity scales with it. */
@@ -298,16 +331,9 @@ export class RailwayNetwork {
 
   /** Whether two cities sit on the same operative rail component. */
   public connected(tileMap: TileMap, a: City, b: City): boolean {
-    for (const comp of this.components(tileMap)) {
-      let hasA = false;
-      let hasB = false;
-      for (const t of comp) {
-        if (t.cityId === a.id) hasA = true;
-        if (t.cityId === b.id) hasB = true;
-        if (hasA && hasB) return true;
-      }
-    }
-    return false;
+    this.ensureTopology(tileMap);
+    const component = this.stationComponents.get(a.id);
+    return component !== undefined && component === this.stationComponents.get(b.id);
   }
 
   /** The whole yearly railway pass: lay new lines, then move freight. */

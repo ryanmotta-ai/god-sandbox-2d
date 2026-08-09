@@ -23,14 +23,14 @@ export class Minimap {
 
     const toggle = el('button', {
       class: 'minimap-toggle',
-      title: 'Collapse minimap (M)',
+      title: 'Recolher minimapa (M)',
       text: '▾',
       on: { click: () => this.toggle() }
     });
 
     this.root = el('div', { class: 'minimap' }, [
       el('div', { class: 'minimap-head' }, [
-        el('span', { class: 'minimap-title', text: 'WORLD MAP' }),
+        el('span', { class: 'minimap-title', text: 'MAPA-MÚNDI' }),
         toggle
       ]),
       el('div', { class: 'minimap-body' }, [this.preview.canvas])

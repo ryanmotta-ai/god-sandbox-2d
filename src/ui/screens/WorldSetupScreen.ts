@@ -20,16 +20,22 @@ import type { GameContext } from '../core/GameContext';
 
 const SIZES = [
   {
-    value: 64,
-    label: 'Pequeno',
-    detail: '64 × 64',
-    blurb: 'Terra apertada. Os reinos se encontram cedo e a história anda rápido.'
+    value: 128,
+    label: 'Padrão',
+    detail: '128 × 128',
+    blurb: 'Equilíbrio entre proximidade, exploração e duração da partida.'
   },
   {
-    value: 128,
+    value: 256,
     label: 'Grande',
-    detail: '128 × 128',
-    blurb: 'Espaço para crescer antes do primeiro conflito. Partidas mais longas.'
+    detail: '256 × 256',
+    blurb: 'Regiões amplas e viagens longas com simulação regional.'
+  },
+  {
+    value: 512,
+    label: 'Vasto',
+    detail: '512 × 512',
+    blurb: 'Mundo continental chunked; recomendado para máquinas com mais memória.'
   }
 ];
 
@@ -51,7 +57,7 @@ export class WorldSetupScreen implements Screen {
 
   public build(ctx: GameContext): HTMLElement {
     this.config = {
-      size: 64,
+      size: 128,
       preset: 'single_continent',
       // Fixed worlds: the seed no longer shapes the terrain. It is kept because
       // it still drives everything else — where people are placed, who they are,
@@ -172,7 +178,7 @@ export class WorldSetupScreen implements Screen {
   }
 
   private sizeSection(): HTMLElement {
-    const group = el('div', { class: 'option-grid cols-2' });
+    const group = el('div', { class: 'option-grid cols-3' });
     this.optionRoots.set('size', group);
 
     for (const size of SIZES) {

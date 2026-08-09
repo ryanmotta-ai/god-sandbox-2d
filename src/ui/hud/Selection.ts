@@ -295,7 +295,7 @@ export class SelectionManager {
     let entity: Entity | null =
       this.cachedEntity?.id === id && this.cachedEntity.hp > 0 ? this.cachedEntity : null;
     if (!entity) {
-      entity = this.sim!.entities.find(e => e.id === id) ?? null;
+      entity = this.sim!.getEntity(id);
       this.cachedEntity = entity;
     }
     // A citizen who died since being selected simply stops resolving. The card

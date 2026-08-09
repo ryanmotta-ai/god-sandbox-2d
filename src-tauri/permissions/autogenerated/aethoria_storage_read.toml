@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-aethoria-storage-read"
+description = "Enables the aethoria_storage_read command without any pre-configured scope."
+commands.allow = ["aethoria_storage_read"]
+
+[[permission]]
+identifier = "deny-aethoria-storage-read"
+description = "Denies the aethoria_storage_read command without any pre-configured scope."
+commands.deny = ["aethoria_storage_read"]

@@ -38,6 +38,9 @@ import {
   type RealmMetrics, type RealmGoodPosition, type CitySummary, type EconomicRole,
   type Relationship, type WarSummary, type InfraBottleneck, type IndustrySector
 } from './RealmMetrics';
+
+const EVENT_TYPE_PT: Record<string, string> = { kingdom: 'reino', king: 'rei', succession: 'sucessão', law: 'lei', revolution: 'revolução', society: 'sociedade', rebellion: 'rebelião', diplomacy: 'diplomacia', war: 'guerra', peace: 'paz', conquest: 'conquista' };
+const IMPORTANCE_PT: Record<string, string> = { minor: 'menor', moderate: 'moderada', major: 'maior', notable: 'notável', legendary: 'lendária' };
 import type { RealmScreenHost } from '../screens/RealmScreen';
 
 // ============================ VOCABULARY ============================
@@ -223,7 +226,7 @@ export function buildOverview(m: RealmMetrics, host: RealmScreenHost): Child[] {
           }
         }),
         stat({ label: 'Cidades', value: m.cities.length, icon: 'city' }),
-        stat({ label: 'Território', value: formatCompact(m.territory), unit: 'tiles', icon: 'map' }),
+        stat({ label: 'Território', value: formatCompact(m.territory), unit: 'blocos', icon: 'map' }),
         stat({
           label: 'PIB', value: formatCompact(m.gdp), icon: 'economy',
           tooltip: {
@@ -1548,6 +1551,9 @@ function buildWarCard(war: WarSummary, m: RealmMetrics, host: RealmScreenHost): 
  */
 function citiesChangedHands(war: WarSummary, m: RealmMetrics, host: RealmScreenHost): HTMLElement | null {
   const events = chronicle.getEventsForRef('war', war.war.id).filter(e => e.type === 'conquest');
+
+
+
   if (!events.length) return null;
 
   const seen = new Map<string, string>();
@@ -1630,16 +1636,16 @@ export function buildInfrastructure(m: RealmMetrics, host: RealmScreenHost): Chi
           label: 'Melhor via', value: i.roadLevel > 0 ? ROAD_LEVEL_LABEL[i.roadLevel] ?? `Nível ${i.roadLevel}` : 'Nenhuma',
           icon: 'route',
           status: i.roadLevel > 0 ? 'positive' : 'warning',
-          tooltip: { title: 'Estrada', description: 'Melhor nível de via em qualquer tile do território do reino.' }
+          tooltip: { title: 'Estrada', description: 'Melhor nível de via em qualquer bloco do território do reino.' }
         }),
         stat({
-          label: 'Ferrovia', value: i.railTiles > 0 ? `${i.railTiles}` : '—', unit: i.railTiles > 0 ? 'tiles' : undefined,
+          label: 'Ferrovia', value: i.railTiles > 0 ? `${i.railTiles}` : '—', unit: i.railTiles > 0 ? 'blocos' : undefined,
           icon: 'route',
           status: i.railTiles === 0 ? undefined : i.railDamagedTiles > 0 ? 'critical' : 'positive',
           tooltip: i.railTiles > 0
             ? {
                 title: 'Ferrovia',
-                value: `${i.railTiles} tiles`,
+                value: `${i.railTiles} blocos`,
                 description: 'Trilhos assentados no território do reino.',
                 rows: [{
                   label: 'Trechos rompidos', value: `${i.railDamagedTiles}`,
@@ -1999,7 +2005,7 @@ function buildEventRow(event: ReturnType<typeof chronicle.getEvents>[number]): H
         el('span', { class: 'ae-realm-event-title', text: event.title ?? event.text }),
         event.title ? el('span', { class: 'ae-realm-event-text', text: event.text }) : null
       ]),
-      badge(event.type, { size: 'sm', variant: 'outline' })
+      badge(EVENT_TYPE_PT[event.type] ?? event.type, { size: 'sm', variant: 'outline' })
     ]),
     {
       title: event.title ?? `Ano ${event.year}`,
@@ -2007,8 +2013,8 @@ function buildEventRow(event: ReturnType<typeof chronicle.getEvents>[number]): H
       icon: 'history',
       rows: [
         { label: 'Ano', value: `${event.year}` },
-        { label: 'Importância', value: event.importance },
-        { label: 'Tipo', value: event.type }
+        { label: 'Importância', value: IMPORTANCE_PT[event.importance] ?? event.importance },
+        { label: 'Tipo', value: EVENT_TYPE_PT[event.type] ?? event.type }
       ],
       footnote: event.causes.length ? `Causa: ${event.causes[0]}` : undefined
     }

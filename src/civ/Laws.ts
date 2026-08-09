@@ -141,9 +141,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   subsistence_levies: {
     id: 'subsistence_levies',
     category: 'taxation',
-    name: 'Subsistence Levies',
-    shortName: 'Low levies',
-    description: 'The crown takes little and leaves most production in village hands.',
+    name: 'Tributos de Subsistência',
+    shortName: 'Tributos baixos',
+    description: 'A coroa pega pouco e deixa a maior parte da produção nas mãos da vila.',
     favours: ['peasants', 'frontier'],
     angers: ['bureaucrats', 'military'],
     effects: {
@@ -156,9 +156,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   royal_tithe: {
     id: 'royal_tithe',
     category: 'taxation',
-    name: 'Royal Tithe',
-    shortName: 'Tithe',
-    description: 'A predictable levy funds the court without fully squeezing the countryside.',
+    name: 'Dízimo Real',
+    shortName: 'Dízimo',
+    description: 'Um tributo previsível financia a corte sem espremer totalmente o campo.',
     favours: ['bureaucrats', 'nobles'],
     angers: [],
     effects: {
@@ -170,9 +170,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   war_taxes: {
     id: 'war_taxes',
     category: 'taxation',
-    name: 'War Taxes',
-    shortName: 'War taxes',
-    description: 'Extraordinary taxation keeps armies supplied and civilians angry.',
+    name: 'Impostos de Guerra',
+    shortName: 'Impostos de guerra',
+    description: 'A tributação extraordinária mantém os exércitos abastecidos e os civis irritados.',
     favours: ['military', 'bureaucrats'],
     angers: ['peasants', 'merchants', 'workers'],
     effects: {
@@ -186,9 +186,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   progressive_tax: {
     id: 'progressive_tax',
     category: 'taxation',
-    name: 'Progressive Taxation',
-    shortName: 'Progressive tax',
-    description: 'The wealthy pay more, reducing inequality while angering old privilege.',
+    name: 'Tributação Progressiva',
+    shortName: 'Imposto progressivo',
+    description: 'Os ricos pagam mais, reduzindo a desigualdade enquanto irrita velhos privilégios.',
     favours: ['peasants', 'workers', 'reformists'],
     angers: ['nobles', 'merchants'],
     effects: {
@@ -203,9 +203,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   common_lands: {
     id: 'common_lands',
     category: 'land',
-    name: 'Common Lands',
-    shortName: 'Commons',
-    description: 'Villages retain shared fields, forests and grazing rights.',
+    name: 'Terras Comunais',
+    shortName: 'Comunais',
+    description: 'As vilas retêm campos compartilhados, florestas e direitos de pastagem.',
     favours: ['peasants', 'frontier'],
     angers: ['nobles'],
     effects: {
@@ -218,9 +218,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   noble_estates: {
     id: 'noble_estates',
     category: 'land',
-    name: 'Noble Estates',
-    shortName: 'Estates',
-    description: 'Land is held through noble privilege and inherited obligation.',
+    name: 'Propriedades Nobres',
+    shortName: 'Propriedades',
+    description: 'A terra é mantida através de privilégio nobre e obrigação herdada.',
     favours: ['nobles', 'military'],
     angers: ['peasants', 'reformists'],
     effects: {
@@ -234,9 +234,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   land_redistribution: {
     id: 'land_redistribution',
     category: 'land',
-    name: 'Land Redistribution',
-    shortName: 'Land reform',
-    description: 'Old estates are broken up and redistributed to households and communes.',
+    name: 'Redistribuição de Terras',
+    shortName: 'Reforma agrária',
+    description: 'Antigas propriedades são desmembradas e redistribuídas para famílias e comunas.',
     favours: ['peasants', 'workers', 'reformists'],
     angers: ['nobles'],
     effects: {
@@ -251,9 +251,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   frontier_homesteads: {
     id: 'frontier_homesteads',
     category: 'land',
-    name: 'Frontier Homesteads',
-    shortName: 'Homesteads',
-    description: 'Settlers receive legal title for claiming and defending new land.',
+    name: 'Colonatos de Fronteira',
+    shortName: 'Colonatos',
+    description: 'Colonos recebem título legal por reivindicar e defender novas terras.',
     favours: ['frontier', 'peasants'],
     angers: ['bureaucrats', 'nobles'],
     effects: {
@@ -266,9 +266,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   closed_markets: {
     id: 'closed_markets',
     category: 'trade',
-    name: 'Closed Markets',
-    shortName: 'Closed markets',
-    description: 'Foreign trade is restricted to protect custom and local supply.',
+    name: 'Mercados Fechados',
+    shortName: 'Mercados fechados',
+    description: 'O comércio estrangeiro é restrito para proteger o costume e o abastecimento local.',
     favours: ['peasants', 'bureaucrats'],
     angers: ['merchants', 'reformists'],
     effects: {
@@ -281,9 +281,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   chartered_companies: {
     id: 'chartered_companies',
     category: 'trade',
-    name: 'Chartered Companies',
-    shortName: 'Charters',
-    description: 'Favoured merchant houses receive monopolies in exchange for crown revenue.',
+    name: 'Companhias de Carta',
+    shortName: 'Cartas régias',
+    description: 'Casas mercantis favorecidas recebem monopólios em troca de receita da coroa.',
     favours: ['merchants', 'bureaucrats'],
     angers: ['workers', 'peasants'],
     effects: {
@@ -297,9 +297,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   free_trade: {
     id: 'free_trade',
     category: 'trade',
-    name: 'Free Trade',
-    shortName: 'Free trade',
-    description: 'Borders open to caravans, ports and foreign goods.',
+    name: 'Livre Comércio',
+    shortName: 'Livre comércio',
+    description: 'Fronteiras abertas para caravanas, portos e mercadorias estrangeiras.',
     favours: ['merchants', 'reformists'],
     angers: ['nobles'],
     effects: {
@@ -315,9 +315,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   strategic_tariffs: {
     id: 'strategic_tariffs',
     category: 'trade',
-    name: 'Strategic Tariffs',
-    shortName: 'Tariffs',
-    description: 'The state protects key workshops and taxes cross-border trade.',
+    name: 'Tarifas Estratégicas',
+    shortName: 'Tarifas',
+    description: 'O estado protege oficinas chave e tributa o comércio fronteiriço.',
     favours: ['workers', 'bureaucrats'],
     angers: ['merchants'],
     effects: {
@@ -330,9 +330,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   citizen_militia: {
     id: 'citizen_militia',
     category: 'military',
-    name: 'Citizen Militia',
-    shortName: 'Militia',
-    description: 'Villages defend themselves with irregular local forces.',
+    name: 'Milícia Cidadã',
+    shortName: 'Milícia',
+    description: 'Vilas se defendem com forças locais irregulares.',
     favours: ['peasants', 'frontier'],
     angers: ['military'],
     effects: {
@@ -345,9 +345,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   professional_army: {
     id: 'professional_army',
     category: 'military',
-    name: 'Professional Army',
-    shortName: 'Army',
-    description: 'A trained standing army answers to the state.',
+    name: 'Exército Profissional',
+    shortName: 'Exército',
+    description: 'Um exército permanente e treinado responde ao estado.',
     favours: ['military', 'bureaucrats'],
     angers: ['peasants'],
     effects: {
@@ -360,9 +360,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   mass_conscription: {
     id: 'mass_conscription',
     category: 'military',
-    name: 'Mass Conscription',
-    shortName: 'Conscription',
-    description: 'Every household owes bodies to the army in wartime.',
+    name: 'Conscrição em Massa',
+    shortName: 'Conscrição',
+    description: 'Toda família deve corpos ao exército em tempos de guerra.',
     favours: ['military'],
     angers: ['peasants', 'workers', 'merchants'],
     effects: {
@@ -377,9 +377,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   defensive_doctrine: {
     id: 'defensive_doctrine',
     category: 'military',
-    name: 'Defensive Doctrine',
-    shortName: 'Defense',
-    description: 'The army is built around fortification, deterrence and limited wars.',
+    name: 'Doutrina Defensiva',
+    shortName: 'Defesa',
+    description: 'O exército é construído em torno de fortificações, dissuasão e guerras limitadas.',
     favours: ['peasants', 'merchants', 'frontier'],
     angers: ['military'],
     effects: {
@@ -392,9 +392,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   customary_rights: {
     id: 'customary_rights',
     category: 'rights',
-    name: 'Customary Rights',
-    shortName: 'Custom',
-    description: 'Rights are local, unwritten and rooted in long memory.',
+    name: 'Direitos Costumeiros',
+    shortName: 'Costumes',
+    description: 'Os direitos são locais, não escritos e enraizados na longa memória.',
     favours: ['peasants', 'clergy_scholars'],
     angers: ['reformists', 'bureaucrats'],
     effects: {
@@ -406,9 +406,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   noble_privileges: {
     id: 'noble_privileges',
     category: 'rights',
-    name: 'Noble Privileges',
-    shortName: 'Privileges',
-    description: 'The law openly protects aristocratic status and hereditary exemptions.',
+    name: 'Privilégios Nobres',
+    shortName: 'Privilégios',
+    description: 'A lei protege abertamente o status aristocrático e isenções hereditárias.',
     favours: ['nobles', 'military'],
     angers: ['peasants', 'workers', 'reformists'],
     effects: {
@@ -422,9 +422,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   civic_rights: {
     id: 'civic_rights',
     category: 'rights',
-    name: 'Civic Rights',
-    shortName: 'Civic rights',
-    description: 'Subjects gain predictable legal standing and protected civic voice.',
+    name: 'Direitos Civis',
+    shortName: 'Direitos civis',
+    description: 'Os súditos ganham status legal previsível e voz cívica protegida.',
     favours: ['merchants', 'workers', 'reformists', 'clergy_scholars'],
     angers: ['nobles', 'military'],
     effects: {
@@ -439,9 +439,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   emergency_powers: {
     id: 'emergency_powers',
     category: 'rights',
-    name: 'Emergency Powers',
-    shortName: 'Emergency',
-    description: 'Civil life bends to security, censorship and rapid executive command.',
+    name: 'Poderes de Emergência',
+    shortName: 'Emergência',
+    description: 'A vida civil se curva à segurança, censura e comando executivo rápido.',
     favours: ['military', 'bureaucrats'],
     angers: ['reformists', 'merchants', 'clergy_scholars'],
     effects: {
@@ -456,9 +456,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   village_autonomy: {
     id: 'village_autonomy',
     category: 'administration',
-    name: 'Village Autonomy',
-    shortName: 'Autonomy',
-    description: 'Local elders and towns settle most affairs without the capital.',
+    name: 'Autonomia das Vilas',
+    shortName: 'Autonomia',
+    description: 'Os anciãos locais e as cidades resolvem a maioria dos assuntos sem a capital.',
     favours: ['peasants', 'frontier'],
     angers: ['bureaucrats'],
     effects: {
@@ -472,9 +472,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   royal_bureaucracy: {
     id: 'royal_bureaucracy',
     category: 'administration',
-    name: 'Royal Bureaucracy',
-    shortName: 'Bureaucracy',
-    description: 'Written offices, clerks and governors bind towns to the treasury.',
+    name: 'Burocracia Real',
+    shortName: 'Burocracia',
+    description: 'Escritórios escritos, escriturários e governadores ligam as cidades ao tesouro.',
     favours: ['bureaucrats', 'merchants'],
     angers: ['frontier'],
     effects: {
@@ -487,9 +487,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   imperial_governors: {
     id: 'imperial_governors',
     category: 'administration',
-    name: 'Imperial Governors',
-    shortName: 'Governors',
-    description: 'Appointed governors extract tribute and obedience from far provinces.',
+    name: 'Governadores Imperiais',
+    shortName: 'Governadores',
+    description: 'Governadores nomeados extraem tributo e obediência de províncias distantes.',
     favours: ['bureaucrats', 'military'],
     angers: ['frontier', 'peasants', 'reformists'],
     effects: {
@@ -504,9 +504,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   federal_charters: {
     id: 'federal_charters',
     category: 'administration',
-    name: 'Federal Charters',
-    shortName: 'Federalism',
-    description: 'Provincial rights are written down to keep distant cities inside the realm.',
+    name: 'Cartas Federais',
+    shortName: 'Federalismo',
+    description: 'Os direitos provinciais são redigidos para manter cidades distantes dentro do reino.',
     favours: ['frontier', 'merchants', 'reformists'],
     angers: ['bureaucrats', 'nobles'],
     effects: {
@@ -520,9 +520,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   guild_customs: {
     id: 'guild_customs',
     category: 'labor',
-    name: 'Guild Customs',
-    shortName: 'Guilds',
-    description: 'Craft labour is organised through guild rules and inherited mastery.',
+    name: 'Costumes das Guildas',
+    shortName: 'Guildas',
+    description: 'O trabalho artesanal é organizado através de regras da guilda e maestria herdada.',
     favours: ['workers', 'clergy_scholars'],
     angers: ['merchants'],
     effects: {
@@ -535,9 +535,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   free_labor: {
     id: 'free_labor',
     category: 'labor',
-    name: 'Free Labour Markets',
-    shortName: 'Free labour',
-    description: 'Workers sell labour freely while employers set wages through markets.',
+    name: 'Mercados de Trabalho Livre',
+    shortName: 'Trabalho livre',
+    description: 'Os trabalhadores vendem o trabalho livremente enquanto os empregadores definem os salários através dos mercados.',
     favours: ['merchants'],
     angers: ['workers', 'reformists'],
     effects: {
@@ -552,9 +552,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   labor_protections: {
     id: 'labor_protections',
     category: 'labor',
-    name: 'Labour Protections',
-    shortName: 'Labour rights',
-    description: 'Guilds and workers gain legal protection from exhaustion and hunger wages.',
+    name: 'Proteções Trabalhistas',
+    shortName: 'Direitos trabalhistas',
+    description: 'Guildas e trabalhadores ganham proteção legal contra a exaustão e salários de fome.',
     favours: ['workers', 'reformists', 'peasants'],
     angers: ['merchants'],
     effects: {
@@ -569,9 +569,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   state_labor_duty: {
     id: 'state_labor_duty',
     category: 'labor',
-    name: 'State Labour Duty',
-    shortName: 'Labour duty',
-    description: 'The state assigns labour to strategic works, mines and foundries.',
+    name: 'Trabalho Compulsório',
+    shortName: 'Trabalho estatal',
+    description: 'O estado designa o trabalho para obras estratégicas, minas e fundições.',
     favours: ['bureaucrats', 'military'],
     angers: ['workers', 'peasants'],
     effects: {
@@ -586,9 +586,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   temple_schools: {
     id: 'temple_schools',
     category: 'knowledge',
-    name: 'Temple Schools',
-    shortName: 'Temple schools',
-    description: 'Knowledge is guarded by ritual specialists and old institutions.',
+    name: 'Escolas Templares',
+    shortName: 'Escolas templares',
+    description: 'O conhecimento é guardado por especialistas rituais e antigas instituições.',
     favours: ['clergy_scholars', 'nobles'],
     angers: ['reformists'],
     effects: {
@@ -601,9 +601,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   public_schools: {
     id: 'public_schools',
     category: 'knowledge',
-    name: 'Public Schools',
-    shortName: 'Schools',
-    description: 'Basic education spreads beyond temples, courts and guild families.',
+    name: 'Escolas Públicas',
+    shortName: 'Escolas',
+    description: 'A educação básica se espalha para além dos templos, cortes e famílias de guildas.',
     favours: ['workers', 'peasants', 'reformists', 'clergy_scholars'],
     angers: ['nobles'],
     effects: {
@@ -617,9 +617,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   censorship_office: {
     id: 'censorship_office',
     category: 'knowledge',
-    name: 'Censorship Office',
-    shortName: 'Censors',
-    description: 'The state controls dangerous texts, news and public teaching.',
+    name: 'Escritório de Censura',
+    shortName: 'Censores',
+    description: 'O estado controla textos perigosos, notícias e o ensino público.',
     favours: ['bureaucrats', 'military'],
     angers: ['clergy_scholars', 'reformists', 'merchants'],
     effects: {
@@ -632,9 +632,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   academies_charter: {
     id: 'academies_charter',
     category: 'knowledge',
-    name: 'Academies Charter',
-    shortName: 'Academies',
-    description: 'Learned institutions receive protection, grants and formal autonomy.',
+    name: 'Carta das Academias',
+    shortName: 'Academias',
+    description: 'Instituições de ensino recebem proteção, doações e autonomia formal.',
     favours: ['clergy_scholars', 'merchants', 'reformists'],
     angers: ['military'],
     effects: {
@@ -648,9 +648,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   common_harvest: {
     id: 'common_harvest',
     category: 'ecology',
-    name: 'Common Harvest',
-    shortName: 'Harvest custom',
-    description: 'Forests, animals and soil are used through inherited local norms.',
+    name: 'Colheita Comunal',
+    shortName: 'Colheita costumeira',
+    description: 'Florestas, animais e solo são usados através de normas locais herdadas.',
     favours: ['peasants', 'frontier'],
     angers: [],
     effects: {
@@ -662,9 +662,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   conservation_edicts: {
     id: 'conservation_edicts',
     category: 'ecology',
-    name: 'Conservation Edicts',
-    shortName: 'Conservation',
-    description: 'The state limits extraction to preserve forests, animals and watersheds.',
+    name: 'Éditos de Conservação',
+    shortName: 'Conservação',
+    description: 'O estado limita a extração para preservar florestas, animais e bacias hidrográficas.',
     favours: ['peasants', 'clergy_scholars', 'reformists'],
     angers: ['merchants', 'workers'],
     effects: {
@@ -678,9 +678,9 @@ export const LAWS: Record<LawId, LawDefinition> = {
   extraction_mandate: {
     id: 'extraction_mandate',
     category: 'ecology',
-    name: 'Extraction Mandate',
-    shortName: 'Extraction',
-    description: 'Mines, timber camps and foundries receive legal priority over restraint.',
+    name: 'Mandato de Extração',
+    shortName: 'Extração',
+    description: 'Minas, madeireiras e fundições recebem prioridade legal sobre a restrição.',
     favours: ['merchants', 'workers', 'military'],
     angers: ['peasants', 'clergy_scholars'],
     effects: {

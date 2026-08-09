@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-aethoria-storage-delete"
+description = "Enables the aethoria_storage_delete command without any pre-configured scope."
+commands.allow = ["aethoria_storage_delete"]
+
+[[permission]]
+identifier = "deny-aethoria-storage-delete"
+description = "Denies the aethoria_storage_delete command without any pre-configured scope."
+commands.deny = ["aethoria_storage_delete"]

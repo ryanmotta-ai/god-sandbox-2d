@@ -3,7 +3,7 @@ import './style.css';
 import { TileMap } from './world/TileMap';
 import { SimulationEngine } from './ai/EntityAI';
 import { Camera } from './renderer/Camera';
-import { PixelRenderer } from './renderer/Renderer';
+import { RendererHost } from './renderer/world/RendererHost';
 import { ParticleManager } from './renderer/Particles';
 import { BrushManager } from './powers/BrushManager';
 import { PowerExecutor } from './powers/GodPowers';
@@ -55,8 +55,16 @@ import { SelectionManager } from './ui/hud/Selection';
 import { WorldSnapshotProvider } from './ui/core/WorldSnapshot';
 import { alerts } from './ui/core/Alerts';
 import { objectNav } from './ui/kit';
+import { SimulationScheduler } from './perf/SimulationScheduler';
+import { perfProfiler } from './perf/PerformanceProfiler';
 
 type AppState = 'menu' | 'loading' | 'playing';
+
+/** Stable seed for Canvas/WebGPU screenshot comparison; absent in normal play. */
+const DEV_RENDER_SEED = (() => {
+  const parsed = Number(new URLSearchParams(location.search).get('renderSeed'));
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+})();
 
 /** Probability that the world spawns a disaster on its own, rolled once per simulated year. */
 const DISASTER_CHANCE_PER_YEAR: Record<string, number> = {
@@ -69,7 +77,7 @@ const DISASTER_CHANCE_PER_YEAR: Record<string, number> = {
 const DEFAULT_WORLD_CONFIG: WorldConfig = {
   size: 128,
   preset: 'single_continent',
-  seed: Math.floor(Math.random() * 2147483647),
+  seed: DEV_RENDER_SEED ?? Math.floor(Math.random() * 2147483647),
   species: [SpeciesType.HUMAN],
   startingPopulation: 2,
   spawnWildlife: true,
@@ -79,7 +87,7 @@ const DEFAULT_WORLD_CONFIG: WorldConfig = {
 class AethoriaGame implements GameContext {
   // ---- Engine ----
   private canvas: HTMLCanvasElement;
-  private renderer: PixelRenderer;
+  private renderer: RendererHost;
 
   public camera = new Camera();
   public tileMap!: TileMap;
@@ -105,7 +113,9 @@ class AethoriaGame implements GameContext {
   // ---- Runtime ----
   private state: AppState = 'menu';
   public simSpeed = 0;
-  private simTickAccumulator = 0;
+  private scheduler = new SimulationScheduler({ frameBudgetMs: 5, maxTicksPerFrame: 48, maxDebtTicks: 240 });
+  private selectedEntityIds = new Set<string>();
+  private diplomacyIds: string[] = [];
   public fps = 60;
   public activeFires = 0;
 
@@ -114,6 +124,7 @@ class AethoriaGame implements GameContext {
   private lastFpsTime = performance.now();
   private lastYearSeen = 1;
   private lastAutosaveYear = 0;
+  private autosaveInFlight = false;
   private extinctionAnnounced = false;
   private hadCivilisation = false;
 
@@ -125,7 +136,7 @@ class AethoriaGame implements GameContext {
 
   constructor() {
     this.canvas = document.getElementById('game-canvas') as HTMLCanvasElement;
-    this.renderer = new PixelRenderer(this.canvas);
+    this.renderer = new RendererHost(this.canvas);
 
     this.screens = new ScreenManager(
       document.getElementById('screen-root')!,
@@ -134,7 +145,10 @@ class AethoriaGame implements GameContext {
     this.toasts = new ToastManager(document.getElementById('toast-root')!);
 
     // A quiet demo world runs behind the title screen.
-    this.buildWorld({ ...DEFAULT_WORLD_CONFIG, seed: Math.floor(Math.random() * 2147483647) }, false);
+    this.buildWorld({
+      ...DEFAULT_WORLD_CONFIG,
+      seed: DEV_RENDER_SEED ?? Math.floor(Math.random() * 2147483647)
+    }, false);
 
     this.hud = new HUD(this, document.getElementById('hud-root')!);
     this.registerScreens();
@@ -467,6 +481,18 @@ class AethoriaGame implements GameContext {
     this.setSpeed(this.simSpeed === 0 ? this.speedBeforePause : 0);
   }
 
+  public stepSpeed(delta: number): void {
+    const speeds = [1, 2, 5, 10, 20, 30, 60];
+    const current = this.simSpeed || this.speedBeforePause;
+    let idx = speeds.indexOf(current);
+    if (idx === -1) {
+      idx = speeds.findIndex(s => s >= current);
+      if (idx === -1) idx = speeds.length - 1;
+    }
+    const nextIdx = Math.max(0, Math.min(speeds.length - 1, idx + delta));
+    this.setSpeed(speeds[nextIdx]);
+  }
+
   public focusOn(x: number, y: number, zoom?: number): void {
     this.camera.targetEntityId = null;
     this.camera.centerOn(x, y, zoom);
@@ -687,6 +713,7 @@ class AethoriaGame implements GameContext {
       case '4': this.setSpeed(10); return;
       case '5': this.setSpeed(20); return;
       case '6': this.setSpeed(30); return;
+      case '7': this.setSpeed(60); return;
       case '[': this.hud.toolbar.cycleBrushSize(-1); return;
       case ']': this.hud.toolbar.cycleBrushSize(1); return;
       case 'f': e.preventDefault(); this.hud.toolbar.focusSearch(); return;
@@ -756,6 +783,7 @@ class AethoriaGame implements GameContext {
   // ============================ GAME LOOP ============================
 
   private gameLoop(time: number): void {
+    const frameStarted = performance.now();
     this.frameCount++;
     if (time - this.lastFpsTime >= 1000) {
       this.fps = this.frameCount;
@@ -782,6 +810,18 @@ class AethoriaGame implements GameContext {
 
     this.camera.setWorldBounds(this.tileMap.width, this.tileMap.height);
     this.camera.update(0.016);
+    const regionCounts = this.tileMap.updateRegionStates(
+      this.camera.x / this.camera.tileSize,
+      this.camera.y / this.camera.tileSize
+    );
+    perfProfiler.setCounter('activeRegions', regionCounts.active);
+    perfProfiler.setCounter('warmRegions', regionCounts.warm);
+    perfProfiler.setCounter('sleepingRegions', regionCounts.sleeping);
+    const worldData = document.documentElement.dataset;
+    worldData.worldActiveRegions = String(regionCounts.active);
+    worldData.worldWarmRegions = String(regionCounts.warm);
+    worldData.worldSleepingRegions = String(regionCounts.sleeping);
+    worldData.worldRegionCenter = `${Math.floor(this.camera.x / this.camera.tileSize / this.tileMap.chunkSize)}:${Math.floor(this.camera.y / this.camera.tileSize / this.tileMap.chunkSize)}`;
 
     if (this.state === 'menu') {
       this.updateMenuBackdrop();
@@ -793,7 +833,7 @@ class AethoriaGame implements GameContext {
     this.particles.update(0.016);
 
     if (this.state === 'playing') {
-      this.hud.update(time);
+      perfProfiler.measure('ui', () => this.hud.update(time));
       this.stats.maybeSample(this.sim);
     }
     this.screens.tick();
@@ -804,6 +844,7 @@ class AethoriaGame implements GameContext {
 
     const showBrush = this.state === 'playing' && !this.screens.isOpen() && !this.brush.isInspecting;
 
+    const renderStarted = performance.now();
     this.renderer.render(
       this.camera,
       this.tileMap,
@@ -820,10 +861,16 @@ class AethoriaGame implements GameContext {
       showBrush ? this.hoverWorldPos?.x ?? null : null,
       showBrush ? this.hoverWorldPos?.y ?? null : null,
       this.brush.brushSize,
-      this.sim.naval.activeShips.values(),
-      this.sim.caravans.activeCaravans.values(),
-      this.sim.railways
+      this.sim.naval,
+      this.sim.caravans,
+      this.sim.railways,
+      undefined,
+      undefined,
+      undefined,
+      this.sim.spatialHash
     );
+    perfProfiler.record('render', performance.now() - renderStarted);
+    perfProfiler.record('frame', performance.now() - frameStarted);
 
     requestAnimationFrame(t => this.gameLoop(t));
   }
@@ -840,23 +887,34 @@ class AethoriaGame implements GameContext {
   private updateSimulation(): void {
     if (this.simSpeed <= 0) return;
 
-    this.simTickAccumulator += this.simSpeed;
-    const ticksToRun = Math.floor(this.simTickAccumulator);
-    this.simTickAccumulator -= ticksToRun;
-    const cappedTicks = Math.min(120, ticksToRun);
+    this.selectedEntityIds.clear();
+    const selected = this.selection.current;
+    if (selected?.kind === 'citizen') this.selectedEntityIds.add(selected.id);
+    const relevanceContext = {
+      centerX: this.camera.x / this.camera.tileSize,
+      centerY: this.camera.y / this.camera.tileSize,
+      hotRadius: 32,
+      warmRadius: 72,
+      selectedEntityIds: this.selectedEntityIds,
+      trackedEntityId: this.camera.targetEntityId
+    };
+    if (this.diplomacyIds.length !== this.sim.kingdoms.size) this.diplomacyIds = [...this.sim.kingdoms.keys()];
 
-    for (let i = 0; i < cappedTicks; i++) {
-      this.sim.tickAI(this.tileMap, this.particles);
+    const result = this.scheduler.runFrame(this.simSpeed, absoluteTick => {
+      this.sim.tickAI(this.tileMap, this.particles, relevanceContext);
 
-      if (i % 2 === 0) {
+      if (absoluteTick % 2 === 0) {
         this.activeFires = this.tileMap.updateFireTick();
         this.tileMap.updateFluidTick();
       }
 
-      if (i % 10 === 0 && this.sim.kingdoms.size > 1) {
-        this.sim.diplomacy.tickDiplomacy([...this.sim.kingdoms.keys()], this.sim.currentYear);
+      if (this.sim.kingdoms.size > 1) {
+        this.sim.diplomacy.tickDiplomacySlice(this.diplomacyIds, this.sim.currentYear, absoluteTick % 10, 10);
       }
-    }
+    });
+    perfProfiler.record('simulation', result.elapsedMs);
+    perfProfiler.setCounter('schedulerTicks', result.ticksRun);
+    perfProfiler.setCounter('schedulerDebt', result.remainingDebt);
 
     if (this.sim.currentYear !== this.lastYearSeen) {
       this.lastYearSeen = this.sim.currentYear;
@@ -905,15 +963,33 @@ class AethoriaGame implements GameContext {
   }
 
   private maybeAutosave(): void {
-    if (!settings.get('autosaveEnabled')) return;
+    if (!settings.get('autosaveEnabled') || this.autosaveInFlight) return;
     const interval = settings.get('autosaveIntervalYears');
     if (this.sim.currentYear - this.lastAutosaveYear < interval) return;
 
-    this.lastAutosaveYear = this.sim.currentYear;
-    const ok = SaveSystem.writeSlot(AUTOSAVE_SLOT, this.buildSaveData(), {
-      name: `Autosave · Year ${this.sim.currentYear}`
-    });
-    this.toast(ok ? `Autosaved at year ${this.sim.currentYear}` : 'Autosave failed — storage is full', ok ? 'info' : 'warning');
+    const saveYear = this.sim.currentYear;
+    this.lastAutosaveYear = saveYear;
+    this.autosaveInFlight = true;
+    void SaveSystem.writeSlot(AUTOSAVE_SLOT, this.buildSaveData(), {
+      name: `Autosave · Ano ${saveYear}`,
+      seed: this.worldConfig.seed
+    })
+      .then(() => this.toast(`Salvo automaticamente no ano ${saveYear}`, 'info'))
+      .catch(error => {
+        console.error('Autosave failed:', error);
+        const code = typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code: unknown }).code)
+          : 'unknown';
+        const message = code === 'disk_full'
+          ? 'Falha no autosave — disco cheio'
+          : code === 'permission_denied'
+            ? 'Falha no autosave — permissão negada'
+            : 'Falha no autosave — armazenamento indisponível';
+        this.toast(message, 'warning');
+      })
+      .finally(() => {
+        this.autosaveInFlight = false;
+      });
   }
 
   private countCivilised(): number {

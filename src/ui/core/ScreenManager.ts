@@ -45,6 +45,14 @@ export interface NavParams {
   good?: string;
   /** Realm to select or highlight (Kingdoms, Diplomacy, Politics, Tech). */
   focusKingdom?: string;
+  /** Technology to inspect (Technology Command Center). */
+  techId?: string;
+  /** Bilateral conflict to open in the Warfare Command Center. */
+  warId?: string;
+  /** Derived field force to frame (Warfare). */
+  forceId?: string;
+  /** Derived active contact cluster to frame (Warfare). */
+  engagementId?: string;
   /** The other side of a pair, for the treaty view (Diplomacy). */
   withKingdom?: string;
   /** Trade route to highlight (Infrastructure). */

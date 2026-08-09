@@ -177,9 +177,9 @@ export class WarfareSystem {
       chronicle.log(
         world.year,
         'siege',
-        `${besieger.name} laid siege to ${city.name}.`,
+        `${besieger.name} iniciou o cerco de ${city.name}.`,
         {
-          title: `Siege of ${city.name}`,
+          title: `Cerco de ${city.name}`,
           importance: city.id === owner.capitalCityId ? 'legendary' : 'major',
           scope: 'international',
           refs: [
@@ -189,10 +189,10 @@ export class WarfareSystem {
             ...(war ? [{ kind: 'war' as const, id: war.id, name: war.reason }] : [])
           ],
           tags: ['siege', 'war', city.id === owner.capitalCityId ? 'capital' : 'city'],
-          causes: [`${besieger.name} concentrated enough nearby military strength to invest the settlement.`],
-          consequences: [`${city.name} was cut off and began accumulating siege pressure.`],
+          causes: [`${besieger.name} concentrou força militar suficiente nas proximidades para cercar o assentamento.`],
+          consequences: [`${city.name} foi isolada e começou a acumular pressão de cerco.`],
           threadId: war ? `war:${war.id}` : `siege:${city.id}:${world.year}`,
-          threadTitle: war?.reason ?? `Siege of ${city.name}`,
+          threadTitle: war?.reason ?? `Cerco de ${city.name}`,
           data: { attackStrength: Number(attackStrength.toFixed(2)), defenceStrength: Number(defenceStrength.toFixed(2)) }
         }
       );
@@ -207,7 +207,7 @@ export class WarfareSystem {
     damageRoadsAround(world.tileMap, city.x, city.y, 5);
     damagePrimaryRoads(world.tileMap, city.x, city.y, 5);
     damageRailAround(world.tileMap, city.x, city.y, 5);
-    damageStrategicBuildings(city);
+    damageStrategicBuildings(city, world.tileMap, world.year);
 
     // A city cut off from its fields starves regardless of how strong its walls are.
     const starving = city.siegeYears >= STARVATION_YEARS;
@@ -267,7 +267,7 @@ export class WarfareSystem {
       'siege',
       `The siege of ${city.name} was broken${besieger ? ` and ${besieger.name} withdrew` : ''}.`,
       {
-        title: `Relief of ${city.name}`,
+        title: `Alívio de ${city.name}`,
         importance: 'major',
         scope: 'international',
         refs: [
@@ -277,7 +277,7 @@ export class WarfareSystem {
           ...(war ? [{ kind: 'war' as const, id: war.id, name: war.reason }] : [])
         ],
         tags: ['siege', 'relief', 'war'],
-        consequences: [`${city.name} escaped immediate capture and siege progress was cleared.`],
+        consequences: [`${city.name} escapou da captura imediata e o progresso do cerco foi zerado.`],
         threadId: war ? `war:${war.id}` : undefined,
         threadTitle: war?.reason
       }
@@ -333,7 +333,9 @@ export class WarfareSystem {
 
     // Buildings are damaged in the assault.
     for (const building of city.buildings.values()) {
-      building.hp = Math.max(1, Math.round(building.hp * rng.range(0.4, 0.8)));
+      const nextHp = Math.max(1, Math.round(building.hp * rng.range(0.4, 0.8)));
+      building.applyDamage(building.hp - nextHp, world.year, 'war');
+      world.tileMap.markRenderDirty(building.x, building.y);
     }
 
     // The storming breaks the roads of the whole region, cutting the conqueror's
@@ -356,7 +358,7 @@ export class WarfareSystem {
     for (const key of city.territory) {
       const [tx, ty] = key.split(',').map(Number);
       const tile = world.tileMap.getTile(tx, ty);
-      if (tile && tile.cityId === city.id) tile.kingdomId = to.id;
+      if (tile && tile.cityId === city.id) { tile.kingdomId = to.id; world.tileMap.markRenderDirty(tile.x, tile.y); }
     }
 
     // Surviving inhabitants become subjects of the conqueror.
@@ -379,16 +381,16 @@ export class WarfareSystem {
           chronicle.log(
             world.year,
             'kingdom',
-            `Ruler ${ruler.name} fell in combat defending the capital of ${from.name}!`,
+            `O governante ${ruler.name} caiu em combate defendendo a capital de ${from.name}!`,
             {
-              title: `Death of Ruler ${ruler.name}`,
+              title: `Morte do Governante ${ruler.name}`,
               importance: 'legendary',
               scope: 'world',
               refs: [
                 { kind: 'kingdom', id: from.id, name: from.name },
                 { kind: 'city', id: city.id, name: city.name }
               ],
-              tags: ['ruler death', 'capital fall', 'legendary']
+              tags: ['morte do governante', 'queda da capital', 'legendary']
             }
           );
         } else {
@@ -397,9 +399,9 @@ export class WarfareSystem {
           chronicle.log(
             world.year,
             'kingdom',
-            `Ruler ${ruler.name} was captured when ${city.name} fell to ${to.name}.`,
+            `O governante ${ruler.name} foi capturado quando ${city.name} caiu para ${to.name}.`,
             {
-              title: `Ruler ${ruler.name} Captured`,
+              title: `Governante ${ruler.name} Capturado`,
               importance: 'legendary',
               scope: 'world',
               refs: [
@@ -407,7 +409,7 @@ export class WarfareSystem {
                 { kind: 'kingdom', id: to.id, name: to.name },
                 { kind: 'city', id: city.id, name: city.name }
               ],
-              tags: ['ruler captured', 'capital fall', 'legendary']
+              tags: ['governante capturado', 'queda da capital', 'legendary']
             }
           );
         }
@@ -427,9 +429,9 @@ export class WarfareSystem {
         chronicle.log(
           world.year,
           'conquest',
-          `${to.name} stormed the capital of ${from.name}! The court flees to ${remaining.name}.`,
+          `${to.name} tomou a capital de ${from.name}! A corte foge para ${remaining.name}.`,
           {
-            title: `Fall of ${city.name}`,
+            title: `Queda de ${city.name}`,
             importance: 'legendary',
             scope: 'international',
             refs: [
@@ -441,9 +443,9 @@ export class WarfareSystem {
             ],
             tags: ['capital', 'conquest', 'siege', 'war'],
             causes: [`${city.name} fell after ${heldFor} ${heldFor === 1 ? 'year' : 'years'} under siege.`],
-            consequences: [`${from.name} moved its court to ${remaining.name}.`, `${city.name} passed to ${to.name}.`],
+            consequences: [`${from.name} moveu sua corte para ${remaining.name}.`, `${city.name} passou para ${to.name}.`],
             threadId: war ? `war:${war.id}` : `conquest:${city.id}:${world.year}`,
-            threadTitle: war?.reason ?? `Fall of ${city.name}`,
+            threadTitle: war?.reason ?? `Queda de ${city.name}`,
             data: { siegeYears: heldFor, civilianCasualties: casualties }
           }
         );
@@ -451,9 +453,9 @@ export class WarfareSystem {
         chronicle.log(
           world.year,
           'conquest',
-          `${to.name} took the last city of ${from.name}. The realm is extinguished.`,
+          `${to.name} tomou a última cidade de ${from.name}. O reino foi extinto.`,
           {
-            title: `Extinction of ${from.name}`,
+            title: `Extinção de ${from.name}`,
             importance: 'legendary',
             scope: 'world',
             refs: [
@@ -462,11 +464,11 @@ export class WarfareSystem {
               { kind: 'kingdom', id: to.id, name: to.name },
               ...(war ? [{ kind: 'war' as const, id: war.id, name: war.reason }] : [])
             ],
-            tags: ['last city', 'realm extinction', 'conquest'],
-            causes: [`${city.name}, the final settlement of ${from.name}, was captured.`],
-            consequences: [`${from.name} no longer possessed a surviving settlement.`],
+            tags: ['última cidade', 'extinção de reino', 'conquest'],
+            causes: [`${city.name}, o último assentamento de ${from.name}, foi capturado.`],
+            consequences: [`${from.name} não possui mais nenhum assentamento sobrevivente.`],
             threadId: war ? `war:${war.id}` : `conquest:${city.id}:${world.year}`,
-            threadTitle: war?.reason ?? `Fall of ${from.name}`,
+            threadTitle: war?.reason ?? `Queda de ${from.name}`,
             data: { siegeYears: heldFor, civilianCasualties: casualties }
           }
         );
@@ -475,9 +477,9 @@ export class WarfareSystem {
       chronicle.log(
         world.year,
         'conquest',
-        `${to.name} captured ${city.name} from ${from.name} after a siege of ${heldFor} ${heldFor === 1 ? 'year' : 'years'}.`,
+        `${to.name} capturou ${city.name} de ${from.name} após um cerco de ${heldFor} ${heldFor === 1 ? 'ano' : 'anos'}.`,
         {
-          title: `Capture of ${city.name}`,
+          title: `Captura de ${city.name}`,
           importance: 'major',
           scope: 'international',
           refs: [
@@ -488,9 +490,9 @@ export class WarfareSystem {
           ],
           tags: ['conquest', 'siege', 'war'],
           causes: [`${city.name} fell after ${heldFor} ${heldFor === 1 ? 'year' : 'years'} under siege.`],
-          consequences: [`The settlement changed allegiance from ${from.name} to ${to.name}.`],
+          consequences: [`O assentamento mudou de lealdade de ${from.name} para ${to.name}.`],
           threadId: war ? `war:${war.id}` : `conquest:${city.id}:${world.year}`,
-          threadTitle: war?.reason ?? `Capture of ${city.name}`,
+          threadTitle: war?.reason ?? `Captura de ${city.name}`,
           data: { siegeYears: heldFor, civilianCasualties: casualties }
         }
       );
@@ -573,16 +575,16 @@ export class WarfareSystem {
     chronicle.log(
       world.year,
       'kingdom',
-      `As part of the peace treaty, ${loser.name} agreed to pay annual war reparations to ${dominant.name} for 10 years.`,
+      `Como parte do tratado de paz, ${loser.name} concordou em pagar reparações de guerra anuais para ${dominant.name} por 10 anos.`,
       {
-        title: `War Reparations Imposed`,
+        title: `Reparações de Guerra Impostas`,
         importance: 'major',
         scope: 'international',
         refs: [
           { kind: 'kingdom', id: loser.id, name: loser.name },
           { kind: 'kingdom', id: dominant.id, name: dominant.name }
         ],
-        tags: ['peace treaty', 'reparations', 'treasury']
+        tags: ['tratado de paz', 'reparations', 'treasury']
       }
     );
 
@@ -621,7 +623,7 @@ export class WarfareSystem {
     for (const key of city.territory) {
       const [tx, ty] = key.split(',').map(Number);
       const tile = world.tileMap.getTile(tx, ty);
-      if (tile && tile.cityId === city.id) tile.kingdomId = to.id;
+      if (tile && tile.cityId === city.id) { tile.kingdomId = to.id; world.tileMap.markRenderDirty(tile.x, tile.y); }
     }
 
     for (const resident of world.entities) {
@@ -634,9 +636,9 @@ export class WarfareSystem {
     chronicle.log(
       world.year,
       'conquest',
-      `In the peace treaty, ${from.name} ceded ${city.name} to ${to.name}.`,
+      `No tratado de paz, ${from.name} cedeu ${city.name} para ${to.name}.`,
       {
-        title: `Cession of ${city.name}`,
+        title: `Cessão de ${city.name}`,
         importance: 'major',
         scope: 'international',
         refs: [
@@ -645,9 +647,9 @@ export class WarfareSystem {
           { kind: 'kingdom', id: to.id, name: to.name },
           ...(recentWar ? [{ kind: 'war' as const, id: recentWar.id, name: recentWar.reason }] : [])
         ],
-        tags: ['peace treaty', 'cession', 'territory'],
-        causes: ['A peace settlement required territorial concessions.'],
-        consequences: [`${city.name} changed sovereignty without being taken by storm.`],
+        tags: ['tratado de paz', 'cession', 'territory'],
+        causes: ['Um acordo de paz exigiu concessões territoriais.'],
+        consequences: [`${city.name} mudou de soberania sem ser tomada à força.`],
         threadId: recentWar ? `war:${recentWar.id}` : undefined,
         threadTitle: recentWar?.reason
       }

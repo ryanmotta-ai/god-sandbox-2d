@@ -27,8 +27,14 @@ export interface TradeRoute {
   establishedYear: number;
   /** Total world-unit value moved over the route's lifetime. */
   totalValue: number;
+  /** Physical units delivered in the current economic year; reset by the trade pass. */
+  deliveredThisYear: number;
   /** Suspended while the two realms are at war or embargoed. */
   active: boolean;
+  /** Internal metropole-colony route. It uses the ordinary trade stock and logistics. */
+  colonialRoute?: boolean;
+  /** Direction of the colonial flow, used only for accounting and Chronicle context. */
+  colonialDirection?: 'colony_to_metropole' | 'metropole_to_colony';
   /** Surveyed path the route physically uses, so capacity can be re-evaluated
    *  against the live condition of the road or sea it crosses. */
   path?: { x: number; y: number }[];
@@ -170,6 +176,8 @@ export class TradeNetwork {
     volume: number;
     year: number;
     path?: { x: number; y: number }[];
+    colonialRoute?: boolean;
+    colonialDirection?: 'colony_to_metropole' | 'metropole_to_colony';
   }): TradeRoute {
     const route: TradeRoute = {
       id: `route_${params.fromCityId}_${params.toCityId}_${params.good}`,
@@ -183,7 +191,10 @@ export class TradeNetwork {
       maxVolume: params.volume,
       establishedYear: params.year,
       totalValue: 0,
+      deliveredThisYear: 0,
       active: true,
+      colonialRoute: params.colonialRoute ?? false,
+      colonialDirection: params.colonialDirection,
       path: params.path
     };
     this.routes.set(route.id, route);
@@ -248,7 +259,10 @@ export class TradeNetwork {
         maxVolume: r.maxVolume,
         establishedYear: r.establishedYear,
         totalValue: r.totalValue,
+        deliveredThisYear: r.deliveredThisYear,
         active: r.active,
+        colonialRoute: r.colonialRoute ?? false,
+        colonialDirection: r.colonialDirection,
         path: r.path
       })),
       agreements: [...this.agreements.values()],
@@ -264,6 +278,8 @@ export class TradeNetwork {
       // Older saves predate maxVolume; fall back to volume so a loaded route can
       // still recover toward its current level rather than being capped at 0.
       if (route.maxVolume == null) route.maxVolume = route.volume;
+      route.deliveredThisYear = route.deliveredThisYear ?? 0;
+      route.colonialRoute = route.colonialRoute ?? false;
       route.path = route.path ?? undefined;
       this.routes.set(route.id, route);
     }

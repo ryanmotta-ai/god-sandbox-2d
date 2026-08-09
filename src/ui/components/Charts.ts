@@ -70,7 +70,7 @@ export function lineChart(
     const marks = [0, Math.floor(labels.length / 2), labels.length - 1];
     for (const idx of new Set(marks)) {
       const x = padL + (count <= 1 ? plotW / 2 : (plotW / (count - 1)) * idx);
-      ctx.fillText(`Yr ${labels[idx]}`, x, height - 8);
+      ctx.fillText(`Ano ${labels[idx]}`, x, height - 8);
     }
   }
   ctx.textAlign = 'start';

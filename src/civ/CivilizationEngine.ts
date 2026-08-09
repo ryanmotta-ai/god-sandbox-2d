@@ -1,5 +1,5 @@
 import { City, SETTLEMENT_TIERS } from './City';
-import { Kingdom, getNextKingdomColor } from './Kingdom';
+import { Kingdom, getNextKingdomColor, type ColonialAccess } from './Kingdom';
 import { Building, BuildingType, BUILDINGS, BASE_BUILDINGS } from './Building';
 import {
   GoodId, GOODS, ALL_GOODS, RAW_GOODS, CRAFTED_GOODS, STRATEGIC_GOODS,
@@ -29,6 +29,11 @@ import {
 } from './Infrastructure';
 import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadEngineering';
 import { UrbanPlanner } from './UrbanPlanner';
+import { perfProfiler } from '../perf/PerformanceProfiler';
+import { buildingArchitecturalStamp, refreshArchitecturalProfile } from './ArchitecturalProfile';
+import { FortificationPlanner } from './FortificationPlanner';
+import { UrbanDistrictPlanner, urbanContextAt } from './UrbanDistricts';
+import { UrbanLifecycleManager, type UrbanLifecycleResult } from './UrbanLifecycle';
 
 /**
  * The yearly heartbeat of civilization.
@@ -102,9 +107,17 @@ export class CivilizationEngine {
   private announcedCurrencies: Set<string> = new Set();
   /** Maritime routes currently blocked by ruined ports, so a collapse is chronicled once. */
   private collapsedRoutes: Set<string> = new Set();
+  /** Colonial routes whose interruption has already been recorded in the Chronicle. */
+  private disruptedColonialRoutes: Set<string> = new Set();
+  /** Rebuilt once per simulated year; replaces city×world and realm×world scans. */
+  private entitiesByCity: Map<string, Entity[]> = new Map();
+  private workersByKingdom: Map<string, number> = new Map();
 
   public reset(): void {
     this.announcedCurrencies.clear();
+    this.disruptedColonialRoutes.clear();
+    this.entitiesByCity.clear();
+    this.workersByKingdom.clear();
   }
 
   // ============================================================
@@ -115,6 +128,14 @@ export class CivilizationEngine {
     // Population is derived from the entities that actually exist, so births,
     // deaths and migration can never drift out of sync with the map.
     this.recountPopulations(world);
+    // Fire/disaster ticks name the exact affected buildings. Fold that compact
+    // event buffer once here instead of scanning every urban lot in the world.
+    UrbanLifecycleManager.applyDamageEvents(
+      world.cities,
+      world.tileMap,
+      world.tileMap.drainBuildingDamageEvents(),
+      world.year
+    );
 
     // Settlements first: they generate everything the higher layers spend.
     for (const city of world.cities.values()) {
@@ -137,9 +158,12 @@ export class CivilizationEngine {
     this.tickStrategicDiplomacy(world);
     // Rail freight runs before trade settles so imports land in the current ledger year
     world.sim?.railways.tickRailways(world);
-    this.tickTrade(world);
+    perfProfiler.measure('trade', () => this.tickTrade(world));
     this.tickVassalage(world);
     this.tickColonisation(world);
+    this.tickColonialFoundations(world);
+    this.tickColonialMigration(world);
+    this.tickColonialPolitics(world);
     this.tickRebellions(world);
     this.tickTradeBanditry(world);
     GreatPersonManager.checkAscension(world.entities, world.kingdoms, world.cities, world.tileMap, world.year);
@@ -167,6 +191,7 @@ export class CivilizationEngine {
 
   private tickSettlement(city: City, world: CivWorld): void {
     const kingdom = city.kingdomId ? world.kingdoms.get(city.kingdomId) ?? null : null;
+    this.refreshCityArchitecture(city, kingdom, world);
     const techMods = kingdom?.research.modifiers() ?? { production: 1, research: 1, growth: 1, trade: 1, military: 1, territory: 0 };
     const gov = kingdom ? GOVERNMENTS[kingdom.government] : null;
     const lawEffects = kingdom ? aggregateLawEffects(kingdom.laws) : null;
@@ -192,14 +217,53 @@ export class CivilizationEngine {
     const productionMult = techMods.production * (gov?.production ?? 1) * productionCulture * productionSociety * (1 + (lawEffects?.production ?? 0));
     const researchMult = techMods.research * (gov?.research ?? 1) * researchCulture * (1 + (lawEffects?.research ?? 0));
 
+    // The phase timeline is tiny and durable; detailed lots/blocks remain the
+    // incremental runtime cache owned by UrbanPlanner.
+    const urbanRadius = this.citySurveyRadius(city);
+    city.recordUrbanPhase(world.year, urbanRadius);
+    UrbanDistrictPlanner.tickCity(city, kingdom, world.tileMap, world.year, urbanRadius);
+    // Old saves acquire CITY-V5 context gradually. Existing architecture does
+    // not all switch class in one year, and ordinary renovation remains the
+    // long-term mechanism that refreshes a building's socioeconomic stamp.
+    let districtBackfill = 0;
+    for (const building of city.buildings.values()) {
+      if (building.urbanContext || building.fortificationRole) continue;
+      building.urbanContext = urbanContextAt(city, building.x, building.y, world.year);
+      world.tileMap.markRenderDirty(building.x, building.y);
+      if (++districtBackfill >= 5) break;
+    }
+    const lifecycle = UrbanLifecycleManager.tickCity(city, kingdom, world.tileMap, world.year);
+    if (lifecycle.vacatedBuildingIds.length > 0) this.releaseInactiveBuildingAssignments(city, lifecycle);
     this.produceGoods(city, world, productionMult);
     this.consumeGoods(city, world);
     this.runConstruction(city, world, kingdom);
     this.repairCityInfrastructure(city, world);
     this.expandTerritory(city, world, techMods.territory + (gov?.expansion ?? 8) + expansionCulture + (lawEffects?.expansion ?? 0));
 
+    const fortification = FortificationPlanner.tickCity(city, kingdom, world);
+    if (fortification.built) {
+      chronicle.log(
+        world.year,
+        'founding',
+        `${city.name} concluiu uma nova linha de muralhas com ${fortification.built.gateIds.length} portões e ${fortification.built.towerIds.length} torres.`,
+        {
+          title: `As muralhas de ${city.name}`,
+          importance: fortification.built.generation > 0 ? 'major' : 'notable',
+          scope: 'city',
+          refs: [{ kind: 'city', id: city.id, name: city.name }],
+          tags: ['city', 'fortification', 'walls'],
+          causes: ['A importância, os recursos e a pressão estratégica do assentamento justificaram uma linha defensiva permanente.'],
+          consequences: [fortification.built.generation > 0
+            ? 'A muralha anterior permaneceu como vestígio histórico dentro da expansão urbana.'
+            : 'Estradas principais passaram a cruzar a defesa por portões controlados.'],
+          data: { generation: fortification.built.generation, perimeter: fortification.built.perimeter }
+        }
+      );
+    }
+
     city.researchOutput = this.computeResearch(city) * researchMult;
     city.updateTier();
+    city.recordUrbanPhase(world.year, this.citySurveyRadius(city));
   }
 
   /** Buildings turn real labour, deposits and recipe inputs into goods. */
@@ -209,8 +273,7 @@ export class CivilizationEngine {
     // A city's economic workforce is made from real adult humanoid entities. Combat
     // specialists and rulers remain available to their own systems rather than being
     // silently counted as factory hands.
-    const labourPool = world.entities.filter(e =>
-      e.cityId === city.id &&
+    const labourPool = (this.entitiesByCity.get(city.id) ?? []).filter(e =>
       e.hp > 0 &&
       SPECIES_DEFINITIONS[e.species].isHumanoid &&
       !e.isChild &&
@@ -228,7 +291,9 @@ export class CivilizationEngine {
       return 48;
     };
 
-    const staffed = [...city.buildings.values()].sort((a, b) => priority(b) - priority(a));
+    const allBuildings = [...city.buildings.values()];
+    for (const building of allBuildings) if (!building.isOperational()) building.staffing = 0;
+    const staffed = allBuildings.filter(building => building.isOperational()).sort((a, b) => priority(b) - priority(a));
     let labourRemaining = labourPool.length;
     let workerCursor = 0;
 
@@ -600,10 +665,22 @@ export class CivilizationEngine {
   /** Population is whatever actually lives there — no separate abstract counter. */
   private recountPopulations(world: CivWorld): void {
     const counts = new Map<string, number>();
+    this.entitiesByCity.clear();
+    this.workersByKingdom.clear();
     for (const entity of world.entities) {
-      if (!entity.cityId) continue;
-      if (!SPECIES_DEFINITIONS[entity.species].isHumanoid) continue;
-      counts.set(entity.cityId, (counts.get(entity.cityId) ?? 0) + 1);
+      const humanoid = SPECIES_DEFINITIONS[entity.species].isHumanoid;
+      if (entity.cityId) {
+        let residents = this.entitiesByCity.get(entity.cityId);
+        if (!residents) {
+          residents = [];
+          this.entitiesByCity.set(entity.cityId, residents);
+        }
+        residents.push(entity);
+        if (humanoid) counts.set(entity.cityId, (counts.get(entity.cityId) ?? 0) + 1);
+      }
+      if (entity.kingdomId && entity.hp > 0 && humanoid && !entity.isChild) {
+        this.workersByKingdom.set(entity.kingdomId, (this.workersByKingdom.get(entity.kingdomId) ?? 0) + 1);
+      }
     }
 
     for (const [id, city] of [...world.cities]) {
@@ -633,6 +710,7 @@ export class CivilizationEngine {
       if (tile && tile.cityId === city.id) {
         tile.cityId = null;
         tile.kingdomId = null;
+        world.tileMap.markRenderDirty(tile.x, tile.y);
         tile.buildingId = null;
       }
     }
@@ -679,7 +757,7 @@ export class CivilizationEngine {
     for (const key of city.territory) {
       const [x, y] = key.split(',').map(Number);
       const tile = world.tileMap.getTile(x, y);
-      if (tile && tile.cityId === city.id) tile.kingdomId = occupier.id;
+      if (tile && tile.cityId === city.id) { tile.kingdomId = occupier.id; world.tileMap.markRenderDirty(tile.x, tile.y); }
     }
 
     // The nearest besiegers stay behind as the new inhabitants.
@@ -696,6 +774,7 @@ export class CivilizationEngine {
       soldier.targetY = null;
     }
     city.population = garrison.length;
+    this.refreshCityArchitecture(city, occupier, world);
 
     chronicle.log(
       world.year,
@@ -730,10 +809,13 @@ export class CivilizationEngine {
   private runConstruction(city: City, world: CivWorld, kingdom: Kingdom | null): void {
     const projects = Math.max(1, Math.min(4, Math.floor(city.population / 15) + 1));
     for (let i = 0; i < projects; i++) {
-      if (!city.hasFreeBuildingSlot()) break;
+      if (!city.hasFreeBuildingSlot()) {
+        if (i === 0) this.tryUpgradeBuilding(city, world.tileMap, world.year);
+        break;
+      }
       const built = this.constructBuilding(city, world, kingdom);
       if (!built) {
-        this.tryUpgradeBuilding(city);
+        this.tryUpgradeBuilding(city, world.tileMap, world.year);
         break;
       }
     }
@@ -753,6 +835,9 @@ export class CivilizationEngine {
     }> = [];
 
     for (const type of unlocked) {
+      // CITY-V4 commissions a coherent defensive circuit. Individual wall
+      // pieces must no longer be selected as random ordinary construction.
+      if (type === 'wall') continue;
       const def = BUILDINGS[type];
       if (!def) continue;
       if (def.unique && city.hasBuilding(type)) continue;
@@ -790,15 +875,21 @@ export class CivilizationEngine {
     }
 
     const building = city.addBuilding(pick.type, pick.spot.x, pick.spot.y);
+    building.recordUrbanOrigin(world.year, city.urbanPhase, city.currentUrbanGeneration);
+    building.beginConstruction(world.year);
+    if (city.architecturalProfile) building.recordArchitecture(buildingArchitecturalStamp(city.architecturalProfile, world.year));
     const tile = world.tileMap.getTile(pick.spot.x, pick.spot.y)!;
     tile.buildingId = building.id;
     tile.cityId = city.id;
     if (city.kingdomId) tile.kingdomId = city.kingdomId;
     city.territory.add(`${pick.spot.x},${pick.spot.y}`);
+    world.tileMap.markRenderDirty(tile.x, tile.y);
+    UrbanPlanner.recordConstruction(city, world.tileMap, building.id);
 
     // Auto-pave street connecting new building to city hall (dirt unless the
     // kingdom has road-building tech, matching paveTradeRoad below)
     this.paveRoadBetween(city, pick.spot.x, pick.spot.y, world);
+    UrbanDistrictPlanner.recordConstruction(city, kingdom, world.tileMap, building, world.year);
 
     if (def.resourceTargets?.length && pick.spot.resourceGood && def.resourceTargets.includes(pick.spot.resourceGood)) {
       building.extractedGood = pick.spot.resourceGood;
@@ -806,7 +897,7 @@ export class CivilizationEngine {
 
     if (['mine', 'quarry', 'oil_well', 'harbor', 'port', 'academy', 'bank', 'factory', 'refinery', 'palace', 'stock_exchange', 'collective'].includes(pick.type)) {
       const resourceLabel = building.extractedGood ? ` over a ${GOODS[building.extractedGood].name} deposit` : '';
-      chronicle.log(world.year, 'founding', `${city.name} completed its ${def.name}${resourceLabel}.`);
+      chronicle.log(world.year, 'founding', `${city.name} iniciou a construção de ${def.name}${resourceLabel}.`);
     }
     return true;
   }
@@ -901,10 +992,10 @@ export class CivilizationEngine {
           ...(kingdom ? [{ kind: 'kingdom' as const, id: kingdom.id, name: kingdom.name }] : [])
         ],
         tags: ['wonder', 'bridge', 'infrastructure'],
-        causes: [`${city.name} could not reach the far bank without spanning ${span} tiles of water.`],
+        causes: [`${city.name} não conseguia alcançar a margem oposta sem abranger ${span} blocos de água.`],
         consequences: [
-          'The crossing carries every cart that used to go the long way round.',
-          `${city.name} is visibly richer for it, and ${kingdom?.name ?? 'the realm'} visibly more capable.`
+          'A travessia carrega toda carroça que antes dava uma longa volta.',
+          `${city.name} está visivelmente mais rica por isso, e ${kingdom?.name ?? 'o reino'} visivelmente mais capaz.`
         ],
         data: { span, stone, wood, x: mid.x, y: mid.y }
       }
@@ -922,15 +1013,24 @@ export class CivilizationEngine {
    * paving degrades to a dirt track, or halts entirely at an unaffordable span.
    */
   private paveRoadBetween(fromCity: City, toX: number, toY: number, world: CivWorld): void {
+    const plan = UrbanPlanner.planStreetConnection(fromCity, world.tileMap, toX, toY, this.citySurveyRadius(fromCity));
+    if (!plan || plan.alreadyConnected) return;
     const level = this.roadGradeFor(fromCity, world);
-    const survey = surveyRoad(world.tileMap, fromCity.x, fromCity.y, toX, toY, level, 1200);
+    const survey = surveyRoad(world.tileMap, plan.fromX, plan.fromY, plan.toX, plan.toY, level, 1200);
     if (survey.path.length === 0) return;
     const works = layRoad(fromCity, world.tileMap, survey, level);
     for (const step of survey.path) {
       const tile = world.tileMap.getTile(Math.floor(step.x), Math.floor(step.y));
-      if (tile && tile.roadLevel > 0) tile.roadTraffic = Math.max(tile.roadTraffic, 35);
+      if (tile && tile.roadLevel > 0) {
+        const traffic = Math.max(tile.roadTraffic, plan.streetClass === 'primary' ? 90 : 35);
+        const changed = tile.roadTraffic !== traffic || tile.cityId !== fromCity.id;
+        tile.roadTraffic = traffic;
+        tile.cityId = fromCity.id;
+        if (changed) world.tileMap.markRenderDirty(tile.x, tile.y);
+      }
     }
-    this.reportRoadWorks(fromCity, works, world, 'the street to its new quarter');
+    UrbanPlanner.recordStreetPath(fromCity, world.tileMap, survey.path, plan.streetClass);
+    this.reportRoadWorks(fromCity, works, world, plan.streetClass === 'primary' ? 'the high street to its new quarter' : 'the side street to its new block');
   }
 
   /**
@@ -963,6 +1063,22 @@ export class CivilizationEngine {
   /** Repairs buildings and roads damaged in war, spending real materials. */
   private repairCityInfrastructure(city: City, world: CivWorld): void {
     repairInfrastructure(city, world.tileMap);
+  }
+
+  /** Rare state transition cleanup, bounded to the affected city's indexed citizens. */
+  private releaseInactiveBuildingAssignments(city: City, lifecycle: UrbanLifecycleResult): void {
+    const inactive = new Set(lifecycle.vacatedBuildingIds);
+    for (const entity of this.entitiesByCity.get(city.id) ?? []) {
+      if (entity.homeBuildingId && inactive.has(entity.homeBuildingId)) {
+        entity.homeBuildingId = null;
+        entity.homeX = city.x;
+        entity.homeY = city.y;
+      }
+      if (entity.workplaceId && inactive.has(entity.workplaceId)) {
+        entity.workplaceId = null;
+        if (entity.profession !== 'king' && entity.profession !== 'leader') entity.profession = 'none';
+      }
+    }
   }
 
   /** How badly this settlement needs a given feasible building right now. */
@@ -1070,16 +1186,24 @@ export class CivilizationEngine {
     return score;
   }
 
-  private tryUpgradeBuilding(city: City): void {
-    const upgradable = [...city.buildings.values()].filter(b => b.level < 3 && city.stock.hasAll(b.upgradeCost()));
+  private tryUpgradeBuilding(city: City, tileMap: TileMap, year: number): void {
+    const upgradable = [...city.buildings.values()].filter(b => b.lifecycleState === 'normal' && b.level < 3 && city.stock.hasAll(b.upgradeCost()));
     if (upgradable.length === 0) return;
-    const target = upgradable.sort((a, b) => (b.definition.jobs ?? 0) - (a.definition.jobs ?? 0))[0];
+    const target = upgradable.sort((a, b) =>
+      (b.definition.jobs ?? 0) - (a.definition.jobs ?? 0) ||
+      a.builtYear - b.builtYear ||
+      a.id.localeCompare(b.id)
+    )[0];
     const cost = target.upgradeCost();
     if (city.stock.spend(cost)) {
       for (const [good, amount] of Object.entries(cost)) {
         city.ledger.recordConsumed(good as GoodId, amount as number);
       }
       target.upgrade();
+      target.recordRenovation(year, city.urbanPhase);
+      if (city.architecturalProfile) target.recordArchitecture(buildingArchitecturalStamp(city.architecturalProfile, year));
+      target.urbanContext = urbanContextAt(city, target.x, target.y, year);
+      tileMap.markRenderDirty(target.x, target.y);
     }
   }
 
@@ -1258,7 +1382,7 @@ export class CivilizationEngine {
       const chosen = choices[rng.chance(0.92) ? 0 : Math.min(choices.length - 1, 1)];
       const tile = world.tileMap.getTile(chosen.x, chosen.y)!;
       city.territory.add(`${tile.x},${tile.y}`);
-      if (city.kingdomId) tile.kingdomId = city.kingdomId;
+      if (city.kingdomId) { tile.kingdomId = city.kingdomId; world.tileMap.markRenderDirty(tile.x, tile.y); }
     }
   }
 
@@ -1272,7 +1396,7 @@ export class CivilizationEngine {
   }
 
   private killCitizens(city: City, world: CivWorld, count: number, cause: string): void {
-    const citizens = world.entities.filter(e => e.cityId === city.id);
+    const citizens = [...(this.entitiesByCity.get(city.id) ?? [])];
     // The very young and very old die first.
     citizens.sort((a, b) => {
       const maxAge = SPECIES_DEFINITIONS[a.species].maxAge;
@@ -1953,12 +2077,7 @@ export class CivilizationEngine {
     }
 
     // Working-age citizens of this realm, counted from the people who exist.
-    let workers = 0;
-    for (const e of world.entities) {
-      if (e.kingdomId !== kingdom.id || e.hp <= 0) continue;
-      if (!SPECIES_DEFINITIONS[e.species].isHumanoid || e.isChild) continue;
-      workers++;
-    }
+    const workers = this.workersByKingdom.get(kingdom.id) ?? 0;
 
     const unemployment = workers > 0 ? clamp((workers - filled) / workers, 0, 1) : 0;
     const labourShortage = jobs > 0 ? clamp((jobs - filled) / jobs, 0, 1) : 0;
@@ -1986,17 +2105,17 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'society',
-        `Bread riots shook ${kingdom.name} as hungry peasants forced open local granaries.`,
+        `Tumultos por pão abalaram ${kingdom.name} quando camponeses famintos arrombaram celeiros locais.`,
         {
-          title: `Bread Riots in ${kingdom.name}`,
+          title: `Tumultos por Pão em ${kingdom.name}`,
           importance: 'major',
           scope: 'kingdom',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
           tags: ['society', 'unrest', 'peasants'],
-          causes: ['Hunger, low peasant satisfaction and high radicalisation converged.'],
-          consequences: ['Stability and legitimacy fell as peasants forced open granaries.'],
+          causes: ['Fome, baixa satisfação dos camponeses e alta radicalização convergiram.'],
+          consequences: ['A estabilidade e a legitimidade caíram à medida que os camponeses arrombavam celeiros.'],
           threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Unrest in ${kingdom.name}`
+          threadTitle: `Inquietação em ${kingdom.name}`
         }
       );
       events.emit('societyUnrest', { kingdom, faction: 'peasants', year: world.year });
@@ -2011,15 +2130,15 @@ export class CivilizationEngine {
         'society',
         `Powerful nobles in ${kingdom.name} gathered in secret to challenge the ruler's legitimacy.`,
         {
-          title: `Noble Conspiracy in ${kingdom.name}`,
+          title: `Conspiração da Nobreza em ${kingdom.name}`,
           importance: 'major',
           scope: 'kingdom',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
           tags: ['society', 'unrest', 'nobles'],
-          causes: ['Influential nobles became dissatisfied and radicalised.'],
+          causes: ['Nobres influentes tornaram-se insatisfeitos e radicalizados.'],
           consequences: ["The ruler's legitimacy was weakened by elite opposition."],
           threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Unrest in ${kingdom.name}`
+          threadTitle: `Inquietação em ${kingdom.name}`
         }
       );
       events.emit('societyUnrest', { kingdom, faction: 'nobles', year: world.year });
@@ -2033,17 +2152,17 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'society',
-        `Merchant houses in ${kingdom.name} moved capital out of reach of the treasury.`,
+        `Casas mercantis em ${kingdom.name} moveram capital para fora do alcance do tesouro.`,
         {
-          title: `Capital Flight in ${kingdom.name}`,
+          title: `Fuga de Capital em ${kingdom.name}`,
           importance: 'major',
           scope: 'kingdom',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
           tags: ['society', 'unrest', 'merchants'],
-          causes: ['Merchant dissatisfaction coincided with tax or trade pressure.'],
-          consequences: ['Treasury reserves and stability declined.'],
+          causes: ['A insatisfação dos mercadores coincidiu com pressão fiscal ou comercial.'],
+          consequences: ['As reservas do tesouro e a estabilidade diminuíram.'],
           threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Unrest in ${kingdom.name}`
+          threadTitle: `Inquietação em ${kingdom.name}`
         }
       );
       events.emit('societyUnrest', { kingdom, faction: 'merchants', year: world.year });
@@ -2057,17 +2176,17 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'society',
-        `Officers in ${kingdom.name} issued a public warning to the court over the state of the army.`,
+        `Oficiais em ${kingdom.name} emitiram um aviso público à corte sobre o estado do exército.`,
         {
-          title: `Military Warning in ${kingdom.name}`,
+          title: `Aviso Militar em ${kingdom.name}`,
           importance: 'major',
           scope: 'kingdom',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
           tags: ['society', 'unrest', 'military'],
-          causes: ['Military dissatisfaction and coup risk reached a dangerous level.'],
-          consequences: ['The court lost stability and legitimacy.'],
+          causes: ['A insatisfação militar e o risco de golpe atingiram um nível perigoso.'],
+          consequences: ['A corte perdeu estabilidade e legitimidade.'],
           threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Unrest in ${kingdom.name}`
+          threadTitle: `Inquietação em ${kingdom.name}`
         }
       );
       events.emit('societyUnrest', { kingdom, faction: 'military', year: world.year });
@@ -2081,17 +2200,17 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'society',
-        `Guilds and workshops in ${kingdom.name} slowed production in protest.`,
+        `Guildas e oficinas em ${kingdom.name} desaceleraram a produção em protesto.`,
         {
-          title: `Industrial Protest in ${kingdom.name}`,
+          title: `Protesto Industrial em ${kingdom.name}`,
           importance: 'major',
           scope: 'kingdom',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
           tags: ['society', 'unrest', 'workers'],
-          causes: ['Worker dissatisfaction rose inside an industrialising economy.'],
-          consequences: ['Production slowed and the treasury lost revenue.'],
+          causes: ['A insatisfação dos trabalhadores aumentou dentro de uma economia em industrialização.'],
+          consequences: ['A produção desacelerou e o tesouro perdeu receita.'],
           threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Unrest in ${kingdom.name}`
+          threadTitle: `Inquietação em ${kingdom.name}`
         }
       );
       events.emit('societyUnrest', { kingdom, faction: 'workers', year: world.year });
@@ -2104,17 +2223,17 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'society',
-        `Reformist circles in ${kingdom.name} circulated manifestos calling for a new political order.`,
+        `Círculos reformistas em ${kingdom.name} circularam manifestos clamando por uma nova ordem política.`,
         {
-          title: `Reformist Manifestos in ${kingdom.name}`,
+          title: `Manifestos Reformistas em ${kingdom.name}`,
           importance: 'major',
           scope: 'kingdom',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
           tags: ['society', 'unrest', 'reformists'],
-          causes: ['Reform pressure and reformist influence became politically visible.'],
-          consequences: ['Calls for a new political order weakened legitimacy.'],
+          causes: ['A pressão por reformas e a influência reformista tornaram-se politicamente visíveis.'],
+          consequences: ['Apelos por uma nova ordem política enfraqueceram a legitimidade.'],
           threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Unrest in ${kingdom.name}`
+          threadTitle: `Inquietação em ${kingdom.name}`
         }
       );
       events.emit('societyUnrest', { kingdom, faction: 'reformists', year: world.year });
@@ -2127,17 +2246,17 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'society',
-        `Frontier towns in ${kingdom.name} demanded autonomy from the capital.`,
+        `Cidades de fronteira em ${kingdom.name} exigiram autonomia da capital.`,
         {
-          title: `Frontier Autonomy Crisis in ${kingdom.name}`,
+          title: `Crise de Autonomia na Fronteira em ${kingdom.name}`,
           importance: 'major',
           scope: 'kingdom',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
           tags: ['society', 'unrest', 'frontier'],
-          causes: ['Weak administrative reach met dissatisfaction on the frontier.'],
-          consequences: ['Autonomy demands increased instability in the realm.'],
+          causes: ['A fraqueza administrativa encontrou insatisfação na fronteira.'],
+          consequences: ['Exigências de autonomia aumentaram a instabilidade no reino.'],
           threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Unrest in ${kingdom.name}`
+          threadTitle: `Inquietação em ${kingdom.name}`
         }
       );
       events.emit('societyUnrest', { kingdom, faction: 'frontier', year: world.year });
@@ -2196,17 +2315,17 @@ export class CivilizationEngine {
     chronicle.log(
       world.year,
       'law',
-      `${kingdom.name} reformed ${decision.law.category.replace('_', ' ')} law: ${decision.current.name} gave way to ${decision.law.name}.`,
+      `${kingdom.name} reformou a lei de ${decision.law.category.replace('_', ' ')}: ${decision.current.name} deu lugar a ${decision.law.name}.`,
       {
-        title: `${decision.law.name} Reform`,
+        title: `Reforma de ${decision.law.name}`,
         importance: decision.pressure >= 0.7 ? 'major' : 'notable',
         scope: 'kingdom',
         refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
         tags: ['law', decision.law.category, 'reform'],
-        causes: [`Political reform pressure reached ${Math.round(decision.pressure * 100)}%.`],
+        causes: [`A pressão por reforma política atingiu ${Math.round(decision.pressure * 100)}%.`],
         consequences: [
-          `${decision.current.name} was replaced by ${decision.law.name}.`,
-          ...(tense ? ['At least one influential social faction reacted with greater dissatisfaction and radicalisation.'] : [])
+          `${decision.current.name} foi substituída por ${decision.law.name}.`,
+          ...(tense ? ['Pelo menos uma facção social influente reagiu com maior insatisfação e radicalização.'] : [])
         ],
         data: { pressure: Number(decision.pressure.toFixed(3)), category: decision.law.category }
       }
@@ -2265,13 +2384,13 @@ export class CivilizationEngine {
       kingdom.economy.stability = 0.35;
       kingdom.economy.treasury *= 0.6;
       kingdom.legitimacy = clamp(kingdom.legitimacy - 0.1, 0, 1);
-      rememberCulture(kingdom.culture, 'revolution', world.year, 0.85, 'A revolution changed the social order.');
+      rememberCulture(kingdom.culture, 'revolution', world.year, 0.85, 'Uma revolução mudou a ordem social.');
       chronicle.log(
         world.year,
         'revolution',
-        `Revolution in ${previousName}! The ${previousGovernment.toLowerCase()} is overthrown and a ${newGov.name.toLowerCase()} is proclaimed as ${kingdom.name}.`,
+        `Revolução em ${previousName}! O governo ${previousGovernment.toLowerCase()} foi deposto e um ${newGov.name.toLowerCase()} foi proclamado como ${kingdom.name}.`,
         {
-          title: `The Revolution of ${world.year}`,
+          title: `A Revolução do ano ${world.year}`,
           importance: 'legendary',
           scope: 'kingdom',
           refs: [
@@ -2279,13 +2398,13 @@ export class CivilizationEngine {
             ...(ruler ? [{ kind: 'person' as const, id: ruler.id, name: ruler.title || ruler.name }] : [])
           ],
           tags: ['revolution', 'government', previousGovernment, newGov.name],
-          causes: ['Accumulated political and social pressure made the old political order unsustainable.'],
+          causes: ['A pressão política e social acumulada tornou a antiga ordem política insustentável.'],
           consequences: [
-            `${previousGovernment} government ended and ${newGov.name} government began.`,
-            'State stability and treasury reserves were sharply reduced.'
+            `O governo ${previousGovernment} terminou e o governo ${newGov.name} começou.`,
+            'A estabilidade do estado e as reservas do tesouro foram drasticamente reduzidas.'
           ],
           threadId: `revolution:${kingdom.id}:${world.year}`,
-          threadTitle: `The Revolution of ${kingdom.name}`,
+          threadTitle: `A Revolução de ${kingdom.name}`,
           data: { from: previousGovernment, to: newGov.name }
         }
       );
@@ -2294,9 +2413,9 @@ export class CivilizationEngine {
         chronicle.log(
           world.year,
           'succession',
-          `${ruler.name} did not survive the revolution.`,
+          `${ruler.name} não sobreviveu à revolução.`,
           {
-            title: `Death of ${ruler.title || ruler.name}`,
+            title: `Morte de ${ruler.title || ruler.name}`,
             importance: 'major',
             scope: 'person',
             refs: [
@@ -2304,9 +2423,9 @@ export class CivilizationEngine {
               { kind: 'kingdom', id: kingdom.id, name: kingdom.name }
             ],
             tags: ['ruler', 'death', 'revolution'],
-            causes: ['The ruler was killed during the revolution.'],
+            causes: ['O governante foi morto durante a revolução.'],
             threadId: `revolution:${kingdom.id}:${world.year}`,
-            threadTitle: `The Revolution of ${kingdom.name}`
+            threadTitle: `A Revolução de ${kingdom.name}`
           }
         );
       }
@@ -2316,15 +2435,15 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'kingdom',
-        `${previousName} reorganised itself as a ${newGov.name.toLowerCase()}, becoming ${kingdom.name}.`,
+        `${previousName} reorganizou-se como um ${newGov.name.toLowerCase()}, tornando-se ${kingdom.name}.`,
         {
-          title: `Government Reorganisation`,
+          title: `Reorganização do Governo`,
           importance: 'major',
           scope: 'kingdom',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
           tags: ['government', 'reorganisation', newGov.name],
-          causes: ['Political institutions adapted to the realm’s current military, social and economic pressures.'],
-          consequences: [`${newGov.name} became the governing order of ${kingdom.name}.`],
+          causes: ['Instituições políticas se adaptaram às atuais pressões militares, sociais e econômicas do reino.'],
+          consequences: [`${newGov.name} tornou-se a ordem de governo de ${kingdom.name}.`],
           data: { from: previousGovernment, to: newGov.name }
         }
       );
@@ -2358,17 +2477,17 @@ export class CivilizationEngine {
         chronicle.log(
           world.year,
           'diplomacy',
-          `${a.name} and ${b.name} made first contact.`,
+          `${a.name} e ${b.name} fizeram primeiro contato.`,
           {
-            title: `First Contact: ${a.name} & ${b.name}`,
+            title: `Primeiro Contato: ${a.name} & ${b.name}`,
             importance: 'major',
             scope: 'international',
             refs: [
               { kind: 'kingdom', id: a.id, name: a.name },
               { kind: 'kingdom', id: b.id, name: b.name }
             ],
-            tags: ['first contact', 'diplomacy'],
-            consequences: ['Both realms entered one another’s known diplomatic world.']
+            tags: ['primeiro contato', 'diplomacy'],
+            consequences: ['Ambos os reinos entraram no mundo diplomático um do outro.']
           }
         );
         events.emit('firstContact', { a, b, year: world.year });
@@ -2409,6 +2528,7 @@ export class CivilizationEngine {
       for (let j = i + 1; j < kingdoms.length; j++) {
         const a = kingdoms[i];
         const b = kingdoms[j];
+        if (a.metropoleId === b.id || b.metropoleId === a.id) continue;
         if (!a.knownKingdoms.has(b.id) || !b.knownKingdoms.has(a.id)) continue;
 
         if (world.diplomacy.isAtWar(a.id, b.id)) {
@@ -2474,12 +2594,12 @@ export class CivilizationEngine {
             Math.max(0, avgSocialPeace - 0.52) * 0.04 +
             Math.min(0.06, (a.externalThreat + b.externalThreat) * 0.035);
           if (rng.chance(0.015 + pactPressure)) {
-            const name = sameSpecies ? `League of ${world.year}` : `Concord of ${world.year}`;
+            const name = sameSpecies ? `Liga do ano ${world.year}` : `Concórdia do ano ${world.year}`;
             world.diplomacy.createAlliance(a.id, b.id, name, world.year);
             chronicle.log(
               world.year,
               'diplomacy',
-              `${a.name} and ${b.name} formed the ${name}.`,
+              `${a.name} e ${b.name} formaram a ${name}.`,
               {
                 title: name,
                 importance: 'major',
@@ -2489,7 +2609,7 @@ export class CivilizationEngine {
                   { kind: 'kingdom', id: b.id, name: b.name }
                 ],
                 tags: ['alliance', 'diplomacy', 'peace'],
-                consequences: [`${a.name} and ${b.name} entered a formal alliance.`],
+                consequences: [`${a.name} e ${b.name} entraram numa aliança formal.`],
                 threadId: `alliance:${[a.id, b.id].sort().join(':')}:${world.year}`,
                 threadTitle: name
               }
@@ -2548,8 +2668,8 @@ export class CivilizationEngine {
       victor.economy.treasury += reparations;
       victor.legitimacy = clamp(victor.legitimacy + 0.06, 0, 1);
       loser.legitimacy = clamp(loser.legitimacy - 0.08, 0, 1);
-      rememberCulture(victor.culture, 'victory', world.year, 0.7, `Victory over ${loser.name} strengthened national pride.`);
-      rememberCulture(loser.culture, 'defeat', world.year, 0.75, `Defeat by ${victor.name} scarred public memory.`);
+      rememberCulture(victor.culture, 'victory', world.year, 0.7, `A vitória sobre ${loser.name} fortaleceu o orgulho nacional.`);
+      rememberCulture(loser.culture, 'defeat', world.year, 0.75, `A derrota para ${victor.name} marcou a memória pública.`);
     } else {
       a.legitimacy = clamp(a.legitimacy - 0.02, 0, 1);
       b.legitimacy = clamp(b.legitimacy - 0.02, 0, 1);
@@ -2571,14 +2691,14 @@ export class CivilizationEngine {
     );
 
     const text = victor
-      ? `${victor.name} forced ${loser!.name} to accept peace after ${duration} years of war.`
-      : `${a.name} and ${b.name} accepted an exhausted peace after ${duration} years of war.`;
+      ? `${victor.name} forçou ${loser!.name} a aceitar a paz após ${duration} anos de guerra.`
+      : `${a.name} e ${b.name} aceitaram uma paz exausta após ${duration} anos de guerra.`;
     chronicle.log(
       world.year,
       'peace',
       text,
       {
-        title: victor ? `Peace after the ${war.reason}` : `The Exhausted Peace`,
+        title: victor ? `Paz após a ${war.reason}` : `A Paz Exausta`,
         importance: 'major',
         scope: 'international',
         refs: [
@@ -2587,8 +2707,8 @@ export class CivilizationEngine {
           { kind: 'war', id: war.id, name: war.reason }
         ],
         tags: ['war', 'peace', settlement],
-        causes: [victor ? 'One side achieved a decisive advantage under mounting exhaustion.' : 'Both realms accumulated enough exhaustion to accept peace.'],
-        consequences: [victor && loser ? `${victor.name} gained reparations and legitimacy while ${loser.name} lost both.` : 'Both realms ended the conflict with lingering war weariness.'],
+        causes: [victor ? 'Um lado alcançou uma vantagem decisiva sob exaustão crescente.' : 'Ambos os reinos acumularam exaustão suficiente para aceitar a paz.'],
+        consequences: [victor && loser ? `${victor.name} ganhou reparações e legitimidade, enquanto ${loser.name} perdeu ambos.` : 'Ambos os reinos terminaram o conflito com um cansaço de guerra persistente.'],
         threadId: `war:${war.id}`,
         threadTitle: war.reason,
         data: { duration, settlement, battles: war.battles, casualties: war.attackerKills + war.defenderKills }
@@ -2616,12 +2736,139 @@ export class CivilizationEngine {
 
   private tickTrade(world: CivWorld): void {
     world.trade.resetYearlyVolume();
+    for (const route of world.trade.routes.values()) route.deliveredThisYear = 0;
     world.trade.pruneRoutes(id => world.cities.has(id));
     world.trade.updateRouteStatus((a, b) => world.diplomacy.isAtWar(a, b));
 
+    this.ensureColonialTradeAgreements(world);
+    this.openColonialTradeRoutes(world);
     this.negotiateTradeAgreements(world);
     this.openTradeRoutes(world);
     this.runTradeRoutes(world);
+  }
+
+  /** CITY-V3 profile changes are event/year driven; existing buildings retain their stamps. */
+  private refreshCityArchitecture(city: City, kingdom: Kingdom | null, world: CivWorld): void {
+    const metropole = kingdom?.metropoleId ? world.kingdoms.get(kingdom.metropoleId) ?? null : null;
+    refreshArchitecturalProfile(city, kingdom, world.tileMap, world.year, metropole);
+    if (!city.architecturalProfile) return;
+    let backfilled = false;
+    for (const building of city.buildings.values()) {
+      if (building.architecture) continue;
+      building.recordArchitecture(buildingArchitecturalStamp(city.architecturalProfile, building.builtYear || city.foundingYear));
+      world.tileMap.markRenderDirty(building.x, building.y);
+      backfilled = true;
+    }
+    if (backfilled) city.markBuildingTopologyChanged();
+  }
+
+  /** Colonial commerce is a preferential use of the normal treaty and route network. */
+  private ensureColonialTradeAgreements(world: CivWorld): void {
+    for (const metropole of world.kingdoms.values()) {
+      for (const colonyId of metropole.colonyIds) {
+        const colony = world.kingdoms.get(colonyId);
+        if (!colony || !colony.isColony || colony.metropoleId !== metropole.id) continue;
+        if (world.trade.isEmbargoed(metropole.id, colony.id)) continue;
+        // Internal commerce is preferential, not costless: the 1% treaty rate
+        // still gives the ordinary trade accounting a real price to settle.
+        if (!world.trade.hasAgreement(metropole.id, colony.id)) {
+          world.trade.signAgreement(metropole.id, colony.id, world.year, 0.01);
+        }
+      }
+    }
+  }
+
+  /** Opens at most one raw export and one manufactured import per colonial relation. */
+  private openColonialTradeRoutes(world: CivWorld): void {
+    for (const metropole of world.kingdoms.values()) {
+      for (const colonyId of metropole.colonyIds) {
+        const colony = world.kingdoms.get(colonyId);
+        if (!colony || !colony.isColony || colony.metropoleId !== metropole.id) continue;
+        if (world.trade.isEmbargoed(metropole.id, colony.id)) continue;
+        if (world.diplomacy.isAtWar(metropole.id, colony.id)) continue;
+        this.openColonialTradeRoute(colony, metropole, 'colony_to_metropole', world);
+        this.openColonialTradeRoute(metropole, colony, 'metropole_to_colony', world);
+      }
+    }
+  }
+
+  private openColonialTradeRoute(
+    seller: Kingdom, buyer: Kingdom,
+    direction: 'colony_to_metropole' | 'metropole_to_colony',
+    world: CivWorld
+  ): void {
+    const goods = direction === 'colony_to_metropole' ? RAW_GOODS : CRAFTED_GOODS;
+    const sourceCities = [...seller.cityIds].map(id => world.cities.get(id)).filter((city): city is City => !!city);
+    const targetCities = [...buyer.cityIds].map(id => world.cities.get(id)).filter((city): city is City => !!city);
+    if (!sourceCities.length || !targetCities.length) return;
+
+    let best: { from: City; to: City; good: GoodId; volume: number; kind: 'overland' | 'maritime'; path?: { x: number; y: number }[]; score: number } | null = null;
+    for (const from of sourceCities) for (const to of targetCities) {
+      const distance = Math.hypot(from.x - to.x, from.y - to.y);
+      const landPath = SimplePathfinder.findPath(from.x, from.y, to.x, to.y, world.tileMap, 'land');
+      const kind = this.determineRouteKind(from, to, world.tileMap, landPath);
+      if (!kind) continue;
+      if (kind === 'maritime' && (!portOperational(from) || !portOperational(to))) continue;
+      const capacity = kind === 'maritime' ? portCapacityFactor(from, to) : roadCapacityFactor(landPath, world.tileMap);
+      const avgRoad = kind === 'maritime' ? 1.5 : avgEffectiveRoadLevel(landPath, world.tileMap);
+      for (const good of goods) {
+        if (world.trade.hasRouteBetween(from.id, to.id, good)) continue;
+        const reserve = Math.max(8, from.population * (GOODS[good].kind === 'raw' ? 0.22 : 0.12));
+        const available = from.stock.get(good) - reserve;
+        if (available < 4) continue;
+        const destinationNeed = this.colonialDestinationNeed(to, good, direction);
+        if (destinationNeed <= 0) continue;
+        const transport = transportCostPerUnit(kind, distance, world.market.price(good), avgRoad);
+        const volume = Math.min(24, Math.max(3, Math.floor(Math.min(available, destinationNeed) * capacity)));
+        if (volume <= 0) continue;
+        const strategicWeight = GOODS[good].strategic ? 3 : GOODS[good].tier === 'regional' ? 1.55 : 1;
+        const industrialWeight = direction === 'colony_to_metropole' && this.realmUsesAsIndustrialInput(buyer, good, world) ? 2.25 : 1;
+        const score = volume * world.market.price(good) * strategicWeight * industrialWeight - transport * volume;
+        if (!best || score > best.score) best = { from, to, good, volume, kind, path: kind === 'overland' ? landPath : undefined, score };
+      }
+    }
+    if (!best) return;
+    const path = best.kind === 'overland' ? this.paveTradeRoad(best.from, best.to, world) : undefined;
+    const route = world.trade.openRoute({
+      fromCityId: best.from.id, toCityId: best.to.id,
+      fromKingdomId: seller.id, toKingdomId: buyer.id,
+      kind: best.kind, good: best.good, volume: best.volume, year: world.year,
+      path: path ?? best.path, colonialRoute: true, colonialDirection: direction
+    });
+    chronicle.log(world.year, 'trade', `${GOODS[best.good].name} passou a ligar ${seller.name} e ${buyer.name} pela rota colonial ${best.kind}.`, {
+      title: `Rota Colonial de ${GOODS[best.good].name}`,
+      importance: GOODS[best.good].strategic ? 'major' : 'notable', scope: 'international',
+      refs: [{ kind: 'kingdom', id: seller.id, name: seller.name }, { kind: 'kingdom', id: buyer.id, name: buyer.name }, { kind: 'good', id: best.good, name: GOODS[best.good].name }],
+      tags: ['colonisation', 'colonial-trade', best.kind, best.good],
+      consequences: [`A rota ${route.id} move excedente real de ${best.from.name} para ${best.to.name}.`],
+      data: { direction, volume: best.volume, kind: best.kind }
+    });
+  }
+
+  /** Demand is inferred from real stocks and recipes, never assigned as a colonial quota. */
+  private colonialDestinationNeed(city: City, good: GoodId, direction: 'colony_to_metropole' | 'metropole_to_colony'): number {
+    const baseTarget = direction === 'colony_to_metropole'
+      ? Math.max(18, city.population * 0.5)
+      : Math.max(10, city.population * 0.28);
+    const shortfall = Math.max(0, baseTarget - city.stock.get(good));
+    if (direction === 'colony_to_metropole') {
+      const industrialUse = [...city.buildings.values()].some(building =>
+        CRAFTED_GOODS.some(output => GOODS[output].producedBy === building.type && productionRecipesFor(output).some(recipe => Object.prototype.hasOwnProperty.call(recipe.inputs, good)))
+      );
+      return industrialUse ? Math.max(shortfall, baseTarget * 0.75) : shortfall;
+    }
+    return shortfall;
+  }
+
+  private realmUsesAsIndustrialInput(realm: Kingdom, good: GoodId, world: CivWorld): boolean {
+    for (const cityId of realm.cityIds) {
+      const city = world.cities.get(cityId);
+      if (!city) continue;
+      if (this.colonialDestinationNeed(city, good, 'colony_to_metropole') > 0 && [...city.buildings.values()].some(building =>
+        CRAFTED_GOODS.some(output => GOODS[output].producedBy === building.type && productionRecipesFor(output).some(recipe => Object.prototype.hasOwnProperty.call(recipe.inputs, good)))
+      )) return true;
+    }
+    return false;
   }
 
   private negotiateTradeAgreements(world: CivWorld): void {
@@ -2644,9 +2891,9 @@ export class CivilizationEngine {
           chronicle.log(
             world.year,
             'economy',
-            `Trade between ${a.name} and ${b.name} collapsed with the outbreak of war.`,
+            `O comércio entre ${a.name} e ${b.name} entrou em colapso com o início da guerra.`,
             {
-              title: `Trade Collapse between ${a.name} and ${b.name}`,
+              title: `Colapso Comercial entre ${a.name} e ${b.name}`,
               importance: 'major',
               scope: 'international',
               refs: [
@@ -2654,8 +2901,8 @@ export class CivilizationEngine {
                 { kind: 'kingdom', id: b.id, name: b.name }
               ],
               tags: ['trade', 'war', 'commerce'],
-              causes: ['War made the existing trade agreement impossible to maintain.'],
-              consequences: ['Commercial exchange between the two realms was suspended.']
+              causes: ['A guerra tornou o acordo comercial existente impossível de ser mantido.'],
+              consequences: ['A troca comercial entre os dois reinos foi suspensa.']
             }
           );
           continue;
@@ -2672,7 +2919,7 @@ export class CivilizationEngine {
           chronicle.log(
             world.year,
             'trade',
-            `${a.name} and ${b.name} signed a trade agreement.`,
+            `${a.name} e ${b.name} assinaram um acordo comercial.`,
             {
               title: `Trade Agreement: ${a.name}–${b.name}`,
               importance: 'notable',
@@ -2681,19 +2928,19 @@ export class CivilizationEngine {
                 { kind: 'kingdom', id: a.id, name: a.name },
                 { kind: 'kingdom', id: b.id, name: b.name }
               ],
-              tags: ['trade agreement', 'commerce'],
-              consequences: ['The two realms could begin opening formal trade routes.'],
+              tags: ['acordo comercial', 'commerce'],
+              consequences: ['Os dois reinos puderam começar a abrir rotas de comércio formais.'],
               data: { tariff: Number(tariff.toFixed(3)) }
             }
           );
         } else if (relation <= -55 && rng.chance(0.12) && !world.trade.isEmbargoed(a.id, b.id)) {
-          world.trade.declareEmbargo(a.id, b.id, world.year, 'diplomatic hostility');
+          world.trade.declareEmbargo(a.id, b.id, world.year, 'hostilidade diplomática');
           chronicle.log(
             world.year,
             'economy',
-            `${a.name} placed an embargo on ${b.name}.`,
+            `${a.name} impôs um embargo a ${b.name}.`,
             {
-              title: `Embargo of ${b.name}`,
+              title: `Embargo a ${b.name}`,
               importance: 'major',
               scope: 'international',
               refs: [
@@ -2701,8 +2948,8 @@ export class CivilizationEngine {
                 { kind: 'kingdom', id: b.id, name: b.name }
               ],
               tags: ['embargo', 'trade', 'hostility'],
-              causes: ['Diplomatic hostility crossed the threshold for economic coercion.'],
-              consequences: ['Formal trade between the two realms was restricted.']
+              causes: ['A hostilidade diplomática cruzou o limite para coerção econômica.'],
+              consequences: ['O comércio formal entre os dois reinos foi restrito.']
             }
           );
         }
@@ -2747,7 +2994,7 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'trade',
-        `A ${kind} trade route opened: ${GOODS[good].name} from ${fromCity.name} to ${toCity.name}.`,
+        `Uma rota de comércio ${kind} foi aberta: ${GOODS[good].name} de ${fromCity.name} para ${toCity.name}.`,
         {
           title: `${GOODS[good].name} Route: ${fromCity.name}–${toCity.name}`,
           importance: volume >= 20 ? 'major' : 'notable',
@@ -2759,10 +3006,10 @@ export class CivilizationEngine {
             { kind: 'kingdom', id: toCity.kingdomId!, name: b.name },
             { kind: 'good', id: good, name: GOODS[good].name }
           ],
-          tags: ['trade route', kind, good],
-          consequences: [`${GOODS[good].name} began moving regularly between the two settlements.`],
+          tags: ['rota de comércio', kind, good],
+          consequences: [`${GOODS[good].name} começou a transitar regularmente entre os dois assentamentos.`],
           threadId: `trade:${fromCity.id}:${toCity.id}:${good}`,
-          threadTitle: `${GOODS[good].name} Trade between ${fromCity.name} and ${toCity.name}`,
+          threadTitle: `Comércio de ${GOODS[good].name} entre ${fromCity.name} e ${toCity.name}`,
           data: { volume, kind }
         }
       );
@@ -2798,14 +3045,19 @@ export class CivilizationEngine {
           const distance = Math.hypot(from.x - to.x, from.y - to.y);
           if (distance > maxDistance) continue;
 
+          // Reachability and infrastructure capacity belong to the city pair,
+          // not to an individual good. Compute A* once, then price every good.
+          const landPath = SimplePathfinder.findPath(from.x, from.y, to.x, to.y, world.tileMap, 'land');
+          const kind = this.determineRouteKind(from, to, world.tileMap, landPath);
+          if (!kind) continue;
+          const capacity = kind === 'maritime'
+            ? portCapacityFactor(from, to)
+            : roadCapacityFactor(landPath, world.tileMap);
+          const avgRoad = kind === 'maritime' ? 1.5 : avgEffectiveRoadLevel(landPath, world.tileMap);
+
           for (const good of ALL_GOODS) {
             const surplus = from.stock.get(good);
             if (surplus < 15) continue;
-
-            // 2a. Intelligent route-type selection via pathfinding
-            const landPath = SimplePathfinder.findPath(from.x, from.y, to.x, to.y, world.tileMap, 'land');
-            const kind = this.determineRouteKind(from, to, world.tileMap, landPath);
-            if (!kind) continue; // Unreachable city pair
 
             // A route exists because someone profits, not because a stock is large.
             // The seller's realm is cheap in this good and the buyer's is dear; the
@@ -2817,10 +3069,6 @@ export class CivilizationEngine {
             // Infrastructure sets the economics of the haul: better roads cut the
             // cost per tile, and the route can only carry what the road or ports
             // physically move (0.7× on a dirt trail, 1.0× stone, 1.3× imperial).
-            const capacity = kind === 'maritime'
-              ? portCapacityFactor(from, to)
-              : roadCapacityFactor(landPath, world.tileMap);
-            const avgRoad = kind === 'maritime' ? 1.5 : avgEffectiveRoadLevel(landPath, world.tileMap);
             const transport = transportCostPerUnit(kind, distance, worldPrice, avgRoad);
             const tariff = treaty ?? buyer.tariffRate();
             const marginPerUnit = buyPrice - sellPrice - transport - buyPrice * tariff;
@@ -2849,7 +3097,10 @@ export class CivilizationEngine {
 
   private runTradeRoutes(world: CivWorld): void {
     for (const route of world.trade.routes.values()) {
-      if (!route.active) continue;
+      if (!route.active) {
+        this.recordColonialRouteInterruption(route, world, 'guerra, embargo ou bloqueio diplomático');
+        continue;
+      }
 
       const from = world.cities.get(route.fromCityId);
       const to = world.cities.get(route.toCityId);
@@ -2865,6 +3116,7 @@ export class CivilizationEngine {
         : roadCapacityFactor(route.path, world.tileMap);
 
       if (capacity <= 0.01) {
+        this.recordColonialRouteInterruption(route, world, 'a infraestrutura logística ficou inoperante');
         if (!this.collapsedRoutes.has(route.id)) {
           this.collapsedRoutes.add(route.id);
           chronicle.log(
@@ -2880,8 +3132,8 @@ export class CivilizationEngine {
                 { kind: 'city', id: to.id, name: to.name },
                 { kind: 'good', id: route.good, name: GOODS[route.good].name }
               ],
-              tags: ['trade collapse', 'infrastructure', 'port'],
-              causes: ['A harbor or port was destroyed or fell below half strength.'],
+              tags: ['colapso comercial', 'infrastructure', 'port'],
+              causes: ['Um porto foi destruído ou caiu para menos da metade de sua integridade.'],
               consequences: [`Imports and exports through ${from.name}–${to.name} stopped.`]
             }
           );
@@ -2889,6 +3141,7 @@ export class CivilizationEngine {
         continue;
       }
       this.collapsedRoutes.delete(route.id);
+      this.disruptedColonialRoutes.delete(route.id);
 
       const shipped = from.stock.take(route.good, route.volume * capacity);
       if (shipped <= 0) continue;
@@ -2896,6 +3149,7 @@ export class CivilizationEngine {
 
       // Anything that couldn't be unloaded goes back on the cart.
       if (delivered < shipped) from.stock.add(route.good, shipped - delivered);
+      route.deliveredThisYear += delivered;
 
       from.ledger.recordExported(route.good, delivered);
       to.ledger.recordImported(route.good, delivered);
@@ -2904,22 +3158,33 @@ export class CivilizationEngine {
       world.market.reportDemand(route.good, delivered);
       world.trade.recordTrade(route, value);
 
+      // Colonial freight pays the distance cost that selected its route. This
+      // is deducted from the export revenue, so a far colony is useful only
+      // when its real surplus and resource value justify moving it.
+      const averageRoad = route.kind === 'maritime' ? 1.5 : avgEffectiveRoadLevel(route.path, world.tileMap);
+      const logisticsCost = route.colonialRoute
+        ? delivered * transportCostPerUnit(route.kind, Math.hypot(from.x - to.x, from.y - to.y), world.market.price(route.good), averageRoad)
+        : 0;
+      const sellerRevenue = Math.max(0, value - logisticsCost);
+
       // Revenue lands once a year, in the same currency the goods were valued
       // at, and only for goods that actually crossed the border. It used to be
       // paid on every caravan/ship arrival — tens of round trips a year per
       // route — multiplied by a solvency check that inflated revenue whenever
       // the buyer had any gold stock, so a few routes minted hundreds of
       // thousands of gold for a realm of twenty people.
-      sellerKingdom.exportVolume += value;
-      sellerKingdom.economy.treasury += value;
-      sellerKingdom.treasury.add('gold', value);
+      sellerKingdom.exportVolume += sellerRevenue;
+      sellerKingdom.economy.treasury += sellerRevenue;
+      sellerKingdom.treasury.add('gold', sellerRevenue);
       if (buyerKingdom.id !== sellerKingdom.id) {
-        const tariff = value * buyerKingdom.tariffRate();
+        const tariffRate = world.trade.getAgreement(sellerKingdom.id, buyerKingdom.id)?.tariff ?? buyerKingdom.tariffRate();
+        const tariff = value * tariffRate;
         buyerKingdom.tariffRevenue += tariff;
         buyerKingdom.economy.treasury += tariff;
         buyerKingdom.treasury.add('gold', tariff);
         buyerKingdom.importVolume += value;
       }
+      this.settleColonialTribute(route, sellerKingdom, buyerKingdom, value);
 
       // Commerce quietly improves relations.
       if (rng.chance(0.25)) {
@@ -2937,12 +3202,13 @@ export class CivilizationEngine {
     const kingdoms = [...world.kingdoms.values()];
 
     for (const overlord of kingdoms) {
+      if (overlord.isColony) continue;
       if (!overlord.research.knowsFeature('diplomacy_pacts')) continue;
       if (overlord.overlordId) continue; // A vassal cannot hold vassals
 
       for (const candidateId of overlord.knownKingdoms) {
         const candidate = world.kingdoms.get(candidateId);
-        if (!candidate || candidate.overlordId || candidate.vassalIds.size > 0) continue;
+        if (!candidate || candidate.isColony || candidate.overlordId || candidate.vassalIds.size > 0) continue;
         if (world.diplomacy.isAtWar(overlord.id, candidate.id)) continue;
 
         const ratio = overlord.computePower() / Math.max(1, candidate.computePower());
@@ -2968,7 +3234,7 @@ export class CivilizationEngine {
         chronicle.log(
           world.year,
           'conquest',
-          `${candidate.name} swore fealty to ${overlord.name} and became its vassal.`
+          `${candidate.name} jurou fidelidade a ${overlord.name} e tornou-se seu vassalo.`
         );
         events.emit('vassalageSworn', { overlord, vassal: candidate, year: world.year });
         break;
@@ -2977,6 +3243,7 @@ export class CivilizationEngine {
 
     // Vassals send tribute to their overlord each year.
     for (const vassal of kingdoms) {
+      if (vassal.isColony) continue;
       if (!vassal.overlordId) continue;
       const overlord = world.kingdoms.get(vassal.overlordId);
       if (!overlord) {
@@ -3010,21 +3277,213 @@ export class CivilizationEngine {
       if (wantsIndependence && rng.chance(0.05 + independencePressure)) {
         vassal.overlordId = null;
         overlord.vassalIds.delete(vassal.id);
-        rememberCulture(vassal.culture, 'secession', world.year, 0.75, `Independence from ${overlord.name} became a founding memory.`);
-        rememberCulture(overlord.culture, 'secession', world.year, 0.65, `${vassal.name} broke from imperial control.`);
-        const declared = world.diplomacy.declareWar(vassal.id, overlord.id, world.year, 'Independence Revolt');
+        rememberCulture(vassal.culture, 'secession', world.year, 0.75, `A independência de ${overlord.name} tornou-se uma memória fundacional.`);
+        rememberCulture(overlord.culture, 'secession', world.year, 0.65, `${vassal.name} se libertou do controle imperial.`);
+        const declared = world.diplomacy.declareWar(vassal.id, overlord.id, world.year, 'Revolta de Independência');
         if (declared) {
           chronicle.log(
             world.year,
             'war',
-            `${vassal.name} renounced fealty to ${overlord.name} and began an independence war.`
+            `${vassal.name} renunciou à sua lealdade a ${overlord.name} e iniciou uma guerra de independência.`
           );
         } else {
-          chronicle.log(world.year, 'kingdom', `${vassal.name} slipped from ${overlord.name}'s control.`);
+          chronicle.log(world.year, 'kingdom', `${vassal.name} escapou do controle de ${overlord.name}.`);
         }
         events.emit('vassalageBroken', { overlord, vassal, year: world.year });
       }
     }
+  }
+
+  // ============================================================
+  // COLONIAL ADMINISTRATION — DISTINCT SUBORDINATE REALMS
+  // ============================================================
+
+  /**
+   * Creates a colonial realm, not another distant city of the metropole. The
+   * city, territory and population are assigned to the new Realm/Kingdom so
+   * the existing growth, economy, diplomacy and warfare loops keep operating
+   * without a parallel colonial simulation.
+   */
+  private tickColonialFoundations(world: CivWorld): void {
+    for (const metropole of world.kingdoms.values()) {
+      if (metropole.isColony || !metropole.research.knowsFeature('colonisation')) continue;
+      if (metropole.totalPopulation < 18 || metropole.economy.treasury < 120) continue;
+      if (!rng.chance(0.055 + Math.min(0.04, metropole.economy.treasury / 12000))) continue;
+
+      const parent = [...metropole.cityIds]
+        .map(id => world.cities.get(id))
+        .filter((city): city is City => !!city)
+        .filter(city => city.population >= 12 && city.prosperity >= 0.5 && city.stock.get('food') >= 110)
+        .sort((a, b) => (b.prosperity * b.population) - (a.prosperity * a.population))[0];
+      if (!parent) continue;
+      const site = this.findColonialFoundationSite(parent, world, metropole);
+      if (site) this.foundColonialRealm(parent, site, metropole, world);
+    }
+  }
+
+  /** Colonial tribute is paid from actual export revenue after the goods arrive. */
+  private settleColonialTribute(route: { colonialRoute?: boolean; colonialDirection?: string }, seller: Kingdom, buyer: Kingdom, value: number): void {
+    if (!route.colonialRoute || route.colonialDirection !== 'colony_to_metropole') return;
+    if (seller.metropoleId !== buyer.id || !seller.isColony) return;
+    const tribute = Math.min(value * 0.08, seller.economy.treasury);
+    if (tribute <= 0) return;
+    seller.economy.treasury -= tribute;
+    seller.treasury.take('gold', tribute);
+    buyer.economy.treasury += tribute;
+    buyer.treasury.add('gold', tribute);
+  }
+
+  private recordColonialRouteInterruption(route: { id: string; colonialRoute?: boolean; good: GoodId; fromCityId: string; toCityId: string }, world: CivWorld, reason: string): void {
+    if (!route.colonialRoute || this.disruptedColonialRoutes.has(route.id)) return;
+    this.disruptedColonialRoutes.add(route.id);
+    const from = world.cities.get(route.fromCityId);
+    const to = world.cities.get(route.toCityId);
+    chronicle.log(world.year, 'economy', `A rota colonial de ${GOODS[route.good].name} foi interrompida: ${reason}.`, {
+      title: `Interrupção Colonial de ${GOODS[route.good].name}`,
+      importance: 'major', scope: 'international',
+      refs: [
+        ...(from ? [{ kind: 'city' as const, id: from.id, name: from.name }] : []),
+        ...(to ? [{ kind: 'city' as const, id: to.id, name: to.name }] : []),
+        { kind: 'good' as const, id: route.good, name: GOODS[route.good].name }
+      ],
+      tags: ['colonisation', 'colonial-trade', 'interruption', route.good],
+      consequences: [`A disponibilidade de ${GOODS[route.good].name} nas cidades dependentes cairá até que a rota volte.`],
+      data: { routeId: route.id, reason }
+    });
+  }
+
+  private foundColonialRealm(parent: City, site: { x: number; y: number; access: Exclude<ColonialAccess, null>; distance: number }, metropole: Kingdom, world: CivWorld): void {
+    const settlers = Math.max(5, Math.min(12, Math.floor(parent.population * 0.2)));
+    const provisions = parent.stock.take('food', 80);
+    const timber = parent.stock.take('wood', 45);
+    const expeditionCost = Math.min(80, metropole.economy.treasury * 0.16);
+    metropole.economy.treasury -= expeditionCost;
+    const capital = new City(nextId('city'), this.generateSettlementName(parent, world), parent.species, site.x, site.y, parent.founderName, world.year);
+    const colony = new Kingdom(nextId('king'), this.generateColonialName(metropole, capital.name, world), parent.species, metropole.color, capital.id, world.year);
+    colony.establishColony(metropole.id, site.access);
+    colony.government = metropole.government;
+    colony.governmentSince = world.year;
+    colony.research.deserialize(metropole.research.serialize());
+    colony.research.current = null;
+    colony.research.progress = 0;
+    colony.economy.treasury = expeditionCost;
+    colony.knownKingdoms.add(metropole.id);
+    metropole.knownKingdoms.add(colony.id);
+    metropole.addColony(colony.id);
+    world.diplomacy.setRelation(metropole.id, colony.id, 100);
+
+    capital.kingdomId = colony.id;
+    capital.parentCityId = parent.id;
+    capital.population = settlers;
+    parent.population -= settlers;
+    parent.ledger.recordExported('food', provisions);
+    parent.ledger.recordExported('wood', timber);
+    capital.ledger.recordImported('food', capital.stock.add('food', provisions));
+    capital.ledger.recordImported('wood', capital.stock.add('wood', timber));
+    capital.updateTier();
+    world.cities.set(capital.id, capital);
+    world.kingdoms.set(colony.id, colony);
+    this.refreshCityArchitecture(capital, colony, world);
+    const tile = world.tileMap.getTile(site.x, site.y)!;
+    tile.cityId = capital.id;
+    tile.kingdomId = colony.id;
+    world.tileMap.markRenderDirty(tile.x, tile.y);
+    capital.seedFoundingClaim(world.tileMap, 5);
+    this.relocateColonists(parent, capital, colony.id, settlers, world);
+
+    chronicle.log(world.year, 'founding', `${metropole.name} fundou ${colony.name}, com capital em ${capital.name}.`, {
+      title: `Fundação de ${colony.name}`,
+      importance: 'major', scope: 'kingdom',
+      refs: [{ kind: 'kingdom', id: metropole.id, name: metropole.name }, { kind: 'kingdom', id: colony.id, name: colony.name }, { kind: 'city', id: capital.id, name: capital.name }],
+      tags: ['colonisation', 'colony', site.access],
+      causes: [`A expedição cobriu ${Math.round(site.distance)} unidades por acesso ${site.access === 'maritime' ? 'marítimo' : 'terrestre'}.`],
+      consequences: [`${colony.name} iniciou sua administração subordinada a ${metropole.name}.`],
+      data: { settlers, access: site.access, metropoleId: metropole.id, colonyId: colony.id }
+    });
+    events.emit('colonialRealmFounded', { metropole, colony, capital, parent, access: site.access, year: world.year });
+  }
+
+  /** Sites are distant, unclaimed and either connected over land or by a viable sea passage. */
+  private findColonialFoundationSite(parent: City, world: CivWorld, metropole: Kingdom): { x: number; y: number; access: Exclude<ColonialAccess, null>; distance: number } | null {
+    const minDistance = Math.max(24, Math.floor(Math.min(world.tileMap.width, world.tileMap.height) * 0.28));
+    let best: { x: number; y: number; access: Exclude<ColonialAccess, null>; distance: number; score: number } | null = null;
+    for (let attempt = 0; attempt < 42; attempt++) {
+      const x = rng.rangeInt(2, Math.max(2, world.tileMap.width - 3));
+      const y = rng.rangeInt(2, Math.max(2, world.tileMap.height - 3));
+      const tile = world.tileMap.getTile(x, y);
+      if (!tile || TERRAINS[tile.type].isWater || !TERRAINS[tile.type].isWalkable || tile.cityId || tile.buildingId || tile.kingdomId) continue;
+      const distance = Math.hypot(parent.x - x, parent.y - y);
+      if (distance < minDistance || [...world.cities.values()].some(city => Math.hypot(city.x - x, city.y - y) < 14)) continue;
+      const landPath = SimplePathfinder.findPath(parent.x, parent.y, x, y, world.tileMap, 'land', 2600);
+      let access: Exclude<ColonialAccess, null> | null = landPath.length > 0 ? 'overland' : null;
+      if (!access && metropole.research.knowsFeature('maritime_trade')) {
+        const departureCoast = this.findCoastAccess(parent.x, parent.y, world.tileMap);
+        const arrivalCoast = this.findCoastAccess(x, y, world.tileMap);
+        if (departureCoast && arrivalCoast && SimplePathfinder.findPath(departureCoast.x, departureCoast.y, arrivalCoast.x, arrivalCoast.y, world.tileMap, 'sea', 2600).length > 0) access = 'maritime';
+      }
+      if (!access) continue;
+      let score = TERRAINS[tile.type].fertility * 35 + Math.min(30, distance * 0.12);
+      for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) {
+        const nearby = world.tileMap.getTile(x + dx, y + dy);
+        const good = nearby?.resourceType ? tileResourceToGood(nearby.resourceType) : null;
+        if (good) score += GOODS[good].basePrice * 0.35;
+      }
+      if (SPECIES_DEFINITIONS[parent.species].preferredBiomes.includes(tile.type)) score += 18;
+      if (access === 'maritime') score += 8;
+      if (!best || score > best.score) best = { x, y, access, distance, score };
+    }
+    return best ? { x: best.x, y: best.y, access: best.access, distance: best.distance } : null;
+  }
+
+  private findCoastAccess(x: number, y: number, tileMap: TileMap): { x: number; y: number } | null {
+    for (let radius = 1; radius <= 7; radius++) for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+      const tile = tileMap.getTile(x + dx, y + dy);
+      if (tile && TERRAINS[tile.type].isWater) return { x: tile.x, y: tile.y };
+    }
+    return null;
+  }
+
+  /** A small annual movement keeps a young colony supplied through existing city/entity ownership. */
+  private tickColonialMigration(world: CivWorld): void {
+    for (const metropole of world.kingdoms.values()) for (const colonyId of metropole.colonyIds) {
+      const colony = world.kingdoms.get(colonyId);
+      const destination = colony ? world.cities.get(colony.capitalCityId) : null;
+      if (!colony || !destination || !colony.isColony || colony.metropoleId !== metropole.id || destination.population >= 20) continue;
+      if (world.diplomacy.isAtWar(metropole.id, colony.id)) continue;
+      const source = [...metropole.cityIds].map(id => world.cities.get(id)).filter((city): city is City => !!city)
+        .filter(city => city.population >= 20 && city.stock.get('food') >= 65).sort((a, b) => b.population - a.population)[0];
+      if (!source) continue;
+      const migrants = Math.min(3, Math.max(1, Math.floor((source.population - 16) / 8)));
+      const food = source.stock.take('food', migrants * 8);
+      source.ledger.recordExported('food', food);
+      destination.ledger.recordImported('food', destination.stock.add('food', food));
+      source.population -= migrants;
+      destination.population += migrants;
+      this.relocateColonists(source, destination, colony.id, migrants, world);
+      events.emit('colonialMigration', { metropole, colony, source, destination, migrants, year: world.year });
+    }
+  }
+
+  private relocateColonists(source: City, destination: City, kingdomId: string, count: number, world: CivWorld): void {
+    const movers = world.entities.filter(entity => entity.cityId === source.id && !entity.isChild).slice(0, count);
+    for (const mover of movers) {
+      if (mover.homeBuildingId) source.buildings.get(mover.homeBuildingId)?.residentIds.delete(mover.id);
+      if (mover.workplaceId) source.buildings.get(mover.workplaceId)?.assignedWorkerIds.delete(mover.id);
+      mover.homeBuildingId = null; mover.workplaceId = null; mover.profession = 'none';
+      mover.cityId = destination.id; mover.kingdomId = kingdomId;
+      mover.x = destination.x + rng.range(-1.5, 1.5); mover.y = destination.y + rng.range(-1.5, 1.5);
+      mover.homeX = destination.x; mover.homeY = destination.y; mover.targetX = null; mover.targetY = null;
+    }
+  }
+
+  private generateColonialName(metropole: Kingdom, capitalName: string, world: CivWorld): string {
+    const root = capitalName.replace(/(Reach|Hollow|Crossing|Landing|Watch|Rest|Ford|Haven|Gate|Rise)$/i, '') || capitalName;
+    for (let suffix = 0; suffix < 12; suffix++) {
+      const candidate = suffix === 0 ? `Colônia ${root}` : `Colônia ${root} ${suffix + 1}`;
+      if (![...world.kingdoms.values()].some(realm => realm.name === candidate)) return candidate;
+    }
+    return `Colônia ${metropole.name.split(' ').pop() ?? world.year}`;
   }
 
   // ============================================================
@@ -3082,10 +3541,12 @@ export class CivilizationEngine {
 
       world.cities.set(colony.id, colony);
       kingdom.addCity(colony.id);
+      this.refreshCityArchitecture(colony, kingdom, world);
 
       const tile = world.tileMap.getTile(site.x, site.y)!;
       tile.cityId = colony.id;
       tile.kingdomId = kingdom.id;
+      world.tileMap.markRenderDirty(tile.x, tile.y);
       colony.seedFoundingClaim(world.tileMap, 4);
 
       // Move some real citizens to the new settlement so the map shows it living.
@@ -3111,9 +3572,9 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'founding',
-        `Settlers from ${city.name} founded ${colony.name} in the name of ${kingdom.name}.`,
+        `Colonos de ${city.name} fundaram ${colony.name} em nome de ${kingdom.name}.`,
         {
-          title: `Founding of ${colony.name}`,
+          title: `Fundação de ${colony.name}`,
           importance: 'major',
           scope: 'city',
           refs: [
@@ -3122,8 +3583,8 @@ export class CivilizationEngine {
             { kind: 'kingdom', id: kingdom.id, name: kingdom.name }
           ],
           tags: ['colonisation', 'founding', 'settlers'],
-          causes: [`${city.name} had the population, food and housing pressure to send settlers outward.`],
-          consequences: [`${kingdom.name} gained a new settlement.`],
+          causes: [`${city.name} teve pressão populacional, de alimentos e moradia para enviar colonos.`],
+          consequences: [`${kingdom.name} ganhou um novo assentamento.`],
           data: { settlers }
         }
       );
@@ -3198,6 +3659,260 @@ export class CivilizationEngine {
   }
 
   // ============================================================
+  // COLONIAL AUTONOMY, REVOLT & INDEPENDENCE
+  // ============================================================
+
+  /** Political pressure is derived from distance, real extraction and lived conditions. */
+  private tickColonialPolitics(world: CivWorld): void {
+    for (const colony of world.kingdoms.values()) {
+      if (!colony.isColony || !colony.metropoleId) continue;
+      const metropole = world.kingdoms.get(colony.metropoleId);
+      if (!metropole) continue;
+
+      if (colony.separatistMovement === 'revolt') {
+        this.resolveColonialRevolt(colony, metropole, world);
+        continue;
+      }
+
+      const distance = this.closestRealmDistance(colony, metropole, world);
+      const distancePressure = clamp(distance / 100, 0, 1);
+      const prosperity = this.colonialProsperity(colony, world);
+      const famine = [...colony.cityIds].reduce((sum, id) => sum + (world.cities.get(id)?.famineYears ?? 0), 0);
+      const crisis = clamp(
+        (1 - colony.economy.stability) * 0.38 +
+        (1 - colony.foodSecurity) * 0.28 +
+        Math.min(1, famine / Math.max(1, colony.cityIds.size * 3)) * 0.24 +
+        (colony.warWeariness / 100) * 0.22,
+        0, 1
+      );
+      const extraction = this.colonialExtractionPressure(colony, metropole, world);
+      const relation = world.diplomacy.getRelation(colony.id, metropole.id);
+      const relationSupport = clamp((relation + 100) / 200, 0, 1);
+
+      colony.colonialIdentity = clamp(
+        colony.colonialIdentity + 0.006 + distancePressure * 0.012 + colony.colonialAutonomy * 0.008 + crisis * 0.012 - prosperity * 0.003,
+        0, 1
+      );
+      const autonomyTarget = clamp(0.1 + distancePressure * 0.3 + colony.colonialIdentity * 0.3 + colony.colonialTension * 0.2 + (1 - metropole.administrativeReach) * 0.16, 0, 0.92);
+      colony.colonialAutonomy += (autonomyTarget - colony.colonialAutonomy) * 0.16;
+      const tensionTarget = clamp(
+        distancePressure * 0.18 + colony.colonialIdentity * 0.14 + extraction * 0.48 + crisis * 0.5 + (1 - colony.colonialLoyalty) * 0.14 - prosperity * 0.24 - relationSupport * 0.22,
+        0, 1
+      );
+      colony.colonialTension += (tensionTarget - colony.colonialTension) * 0.22;
+      const loyaltyTarget = clamp(0.96 - colony.colonialTension * 0.62 - colony.colonialIdentity * 0.18 - colony.colonialAutonomy * 0.1 + prosperity * 0.14 + relationSupport * 0.16, 0, 1);
+      colony.colonialLoyalty += (loyaltyTarget - colony.colonialLoyalty) * 0.2;
+
+      const movementPressure = clamp(
+        colony.colonialIdentity * 0.35 + colony.colonialAutonomy * 0.2 + colony.colonialTension * 0.3 + crisis * 0.2 + extraction * 0.12 + colony.foreignSupport * 0.18,
+        0, 1
+      );
+      const colonialAge = world.year - colony.foundingYear;
+      if (colony.separatistMovement === 'none' && colonialAge >= 8 && movementPressure >= 0.62 && colony.colonialIdentity >= 0.35) {
+        colony.separatistMovement = 'organizing';
+        colony.separatistSince = world.year;
+        this.selectColonialLeader(colony, world);
+        chronicle.log(world.year, 'rebellion', `Um movimento separatista começou a se organizar em ${colony.name}.`, {
+          title: `Movimento Separatista em ${colony.name}`,
+          importance: 'major', scope: 'kingdom',
+          refs: [{ kind: 'kingdom', id: colony.id, name: colony.name }, { kind: 'kingdom', id: metropole.id, name: metropole.name }],
+          tags: ['colonisation', 'autonomy', 'separatism'],
+          causes: ['Distância, identidade colonial, exploração econômica e condições locais elevaram a pressão política.'],
+          consequences: ['Elites locais passaram a organizar uma plataforma de autogoverno.'],
+          data: { identity: Number(colony.colonialIdentity.toFixed(2)), tension: Number(colony.colonialTension.toFixed(2)), autonomy: Number(colony.colonialAutonomy.toFixed(2)) }
+        });
+      }
+
+      if (colony.separatistMovement !== 'organizing') continue;
+      const movementAge = world.year - (colony.separatistSince ?? world.year);
+      const peaceful = movementAge >= 4 && colony.colonialAutonomy >= 0.76 && colony.colonialIdentity >= 0.66 && colony.colonialTension <= 0.5 && relation >= 25 && crisis < 0.3;
+      if (peaceful) {
+        this.grantColonialIndependence(colony, metropole, world, true);
+        continue;
+      }
+      if (movementAge >= 2 && movementPressure >= 0.74 && colony.colonialTension >= 0.66 && colony.colonialLoyalty <= 0.38) {
+        this.startColonialRevolt(colony, metropole, world);
+      }
+    }
+  }
+
+  private colonialProsperity(colony: Kingdom, world: CivWorld): number {
+    let total = 0;
+    let count = 0;
+    for (const cityId of colony.cityIds) {
+      const city = world.cities.get(cityId);
+      if (!city) continue;
+      total += city.prosperity;
+      count++;
+    }
+    return count ? total / count : 0;
+  }
+
+  /** Only deliveries actually completed on colonial routes count as exploitation pressure. */
+  private colonialExtractionPressure(colony: Kingdom, metropole: Kingdom, world: CivWorld): number {
+    let value = 0;
+    for (const route of world.trade.routesFor(colony.id)) {
+      if (!route.active || !route.colonialRoute || route.colonialDirection !== 'colony_to_metropole') continue;
+      if (route.fromKingdomId !== colony.id || route.toKingdomId !== metropole.id) continue;
+      value += route.deliveredThisYear * world.market.price(route.good);
+    }
+    const output = [...colony.cityIds].reduce((sum, id) => sum + (world.cities.get(id)?.economicOutput ?? 0), 0);
+    return clamp(value / Math.max(30, output + 20), 0, 1);
+  }
+
+  private startColonialRevolt(colony: Kingdom, metropole: Kingdom, world: CivWorld): void {
+    colony.colonialStatus = 'AUTONOMOUS_COLONY';
+    colony.separatistMovement = 'revolt';
+    colony.revoltYear = world.year;
+    this.selectColonialLeader(colony, world);
+    const declared = world.diplomacy.declareWar(colony.id, metropole.id, world.year, 'Colonial Independence Revolt');
+    this.seekColonialSupport(colony, metropole, world);
+    chronicle.log(world.year, 'rebellion', `${colony.name} levantou-se contra ${metropole.name} pela independência.`, {
+      title: `Revolta de Independência de ${colony.name}`,
+      importance: 'legendary', scope: 'international',
+      refs: [{ kind: 'kingdom', id: colony.id, name: colony.name }, { kind: 'kingdom', id: metropole.id, name: metropole.name }],
+      tags: ['colonisation', 'rebellion', 'independence', 'war'],
+      causes: ['O movimento separatista ultrapassou o limiar de confronto aberto.'],
+      consequences: [declared ? 'A metrópole iniciou a repressão militar.' : 'A crise entrou em conflito aberto.'],
+      threadId: `colonial-independence:${colony.id}`,
+      threadTitle: `Independência de ${colony.name}`
+    });
+    events.emit('colonialRevolt', { colony, metropole, year: world.year });
+  }
+
+  /** Allies answer with real treasury aid and the existing alliance mechanism. */
+  private seekColonialSupport(colony: Kingdom, metropole: Kingdom, world: CivWorld): void {
+    const colonialBackers = new Set<string>(colony.knownKingdoms);
+    for (const alliance of world.diplomacy.alliances.values()) {
+      if (alliance.members.has(colony.id)) for (const id of alliance.members) colonialBackers.add(id);
+      if (alliance.members.has(metropole.id)) for (const id of alliance.members) colonialBackers.add(id);
+    }
+    for (const id of colonialBackers) {
+      if (id === colony.id || id === metropole.id) continue;
+      const power = world.kingdoms.get(id);
+      if (!power) continue;
+      const supportsColony = world.diplomacy.getRelation(power.id, colony.id) >= 25 && world.diplomacy.getRelation(power.id, metropole.id) < 25;
+      const recipient = supportsColony ? colony : metropole;
+      const aid = Math.min(30, Math.max(0, power.economy.treasury * 0.035));
+      if (aid <= 0) continue;
+      power.economy.treasury -= aid;
+      recipient.economy.treasury += aid;
+      if (supportsColony) {
+        colony.foreignSupport = clamp(colony.foreignSupport + aid / 180, 0, 1);
+        world.diplomacy.createAlliance(colony.id, power.id, `Liga de ${colony.name}`, world.year);
+      }
+      chronicle.log(world.year, 'diplomacy', `${power.name} enviou apoio a ${recipient.name} durante a crise colonial.`, {
+        title: `Apoio Externo a ${recipient.name}`,
+        importance: 'notable', scope: 'international',
+        refs: [{ kind: 'kingdom', id: power.id, name: power.name }, { kind: 'kingdom', id: recipient.id, name: recipient.name }],
+        tags: ['colonisation', 'independence', 'foreign-support'], data: { aid: Math.round(aid) }
+      });
+    }
+  }
+
+  private resolveColonialRevolt(colony: Kingdom, metropole: Kingdom, world: CivWorld): void {
+    const years = world.year - (colony.revoltYear ?? world.year);
+    const colonialPower = colony.computePower() * (1 + colony.foreignSupport * 0.45);
+    const metropolePower = metropole.computePower();
+    const independenceCase = clamp(
+      colony.colonialIdentity * 0.28 + colony.colonialAutonomy * 0.2 + colony.colonialTension * 0.2 +
+      Math.min(1, colonialPower / Math.max(1, metropolePower)) * 0.18 + colony.foreignSupport * 0.18,
+      0, 1
+    );
+    if (years >= 2 && independenceCase >= 0.7) {
+      this.grantColonialIndependence(colony, metropole, world, false);
+      return;
+    }
+    if (years >= 3 && metropolePower > colonialPower * 2.25 && colony.foreignSupport < 0.2) {
+      world.diplomacy.settleWar(colony.id, metropole.id, world.year, 'victory', metropole.id, -45, 8);
+      colony.colonialStatus = 'COLONY';
+      colony.separatistMovement = 'none';
+      colony.separatistSince = null;
+      colony.revoltYear = null;
+      colony.foreignSupport = 0;
+      colony.colonialAutonomy = Math.min(colony.colonialAutonomy, 0.38);
+      colony.colonialTension = Math.min(colony.colonialTension, 0.45);
+      colony.colonialLoyalty = Math.max(colony.colonialLoyalty, 0.48);
+      chronicle.log(world.year, 'war', `${metropole.name} reprimiu a revolta em ${colony.name}.`, {
+        title: `Repressão da Revolta de ${colony.name}`,
+        importance: 'major', scope: 'international',
+        refs: [{ kind: 'kingdom', id: metropole.id, name: metropole.name }, { kind: 'kingdom', id: colony.id, name: colony.name }],
+        tags: ['colonisation', 'rebellion', 'repression'],
+        consequences: ['A administração colonial foi restaurada com autonomia reduzida.']
+      });
+      events.emit('colonialRevoltSuppressed', { colony, metropole, year: world.year });
+    }
+  }
+
+  private grantColonialIndependence(colony: Kingdom, metropole: Kingdom, world: CivWorld, peaceful: boolean): void {
+    const oldName = colony.name;
+    colony.name = this.generateIndependentColonyName(colony, world);
+    colony.colonialStatus = 'INDEPENDENT';
+    colony.metropoleId = null;
+    colony.colonialAccess = null;
+    colony.colonialAutonomy = 1;
+    colony.colonialLoyalty = 0;
+    colony.colonialTension = peaceful ? 0.28 : 0.72;
+    colony.colonialIdentity = 1;
+    colony.separatistMovement = 'none';
+    colony.separatistSince = null;
+    colony.revoltYear = null;
+    metropole.removeColony(colony.id);
+    for (const cityId of colony.cityIds) {
+      const city = world.cities.get(cityId);
+      if (city) this.refreshCityArchitecture(city, colony, world);
+    }
+    this.selectColonialLeader(colony, world);
+
+    const governments = colony.research.unlockedGovernments();
+    if (governments.includes('republic')) colony.adoptGovernment('republic', world.year);
+    const agreement = world.trade.getAgreement(colony.id, metropole.id);
+    if (peaceful && agreement) {
+      agreement.tariff = Math.max(0.02, (colony.tariffRate() + metropole.tariffRate()) / 2);
+      for (const route of world.trade.routesFor(colony.id)) {
+        if ((route.fromKingdomId === colony.id && route.toKingdomId === metropole.id) || (route.fromKingdomId === metropole.id && route.toKingdomId === colony.id)) {
+          route.colonialRoute = false;
+          route.colonialDirection = undefined;
+        }
+      }
+      world.diplomacy.setRelation(colony.id, metropole.id, 25);
+    } else {
+      world.trade.cancelAgreement(colony.id, metropole.id, world.year, 'independence war');
+      world.diplomacy.settleWar(colony.id, metropole.id, world.year, 'independence', colony.id, -65, 10);
+    }
+    chronicle.log(world.year, 'kingdom', `${oldName} tornou-se ${colony.name}, um reino independente.`, {
+      title: `Independência de ${colony.name}`,
+      importance: 'legendary', scope: 'international',
+      refs: [{ kind: 'kingdom', id: colony.id, name: colony.name }, { kind: 'kingdom', id: metropole.id, name: metropole.name }],
+      tags: ['colonisation', 'independence', peaceful ? 'peaceful' : 'war'],
+      consequences: ['Cidades, população, território, economia e diplomacia da antiga colônia continuam no novo reino.'],
+      threadId: `colonial-independence:${colony.id}`,
+      threadTitle: `Independência de ${colony.name}`,
+      data: { peaceful }
+    });
+    events.emit('colonyIndependent', { colony, metropole, peaceful, year: world.year });
+  }
+
+  private generateIndependentColonyName(colony: Kingdom, world: CivWorld): string {
+    const root = colony.name.replace(/^Colônia\s+/i, '').replace(/^Colony\s+of\s+/i, '') || colony.name;
+    const title = colony.research.unlockedGovernments().includes('republic') ? 'República de' : 'Estado Livre de';
+    for (let suffix = 0; suffix < 12; suffix++) {
+      const candidate = suffix === 0 ? `${title} ${root}` : `${title} ${root} ${suffix + 1}`;
+      if (![...world.kingdoms.values()].some(realm => realm.id !== colony.id && realm.name === candidate)) return candidate;
+    }
+    return `${title} ${root} ${world.year}`;
+  }
+
+  private selectColonialLeader(colony: Kingdom, world: CivWorld): void {
+    const preferred = world.entities.find(entity => entity.cityId === colony.capitalCityId && (entity.profession === 'leader' || entity.profession === 'king'))
+      ?? world.entities.find(entity => entity.cityId === colony.capitalCityId && !entity.isChild);
+    if (!preferred) return;
+    preferred.profession = 'king';
+    preferred.kingdomId = colony.id;
+    colony.rulerId = preferred.id;
+  }
+
+  // ============================================================
   // REBELLIONS, CIVIL WARS & SECESSION
   // ============================================================
 
@@ -3209,6 +3924,7 @@ export class CivilizationEngine {
     if (world.year < 15) return;
 
     for (const kingdom of [...world.kingdoms.values()]) {
+      if (kingdom.isColony) continue;
       if (kingdom.cityIds.size <= 1) continue; // Single-city realms cannot split
       if (
         kingdom.economy.stability > 0.42 &&
@@ -3252,7 +3968,7 @@ export class CivilizationEngine {
           // Secession! The city breaks away and forms a new independent realm
           const rebelKingdomId = nextId('king');
           const rebelColor = getNextKingdomColor();
-          const rebelName = `Free State of ${city.name}`;
+          const rebelName = `Estado Livre de ${city.name}`;
 
           const rebelKingdom = new Kingdom(
             rebelKingdomId,
@@ -3297,8 +4013,8 @@ export class CivilizationEngine {
           rebelKingdom.culture.openness = clamp(rebelKingdom.culture.openness + 0.08, 0, 1);
           rebelKingdom.culture.tradition = clamp(rebelKingdom.culture.tradition - 0.08, 0, 1);
           rebelKingdom.culture.diplomaticTrust = clamp(rebelKingdom.culture.diplomaticTrust - 0.1, 0, 1);
-          rememberCulture(rebelKingdom.culture, 'secession', world.year, 0.9, `Secession from ${kingdom.name} founded the new state.`);
-          rememberCulture(kingdom.culture, 'secession', world.year, 0.7, `${city.name} seceded from the realm.`);
+          rememberCulture(rebelKingdom.culture, 'secession', world.year, 0.9, `A secessão de ${kingdom.name} fundou o novo estado.`);
+          rememberCulture(kingdom.culture, 'secession', world.year, 0.7, `${city.name} se separou do reino.`);
           rebelKingdom.society = {
             ...kingdom.society,
             factions: Object.fromEntries(
@@ -3335,20 +4051,23 @@ export class CivilizationEngine {
           for (const key of city.territory) {
             const [tx, ty] = key.split(',').map(Number);
             const tile = world.tileMap.getTile(tx, ty);
-            if (tile) tile.kingdomId = rebelKingdomId;
+            if (tile) {
+              tile.kingdomId = rebelKingdomId;
+              world.tileMap.markRenderDirty(tile.x, tile.y);
+            }
           }
 
           world.kingdoms.set(rebelKingdomId, rebelKingdom);
 
           // The parent kingdom immediately declares war on the rebels!
-          world.diplomacy.declareWar(kingdom.id, rebelKingdomId, world.year, 'Secession & Rebellion');
+          world.diplomacy.declareWar(kingdom.id, rebelKingdomId, world.year, 'Secessão e Rebelião');
 
           chronicle.log(
             world.year,
             'rebellion',
-            `Rebellion in ${kingdom.name}! ${city.name} seceded and proclaimed the ${rebelName}. Civil war erupts!`,
+            `Rebelião em ${kingdom.name}! ${city.name} se separou e proclamou o ${rebelName}. Irrompe a guerra civil!`,
             {
-              title: `The Secession of ${city.name}`,
+              title: `A Secessão de ${city.name}`,
               importance: 'legendary',
               scope: 'international',
               refs: [
@@ -3356,11 +4075,11 @@ export class CivilizationEngine {
                 { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
                 { kind: 'kingdom', id: rebelKingdom.id, name: rebelKingdom.name }
               ],
-              tags: ['rebellion', 'secession', 'civil war'],
-              causes: ['Local revolt pressure and political alienation crossed the threshold for secession.'],
-              consequences: [`${rebelKingdom.name} emerged as an independent state and war began with ${kingdom.name}.`],
+              tags: ['rebellion', 'secession', 'guerra civil'],
+              causes: ['A pressão da revolta local e alienação política cruzaram o limite para secessão.'],
+              consequences: [`${rebelKingdom.name} surgiu como um estado independente e começou uma guerra com ${kingdom.name}.`],
               threadId: `rebellion:${kingdom.id}:${city.id}:${world.year}`,
-              threadTitle: `The Rebellion of ${city.name}`
+              threadTitle: `A Rebelião de ${city.name}`
             }
           );
           events.emit('rebellionOccurred', { kingdom, rebelKingdom, city, year: world.year });
@@ -3397,7 +4116,7 @@ export class CivilizationEngine {
           chronicle.log(
             world.year,
             'disaster',
-            `Bandits raided the ${route.kind} trade route between ${fromCity.name} and ${toCity.name}.`
+            `Bandidos atacaram a rota comercial ${route.kind} entre ${fromCity.name} e ${toCity.name}.`
           );
         }
       } else if (route.volume < route.maxVolume) {
@@ -3491,15 +4210,15 @@ export class CivilizationEngine {
       chronicle.log(
         world.year,
         'conquest',
-        `${kingdom.name} has fallen. Its last settlement is gone.`,
+        `${kingdom.name} caiu. Seu último assentamento não existe mais.`,
         {
-          title: `Fall of ${kingdom.name}`,
+          title: `Queda de ${kingdom.name}`,
           importance: 'legendary',
           scope: 'world',
           refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['fall of a realm', 'extinction', 'conquest'],
-          causes: ['The realm lost its final surviving settlement.'],
-          consequences: ['The kingdom ceased to exist as an independent state.']
+          tags: ['queda de um reino', 'extinction', 'conquest'],
+          causes: ['O reino perdeu seu último assentamento sobrevivente.'],
+          consequences: ['O reino deixou de existir como um estado independente.']
         }
       );
       events.emit('kingdomFell', { kingdom, year: world.year });
@@ -3511,6 +4230,15 @@ export class CivilizationEngine {
       }
       if (kingdom.overlordId) {
         world.kingdoms.get(kingdom.overlordId)?.vassalIds.delete(id);
+      }
+      if (kingdom.metropoleId) world.kingdoms.get(kingdom.metropoleId)?.removeColony(id);
+      for (const colonyId of kingdom.colonyIds) {
+        const colony = world.kingdoms.get(colonyId);
+        if (colony?.metropoleId === id) {
+          colony.metropoleId = null;
+          colony.colonialStatus = 'INDEPENDENT';
+          colony.colonialAccess = null;
+        }
       }
       for (const other of world.kingdoms.values()) other.knownKingdoms.delete(id);
 

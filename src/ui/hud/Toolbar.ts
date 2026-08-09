@@ -45,8 +45,8 @@ export class Toolbar {
 
     this.tabsEl = el('div', { class: 'dock-tabs' });
     this.gridEl = el('div', { class: 'dock-grid' });
-    this.activeNameEl = el('span', { class: 'active-tool-name', text: 'Add Land' });
-    this.activeDescEl = el('span', { class: 'active-tool-desc', text: 'Create soil land' });
+    this.activeNameEl = el('span', { class: 'active-tool-name', text: 'Adicionar Terra' });
+    this.activeDescEl = el('span', { class: 'active-tool-desc', text: 'Criar terra de solo' });
     this.sizeEl = el('div', { class: 'brush-sizes' });
 
     this.searchInput = el('input', {

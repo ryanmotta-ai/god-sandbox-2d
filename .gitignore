@@ -8,6 +8,7 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+src-tauri/target/
 
 # ============================ LOGS AND SCRATCH ============================
 *.log

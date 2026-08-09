@@ -60,6 +60,9 @@ export interface ObjectRef {
   /** Short qualifier shown after the name in muted type: a realm, a year, a
    *  category. Keeps a bare name from being ambiguous in a long list. */
   qualifier?: string;
+  /** Optional world context for objects whose meaning is scoped to a realm.
+   * Technology is globally defined but capability is realm-specific. */
+  context?: { kingdomId?: string };
 }
 
 /** Default artwork per kind, so a ref only names an icon when it wants to

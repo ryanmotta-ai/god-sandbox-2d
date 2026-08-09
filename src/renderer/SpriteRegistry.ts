@@ -283,12 +283,12 @@ export class SpriteRegistry {
     }, 24, 24);
 
     this.registerSprite('node_horses', (ctx) => {
-      // small grazing horse silhouette; the renderer keeps herds rare
-      ctx.fillStyle = '#6d4527'; ctx.fillRect(5, 10, 12, 6); ctx.fillRect(15, 7, 5, 6);
-      ctx.fillStyle = '#8d5d33'; ctx.fillRect(7, 11, 9, 4); ctx.fillRect(17, 8, 3, 3);
-      ctx.fillStyle = '#3d312a'; ctx.fillRect(6, 16, 2, 6); ctx.fillRect(11, 16, 2, 6); ctx.fillRect(16, 15, 2, 6);
-      ctx.fillRect(3, 10, 3, 2); ctx.fillRect(2, 11, 2, 4);
-      ctx.fillStyle = '#d7d3c8'; ctx.fillRect(19, 8, 1, 1);
+      // grazing cattle / ox herd silhouette
+      ctx.fillStyle = '#5c3a21'; ctx.fillRect(4, 11, 14, 6); ctx.fillRect(14, 8, 6, 6);
+      ctx.fillStyle = '#875326'; ctx.fillRect(6, 12, 10, 4); ctx.fillRect(15, 9, 4, 4);
+      ctx.fillStyle = '#f8fafc'; ctx.fillRect(8, 12, 4, 3);
+      ctx.fillStyle = '#29170e'; ctx.fillRect(5, 17, 2, 5); ctx.fillRect(10, 17, 2, 5); ctx.fillRect(15, 16, 2, 5);
+      ctx.fillStyle = '#fef08a'; ctx.fillRect(15, 6, 2, 3); ctx.fillRect(18, 7, 2, 2);
     }, 24, 24);
 
     this.registerSprite('node_cotton', (ctx) => {

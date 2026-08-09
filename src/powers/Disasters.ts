@@ -16,9 +16,7 @@ export class DisasterSystem {
 
     tileMap.applyBrush(x, y, 1.5, tile => {
       tile.isOnFire = true;
-      if (tile.buildingId) {
-        tile.buildingId = null; // Destroy building on direct hit
-      }
+      if (tile.buildingId) tileMap.recordBuildingDamage(tile, .72, 'disaster');
     });
 
     const hitEntities = spatialHash.queryRadius(x, y, 3);
@@ -42,11 +40,12 @@ export class DisasterSystem {
       if (dist < 1.5) {
         tile.type = TerrainType.LAVA;
         tile.height = Math.max(0, tile.height - 0.4);
+        if (tile.buildingId) tileMap.recordBuildingDamage(tile, 1.25, 'disaster');
       } else if (dist < 3) {
         tile.type = TerrainType.SOIL;
         tile.isOnFire = true;
+        if (tile.buildingId) tileMap.recordBuildingDamage(tile, .55, 'disaster');
       }
-      tile.buildingId = null;
       tile.resourceType = null;
     });
 
@@ -73,9 +72,7 @@ export class DisasterSystem {
       } else if (!tile.type.includes('ocean')) {
         tile.height = Math.max(0, tile.height - 0.25);
       }
-      if (tile.buildingId) {
-        tile.buildingId = null;
-      }
+      if (tile.buildingId) tileMap.recordBuildingDamage(tile, .48, 'disaster');
     });
   }
 

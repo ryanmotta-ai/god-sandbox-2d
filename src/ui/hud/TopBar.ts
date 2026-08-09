@@ -32,7 +32,8 @@ const SPEEDS: { value: number; label: string; icon?: string; shortcut: string; d
   { value: 5,  label: '5×',  shortcut: '3', description: 'Cinco horas por segundo.' },
   { value: 10, label: '10×', shortcut: '4', description: 'Dez horas por segundo.' },
   { value: 20, label: '20×', shortcut: '5', description: 'Vinte horas por segundo.' },
-  { value: 30, label: '30×', shortcut: '6', description: 'Trinta horas por segundo. Velocidade hiper-acelerada!' }
+  { value: 30, label: '30×', shortcut: '6', description: 'Trinta horas por segundo. Velocidade hiper-acelerada!' },
+  { value: 60, label: '60×', shortcut: '7', description: 'Sessenta horas por segundo (60×). Velocidade ultra-acelerada!' }
 ];
 
 const ERA_STYLE: Record<string, { color: string; icon: string }> = {

@@ -11,11 +11,11 @@ import type { KingdomRanking } from '../core/StatsTracker';
 type SortKey = 'power' | 'population' | 'cities' | 'territory' | 'age';
 
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: 'power', label: 'Military power' },
-  { key: 'population', label: 'Population' },
-  { key: 'cities', label: 'Cities' },
-  { key: 'territory', label: 'Territory' },
-  { key: 'age', label: 'Oldest' }
+  { key: 'power', label: 'Poder militar' },
+  { key: 'population', label: 'População' },
+  { key: 'cities', label: 'Cidades' },
+  { key: 'territory', label: 'Território' },
+  { key: 'age', label: 'Mais antigo' }
 ];
 
 /** Realm browser: every kingdom on the left, full dossier on the right. */
@@ -52,12 +52,12 @@ export class KingdomsScreen implements Screen {
     const layout = el('div', { class: 'browser-screen' }, [
       el('header', { class: 'screen-head' }, [
         el('div', {}, [
-          el('h2', { class: 'screen-title', text: '👑 Realms of Aethoria' }),
-          el('p', { class: 'screen-sub', text: `${ctx.sim.kingdoms.size} kingdoms · ${ctx.sim.cities.size} settlements · year ${ctx.sim.currentYear}` })
+          el('h2', { class: 'screen-title', text: '👑 Reinos de Aethoria' }),
+          el('p', { class: 'screen-sub', text: `${ctx.sim.kingdoms.size} reinos · ${ctx.sim.cities.size} assentamentos · ano ${ctx.sim.currentYear}` })
         ]),
         el('div', { class: 'head-actions' }, [
-          el('label', { class: 'inline-field' }, [el('span', { text: 'Sort by' }), sortSelect]),
-          button('Close', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
+          el('label', { class: 'inline-field' }, [el('span', { text: 'Ordenar por' }), sortSelect]),
+          button('Fechar', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
         ])
       ]),
       el('div', { class: 'browser-body' }, [this.listEl, this.detailEl])
@@ -89,9 +89,9 @@ export class KingdomsScreen implements Screen {
     const ranked = this.rankings();
 
     if (ranked.length === 0) {
-      this.listEl.appendChild(emptyState('🏳️', 'No kingdoms yet', 'Settlements must grow before a realm is proclaimed.'));
+      this.listEl.appendChild(emptyState('🏳️', 'Nenhum reino ainda', 'Assentamentos devem crescer antes que um reino seja proclamado.'));
       clear(this.detailEl);
-      this.detailEl.appendChild(emptyState('👑', 'Nothing to inspect', 'Spawn some humanoids and let the world run.'));
+      this.detailEl.appendChild(emptyState('👑', 'Nada a inspecionar', 'Gere alguns humanoides e deixe o mundo rodar.'));
       return;
     }
 
@@ -120,7 +120,7 @@ export class KingdomsScreen implements Screen {
         el('div', { class: 'realm-row-main' }, [
           el('div', { class: 'realm-row-title' }, [
             el('span', { class: 'realm-name', text: kingdom.name }),
-            atWar ? el('span', { class: 'war-flag', text: '⚔️', title: 'At war' }) : null
+            atWar ? el('span', { class: 'war-flag', text: '⚔️', title: 'Em guerra' }) : null
           ].filter(Boolean) as HTMLElement[]),
           el('span', { class: 'realm-row-meta', text: `${SPECIES_DEFINITIONS[kingdom.species].name} · 👥 ${formatNumber(rank.population)} · 🏛️ ${rank.cities}` }),
           el('div', { class: 'realm-power' }, [
@@ -164,47 +164,47 @@ export class KingdomsScreen implements Screen {
         el('span', { class: 'hero-emblem', text: kingdom.emblem }),
         el('div', {}, [
           el('h3', { class: 'hero-name', text: kingdom.name }),
-          el('p', { class: 'hero-sub', text: `${config.name} realm · founded year ${kingdom.foundingYear} · ${this.ctx.sim.currentYear - kingdom.foundingYear} years old` })
+          el('p', { class: 'hero-sub', text: `Reino ${config.name} · fundado no ano ${kingdom.foundingYear} · ${this.ctx.sim.currentYear - kingdom.foundingYear} anos de idade` })
         ])
       ])
     );
 
     this.detailEl.appendChild(
       el('div', { class: 'stat-grid cols-4' }, [
-        this.tile('⚔️', 'Power', formatNumber(ranking?.power ?? 0)),
-        this.tile('👥', 'Subjects', formatNumber(subjects.length)),
-        this.tile('🏛️', 'Cities', `${cities.length}`),
-        this.tile('🗺️', 'Territory', formatNumber(ranking?.territory ?? 0))
+        this.tile('⚔️', 'Poder', formatNumber(ranking?.power ?? 0)),
+        this.tile('👥', 'Súditos', formatNumber(subjects.length)),
+        this.tile('🏛️', 'Cidades', `${cities.length}`),
+        this.tile('🗺️', 'Território', formatNumber(ranking?.territory ?? 0))
       ])
     );
 
     this.detailEl.appendChild(
       el('section', { class: 'detail-block' }, [
-        el('h4', { class: 'block-title', text: 'Crown' }),
+        el('h4', { class: 'block-title', text: 'Coroa' }),
         el('div', { class: 'stat-list' }, [
-          statRow('Ruler', ruler ? `👑 ${ruler.name} (Lvl ${ruler.level})` : 'Throne vacant', ruler ? '#fbbf24' : undefined),
-          statRow('Capital', this.ctx.sim.cities.get(kingdom.capitalCityId)?.name ?? 'Lost'),
-          statRow('Culture level', `${kingdom.cultureLevel}`),
-          statRow('Treasury', formatNumber(kingdom.wealth)),
-          statRow('Average subject level', avgLevel.toFixed(1))
+          statRow('Governante', ruler ? `👑 ${ruler.name} (Nvl ${ruler.level})` : 'Trono vago', ruler ? '#fbbf24' : undefined),
+          statRow('Capital', this.ctx.sim.cities.get(kingdom.capitalCityId)?.name ?? 'Perdida'),
+          statRow('Nível cultural', `${kingdom.cultureLevel}`),
+          statRow('Tesouro', formatNumber(kingdom.wealth)),
+          statRow('Nível médio dos súditos', avgLevel.toFixed(1))
         ])
       ])
     );
 
     this.detailEl.appendChild(
       el('section', { class: 'detail-block' }, [
-        el('h4', { class: 'block-title', text: 'Culture' }),
+        el('h4', { class: 'block-title', text: 'Cultura' }),
         el('div', { class: 'stat-list' }, [
-          statRow('Identity', cultureSummary(kingdom.culture)),
-          statRow('Living memory', kingdom.culture.memories[0]?.label ?? 'No defining memory yet')
+          statRow('Identidade', cultureSummary(kingdom.culture)),
+          statRow('Memória viva', kingdom.culture.memories[0]?.label ?? 'Nenhuma memória marcante')
         ]),
         el('div', { class: 'chip-row' },
           dominantCultureTraits(kingdom.culture, 5).map(trait => badge(trait, kingdom.color))
         ),
-        meter('Militarism', kingdom.culture.militarism, 1, '#ef4444', `${Math.round(kingdom.culture.militarism * 100)}%`),
-        meter('Openness', kingdom.culture.openness, 1, '#38bdf8', `${Math.round(kingdom.culture.openness * 100)}%`),
-        meter('Mercantilism', kingdom.culture.mercantilism, 1, '#f59e0b', `${Math.round(kingdom.culture.mercantilism * 100)}%`),
-        meter('War trauma', kingdom.culture.warTrauma, 1, '#a855f7', `${Math.round(kingdom.culture.warTrauma * 100)}%`)
+        meter('Militarismo', kingdom.culture.militarism, 1, '#ef4444', `${Math.round(kingdom.culture.militarism * 100)}%`),
+        meter('Abertura', kingdom.culture.openness, 1, '#38bdf8', `${Math.round(kingdom.culture.openness * 100)}%`),
+        meter('Mercantilismo', kingdom.culture.mercantilism, 1, '#f59e0b', `${Math.round(kingdom.culture.mercantilism * 100)}%`),
+        meter('Trauma de guerra', kingdom.culture.warTrauma, 1, '#a855f7', `${Math.round(kingdom.culture.warTrauma * 100)}%`)
       ])
     );
 
@@ -216,17 +216,17 @@ export class KingdomsScreen implements Screen {
 
     this.detailEl.appendChild(
       el('section', { class: 'detail-block' }, [
-        el('h4', { class: 'block-title', text: 'Social Factions' }),
+        el('h4', { class: 'block-title', text: 'Facções Sociais' }),
         el('div', { class: 'stat-list' }, [
-          statRow('Balance', societySummary(kingdom.society)),
-          statRow('Dominant faction', SOCIAL_FACTIONS[kingdom.society.dominantFaction].name),
-          statRow('Restless groups', restlessFactions || 'None organised')
+          statRow('Equilíbrio', societySummary(kingdom.society)),
+          statRow('Facção dominante', SOCIAL_FACTIONS[kingdom.society.dominantFaction].name),
+          statRow('Grupos inquietos', restlessFactions || 'Nenhum organizado')
         ]),
-        meter('Social cohesion', kingdom.society.cohesion, 1, '#22c55e', `${Math.round(kingdom.society.cohesion * 100)}%`),
-        meter('Reform pressure', kingdom.society.reformPressure, 1, '#38bdf8', `${Math.round(kingdom.society.reformPressure * 100)}%`),
-        meter('Revolt risk', kingdom.society.revoltRisk, 1, '#ef4444', `${Math.round(kingdom.society.revoltRisk * 100)}%`),
+        meter('Coesão social', kingdom.society.cohesion, 1, '#22c55e', `${Math.round(kingdom.society.cohesion * 100)}%`),
+        meter('Pressão reformista', kingdom.society.reformPressure, 1, '#38bdf8', `${Math.round(kingdom.society.reformPressure * 100)}%`),
+        meter('Risco de revolta', kingdom.society.revoltRisk, 1, '#ef4444', `${Math.round(kingdom.society.revoltRisk * 100)}%`),
         ...topFactions.map(f =>
-          meter(SOCIAL_FACTIONS[f.id].shortName, f.influence, 1, SOCIAL_FACTIONS[f.id].color, `${Math.round(f.influence * 100)}% influence`)
+          meter(SOCIAL_FACTIONS[f.id].shortName, f.influence, 1, SOCIAL_FACTIONS[f.id].color, `${Math.round(f.influence * 100)}% influência`)
         )
       ])
     );
@@ -235,13 +235,13 @@ export class KingdomsScreen implements Screen {
     const latestLaw = kingdom.laws.history[0];
     this.detailEl.appendChild(
       el('section', { class: 'detail-block' }, [
-        el('h4', { class: 'block-title', text: 'Laws & Reforms' }),
+        el('h4', { class: 'block-title', text: 'Leis e Reformas' }),
         el('div', { class: 'stat-list' }, [
-          statRow('Legal order', lawSummary(kingdom.laws)),
-          statRow('Reform momentum', `${Math.round(kingdom.laws.reformMomentum * 100)}%`),
-          statRow('Latest reform', latestLaw ? `Year ${latestLaw.year}: ${LAWS[latestLaw.from].shortName} -> ${LAWS[latestLaw.to].shortName}` : 'No major reform yet')
+          statRow('Ordem jurídica', lawSummary(kingdom.laws)),
+          statRow('Impulso reformista', `${Math.round(kingdom.laws.reformMomentum * 100)}%`),
+          statRow('Última reforma', latestLaw ? `Ano ${latestLaw.year}: ${LAWS[latestLaw.from].shortName} -> ${LAWS[latestLaw.to].shortName}` : 'Nenhuma reforma importante')
         ]),
-        meter('Reform readiness', kingdom.laws.reformMomentum, 1, '#22c55e', `${Math.round(kingdom.laws.reformMomentum * 100)}%`),
+        meter('Prontidão para reforma', kingdom.laws.reformMomentum, 1, '#22c55e', `${Math.round(kingdom.laws.reformMomentum * 100)}%`),
         el('div', { class: 'chip-row' },
           activeLaws.map(law => badge(`${law.shortName}`, kingdom.color))
         )
@@ -251,7 +251,7 @@ export class KingdomsScreen implements Screen {
     if (cities.length) {
       this.detailEl.appendChild(
         el('section', { class: 'detail-block' }, [
-          el('h4', { class: 'block-title', text: `Settlements (${cities.length})` }),
+          el('h4', { class: 'block-title', text: `Assentamentos (${cities.length})` }),
           el('div', { class: 'city-cards' },
             cities
               .sort((a, b) => b.population - a.population)
@@ -262,7 +262,7 @@ export class KingdomsScreen implements Screen {
                     click: () => {
                       this.ctx.focusOn(city.x, city.y, 1.6);
                       this.ctx.screens.closeAll();
-                      this.ctx.toast(`Viewing ${city.name}`, 'info');
+                      this.ctx.toast(`Vendo ${city.name}`, 'info');
                     }
                   }
                 }, [
@@ -283,7 +283,7 @@ export class KingdomsScreen implements Screen {
 
     this.detailEl.appendChild(
       el('section', { class: 'detail-block' }, [
-        el('h4', { class: 'block-title', text: 'Population' }),
+        el('h4', { class: 'block-title', text: 'População' }),
         el('div', { class: 'chip-row' },
           Array.from(professions.entries())
             .sort((a, b) => b[1] - a[1])
@@ -294,7 +294,7 @@ export class KingdomsScreen implements Screen {
 
     this.detailEl.appendChild(
       el('section', { class: 'detail-block' }, [
-        el('h4', { class: 'block-title', text: wars.length ? `Wars (${wars.length})` : 'Wars' }),
+        el('h4', { class: 'block-title', text: wars.length ? `Guerras (${wars.length})` : 'Guerras' }),
         wars.length
           ? el('div', { class: 'war-list' },
               wars.map(war => {
@@ -305,21 +305,21 @@ export class KingdomsScreen implements Screen {
                 const theirs = isAttacker ? war.defenderKills : war.attackerKills;
                 return el('div', { class: 'war-row' }, [
                   el('div', { class: 'war-row-head' }, [
-                    el('span', { class: 'war-title', text: `vs ${enemy?.name ?? 'Unknown realm'}` }),
-                    badge(isAttacker ? 'Aggressor' : 'Defender', isAttacker ? '#ef4444' : '#38bdf8')
+                    el('span', { class: 'war-title', text: `vs ${enemy?.name ?? 'Reino desconhecido'}` }),
+                    badge(isAttacker ? 'Agressor' : 'Defensor', isAttacker ? '#ef4444' : '#38bdf8')
                   ]),
-                  el('p', { class: 'war-meta', text: `${war.reason} · since year ${war.startYear} · ${war.battles} battles` }),
-                  meter('Kill ratio', own, Math.max(1, own + theirs), kingdom.color, `${own} : ${theirs}`)
+                  el('p', { class: 'war-meta', text: `${war.reason} · desde o ano ${war.startYear} · ${war.battles} batalhas` }),
+                  meter('Proporção de baixas', own, Math.max(1, own + theirs), kingdom.color, `${own} : ${theirs}`)
                 ]);
               })
             )
-          : el('p', { class: 'muted small', text: 'This realm is currently at peace.' })
+          : el('p', { class: 'muted small', text: 'Este reino está em paz.' })
       ])
     );
 
     this.detailEl.appendChild(
       el('div', { class: 'action-row' }, [
-        button('View on map', () => {
+        button('Ver no mapa', () => {
           const capital = this.ctx.sim.cities.get(kingdom.capitalCityId) ?? cities[0];
           if (capital) {
             this.ctx.focusOn(capital.x, capital.y, 1.4);

@@ -1,9 +1,14 @@
-import { Building, BuildingType, BUILDINGS } from './Building';
+import { Building, BuildingType, BUILDINGS, type UrbanHistoricalPhase } from './Building';
 import { SpeciesType } from '../entities/Species';
 import { Stockpile, GoodId } from './Goods';
 import { CityLedger } from './Economy';
 import { TerrainType, TERRAINS } from '../world/Biomes';
+import { CompactTerritory } from '../world/CompactTerritory';
 import { nextId } from '../core/Random';
+import type { ArchitecturalProfile } from './ArchitecturalProfile';
+import { architecturalProfileIsValid } from './ArchitecturalProfile';
+import type { FortificationLine } from './FortificationPlanner';
+import type { UrbanDistrictCell, UrbanSpecialization } from './UrbanDistricts';
 
 /**
  * A settlement. Grows through tiers as its population rises, and each tier
@@ -11,6 +16,31 @@ import { nextId } from '../core/Random';
  */
 
 export type SettlementTier = 'camp' | 'hamlet' | 'village' | 'town' | 'city' | 'metropolis';
+
+export interface UrbanPhaseRecord {
+  phase: UrbanHistoricalPhase;
+  startedYear: number;
+  /** Survey radius when the phase first appeared; useful for historical rings. */
+  radius: number;
+}
+
+export interface UrbanLifecycleChronicle {
+  lastFireYear: number | null;
+  lastDestructionYear: number | null;
+  lastAbandonmentYear: number | null;
+  lastReconstructionYear: number | null;
+  lastRecoveryYear: number | null;
+}
+
+const URBAN_PHASE_ORDER: readonly UrbanHistoricalPhase[] = ['settlement', 'village', 'city', 'great_city', 'metropolis'];
+
+export function historicalPhaseForTier(tier: SettlementTier): UrbanHistoricalPhase {
+  if (tier === 'camp') return 'settlement';
+  if (tier === 'hamlet' || tier === 'village') return 'village';
+  if (tier === 'town') return 'city';
+  if (tier === 'city') return 'great_city';
+  return 'metropolis';
+}
 
 export interface TierInfo {
   id: SettlementTier;
@@ -69,8 +99,33 @@ export class City {
 
   /** Everything this settlement physically holds. */
   public stock: Stockpile;
-  public territory: Set<string> = new Set();
+  public territory: CompactTerritory = new CompactTerritory();
   public buildings: Map<string, Building> = new Map();
+  /** Renderer-facing topology generation; changes only when building membership changes. */
+  public buildingVersion: number = 1;
+  /** Durable, compact timeline; detailed lot/block state remains derived. */
+  public urbanHistory: UrbanPhaseRecord[] = [];
+  /** CITY-V3 event-derived identity. Renderer reads it; it is never recomputed per frame. */
+  public architecturalProfile: ArchitecturalProfile | null = null;
+  /** Runtime cache generation for the urban planner. */
+  public architecturalVersion: number = 0;
+  /** CITY-V4 durable defensive rings. Geometry is rebuilt only when a line is commissioned. */
+  public fortificationLines: FortificationLine[] = [];
+  /** CITY-V5 compact functional cells; boundaries emerge from activity, never zoning. */
+  public urbanDistricts: UrbanDistrictCell[] = [];
+  public urbanSpecialization: UrbanSpecialization | null = null;
+  public districtVersion: number = 0;
+  /** CITY-V6 city-wide memory; detailed physical state remains on each building. */
+  public peakPopulation: number = 0;
+  public urbanCrisisYears: number = 0;
+  public lifecycleVersion: number = 0;
+  public urbanLifecycleChronicle: UrbanLifecycleChronicle = {
+    lastFireYear: null,
+    lastDestructionYear: null,
+    lastAbandonmentYear: null,
+    lastReconstructionYear: null,
+    lastRecoveryYear: null
+  };
 
   public tier: SettlementTier = 'camp';
   /**
@@ -133,7 +188,9 @@ export class City {
     this.territory.add(`${x},${y}`);
 
     const tc = new Building(`b_tc_${id}`, 'town_center', x, y, id);
+    tc.recordUrbanOrigin(foundingYear, 'settlement', 0);
     this.buildings.set(tc.id, tc);
+    this.urbanHistory.push({ phase: 'settlement', startedYear: foundingYear, radius: 0 });
   }
 
   // ============================ TIERS ============================
@@ -161,7 +218,7 @@ export class City {
   public storageBonus(): number {
     let bonus = 0;
     for (const b of this.buildings.values()) {
-      bonus += (b.definition.storage ?? 0) * b.level;
+      bonus += (b.definition.storage ?? 0) * b.level * b.operationalFactor();
     }
     return bonus;
   }
@@ -183,7 +240,9 @@ export class City {
   public hasFreeBuildingSlot(): boolean {
     let repeatable = 0;
     for (const b of this.buildings.values()) {
-      if (!b.definition.unique) repeatable++;
+      // Curtain walls are infrastructure pieces, not urban lots. Counting a
+      // 40-segment perimeter here would freeze normal city growth forever.
+      if (!b.definition.unique && !b.fortificationRole && b.countsTowardBuildingSlots()) repeatable++;
     }
     return repeatable < this.buildingSlots;
   }
@@ -191,14 +250,14 @@ export class City {
   /** Job slots this settlement offers, counting building levels. */
   public jobCount(): number {
     let jobs = 0;
-    for (const b of this.buildings.values()) jobs += (b.definition.jobs ?? 0) * b.level;
+    for (const b of this.buildings.values()) jobs += (b.definition.jobs ?? 0) * b.level * b.operationalFactor();
     return jobs;
   }
 
   /** Job slots currently filled by a real, living worker. */
   public filledJobs(): number {
     let filled = 0;
-    for (const b of this.buildings.values()) filled += b.assignedWorkerIds.size;
+    for (const b of this.buildings.values()) if (b.isOperational()) filled += b.assignedWorkerIds.size;
     return filled;
   }
 
@@ -227,7 +286,10 @@ export class City {
         if (tile.kingdomId && tile.kingdomId !== this.kingdomId) continue;
 
         this.territory.add(`${tile.x},${tile.y}`);
-        if (this.kingdomId) tile.kingdomId = this.kingdomId;
+        if (this.kingdomId && tile.kingdomId !== this.kingdomId) {
+          tile.kingdomId = this.kingdomId;
+          tileMap.markRenderDirty(tile.x, tile.y);
+        }
       }
     }
   }
@@ -240,7 +302,7 @@ export class City {
   public housingCapacity(): number {
     let capacity = 0;
     for (const b of this.buildings.values()) {
-      capacity += (b.definition.housing ?? 0) * b.level;
+      capacity += (b.definition.housing ?? 0) * b.level * b.operationalFactor();
     }
     return capacity;
   }
@@ -249,7 +311,7 @@ export class City {
   public jobsAvailable(): number {
     let jobs = 0;
     for (const b of this.buildings.values()) {
-      jobs += (b.definition.jobs ?? 0) * b.level;
+      jobs += (b.definition.jobs ?? 0) * b.level * b.operationalFactor();
     }
     return jobs;
   }
@@ -257,11 +319,35 @@ export class City {
   /** Combined defensive multiplier from walls, barracks and keeps. */
   public defenseMultiplier(): number {
     let multiplier = 1;
+    let legacyWalls = 0;
     for (const b of this.buildings.values()) {
+      if (b.type === 'wall') {
+        if (!b.fortificationRole) legacyWalls++;
+        continue;
+      }
+      if (!b.isOperational()) continue;
       const def = b.definition.defense;
       if (def) multiplier *= 1 + (def - 1) * (1 + (b.level - 1) * 0.4);
     }
-    return multiplier;
+    // Old saves may contain free-standing wall buildings. Keep their value but
+    // bound it instead of multiplying 1.25 once per physical segment.
+    let fortification = Math.min(.6, legacyWalls * .12);
+    for (const line of this.fortificationLines) {
+      let intact = 0;
+      let towers = 0;
+      let gates = 0;
+      for (const id of line.buildingIds) {
+        const piece = this.buildings.get(id);
+        if (!piece || piece.hp <= 0) continue;
+        intact += Math.max(0, Math.min(1, piece.hp / Math.max(1, piece.maxHp)));
+        if (piece.fortificationRole === 'tower') towers++;
+        if (piece.fortificationRole === 'gate') gates++;
+      }
+      const completeness = line.buildingIds.length > 0 ? intact / line.buildingIds.length : 0;
+      const lineValue = Math.min(1.15, .22 + completeness * .42 + towers * .018 - gates * .012);
+      fortification += line.status === 'active' ? lineValue : lineValue * .22;
+    }
+    return multiplier * (1 + Math.min(2.2, fortification));
   }
 
   // ============================ BUILDINGS ============================
@@ -279,14 +365,35 @@ export class City {
   public addBuilding(type: BuildingType, bx: number, by: number): Building {
     const b = new Building(nextId('b'), type, bx, by, this.id);
     this.buildings.set(b.id, b);
+    this.buildingVersion++;
     this.stock.capacity = this.tierInfo.storage + this.storageBonus();
     return b;
   }
 
   public removeBuilding(id: string): void {
-    this.buildings.delete(id);
+    if (this.buildings.delete(id)) this.buildingVersion++;
     this.stock.capacity = this.tierInfo.storage + this.storageBonus();
   }
+
+  public get urbanPhase(): UrbanHistoricalPhase { return historicalPhaseForTier(this.tier); }
+
+  public get currentUrbanGeneration(): number {
+    let generation = 0;
+    for (const record of this.urbanHistory) generation = Math.max(generation, URBAN_PHASE_ORDER.indexOf(record.phase));
+    return Math.max(0, generation);
+  }
+
+  /** Records only forward historical transitions; temporary population loss never rewrites the city. */
+  public recordUrbanPhase(year: number, radius: number): boolean {
+    const phase = this.urbanPhase;
+    const nextGeneration = URBAN_PHASE_ORDER.indexOf(phase);
+    if (nextGeneration <= this.currentUrbanGeneration) return false;
+    this.urbanHistory.push({ phase, startedYear: year, radius: Math.max(0, radius) });
+    return true;
+  }
+
+  /** For rare systems that install a prebuilt landmark directly. */
+  public markBuildingTopologyChanged(): void { this.buildingVersion++; }
 
   /** Buildings of a category, used by the construction AI to balance a settlement. */
   public buildingsOfCategory(category: string): Building[] {
@@ -304,7 +411,7 @@ export class City {
   public jobSlotInfo(type: BuildingType): { total: number; filled: number } {
     let total = 0, filled = 0;
     for (const b of this.buildings.values()) {
-      if (b.type === type) {
+      if (b.type === type && b.isOperational()) {
         total += (b.definition.jobs ?? 0);
         filled += b.assignedWorkerIds.size;
       }
@@ -412,9 +519,36 @@ export class City {
         y: b.y,
         level: b.level,
         hp: b.hp,
+        maxHp: b.maxHp,
         extractedGood: b.extractedGood,
-        assignedWorkerIds: [...b.assignedWorkerIds]
-      }))
+        assignedWorkerIds: [...b.assignedWorkerIds],
+        builtYear: b.builtYear,
+        originPhase: b.originPhase,
+        originGeneration: b.originGeneration,
+        renovatedYear: b.renovatedYear,
+        visualPhase: b.visualPhase,
+        architecture: b.architecture,
+        fortificationRole: b.fortificationRole,
+        fortificationLineId: b.fortificationLineId,
+        urbanContext: b.urbanContext,
+        lifecycleState: b.lifecycleState,
+        lifecycleProgress: b.lifecycleProgress,
+        stateSinceYear: b.stateSinceYear,
+        lastLifecycleYear: b.lastLifecycleYear,
+        abandonmentYears: b.abandonmentYears,
+        natureReclaim: b.natureReclaim,
+        lastDamageYear: b.lastDamageYear,
+        lastDamageCause: b.lastDamageCause,
+        lifecycleHistory: b.lifecycleHistory
+      })),
+      urbanHistory: this.urbanHistory,
+      architecturalProfile: this.architecturalProfile,
+      fortificationLines: this.fortificationLines,
+      urbanDistricts: this.urbanDistricts,
+      urbanSpecialization: this.urbanSpecialization,
+      peakPopulation: this.peakPopulation,
+      urbanCrisisYears: this.urbanCrisisYears,
+      urbanLifecycleChronicle: this.urbanLifecycleChronicle
     };
   }
 
@@ -436,17 +570,62 @@ export class City {
     city.siegeYears = data.siegeYears ?? 0;
     city.capturedYear = data.capturedYear ?? null;
     city.formerOwnerId = data.formerOwnerId ?? null;
-    city.territory = new Set(data.territory ?? [`${data.x},${data.y}`]);
+    city.urbanHistory = Array.isArray(data.urbanHistory) && data.urbanHistory.length > 0
+      ? data.urbanHistory.map((record: any) => ({ phase: record.phase, startedYear: record.startedYear, radius: record.radius ?? 0 }))
+      : [{ phase: 'settlement', startedYear: city.foundingYear, radius: 0 }];
+    city.architecturalProfile = architecturalProfileIsValid(data.architecturalProfile) ? data.architecturalProfile : null;
+    city.architecturalVersion = city.architecturalProfile?.revision ?? 0;
+    city.fortificationLines = Array.isArray(data.fortificationLines)
+      ? data.fortificationLines.map((line: FortificationLine) => ({
+          ...line,
+          outline: Array.isArray(line.outline) ? line.outline : [],
+          buildingIds: Array.isArray(line.buildingIds) ? line.buildingIds : [],
+          gateIds: Array.isArray(line.gateIds) ? line.gateIds : [],
+          towerIds: Array.isArray(line.towerIds) ? line.towerIds : []
+        }))
+      : [];
+    city.urbanDistricts = Array.isArray(data.urbanDistricts) ? data.urbanDistricts : [];
+    city.urbanSpecialization = data.urbanSpecialization ?? null;
+    city.districtVersion = city.urbanDistricts.length > 0 ? 1 : 0;
+    city.peakPopulation = Math.max(data.peakPopulation ?? 0, city.population);
+    city.urbanCrisisYears = data.urbanCrisisYears ?? 0;
+    city.urbanLifecycleChronicle = {
+      ...city.urbanLifecycleChronicle,
+      ...(data.urbanLifecycleChronicle ?? {})
+    };
+    city.territory = new CompactTerritory(data.territory ?? [`${data.x},${data.y}`]);
 
     if (Array.isArray(data.buildings) && data.buildings.length > 0) {
       city.buildings.clear();
       for (const bd of data.buildings) {
         const b = new Building(bd.id, bd.type, bd.x, bd.y, city.id);
         b.level = bd.level ?? 1;
-        b.maxHp = (BUILDINGS[bd.type as BuildingType]?.maxHp ?? 150) * (1 + (b.level - 1) * 0.5);
+        b.maxHp = bd.maxHp ?? (BUILDINGS[bd.type as BuildingType]?.maxHp ?? 150) * (1 + (b.level - 1) * 0.5);
         b.hp = bd.hp ?? b.maxHp;
         b.extractedGood = bd.extractedGood ?? null;
         b.assignedWorkerIds = new Set(bd.assignedWorkerIds ?? []);
+        const fallbackPhase = historicalPhaseForTier(city.tier);
+        b.builtYear = bd.builtYear ?? city.foundingYear;
+        b.originPhase = bd.originPhase ?? fallbackPhase;
+        b.originGeneration = bd.originGeneration ?? Math.max(0, URBAN_PHASE_ORDER.indexOf(b.originPhase));
+        b.renovatedYear = bd.renovatedYear ?? null;
+        b.visualPhase = bd.visualPhase ?? b.originPhase;
+        b.architecture = bd.architecture ?? null;
+        b.fortificationRole = bd.fortificationRole ?? null;
+        b.fortificationLineId = bd.fortificationLineId ?? null;
+        b.urbanContext = bd.urbanContext ?? null;
+        const inferredState = b.hp / Math.max(1, b.maxHp) <= .12
+          ? 'ruin'
+          : b.hp / Math.max(1, b.maxHp) <= .9 ? 'damaged' : 'normal';
+        b.lifecycleState = bd.lifecycleState ?? inferredState;
+        b.lifecycleProgress = bd.lifecycleProgress ?? (b.lifecycleState === 'normal' || b.lifecycleState === 'damaged' ? 1 : 0);
+        b.stateSinceYear = bd.stateSinceYear ?? b.builtYear;
+        b.lastLifecycleYear = bd.lastLifecycleYear ?? b.stateSinceYear;
+        b.abandonmentYears = bd.abandonmentYears ?? 0;
+        b.natureReclaim = bd.natureReclaim ?? 0;
+        b.lastDamageYear = bd.lastDamageYear ?? null;
+        b.lastDamageCause = bd.lastDamageCause ?? null;
+        b.lifecycleHistory = Array.isArray(bd.lifecycleHistory) ? bd.lifecycleHistory.slice(-8) : [];
         city.buildings.set(b.id, b);
       }
     }

@@ -8,37 +8,37 @@ type ViewMode = 'timeline' | 'stories';
 type ImportanceMode = 'all' | 'major';
 
 const FILTERS: { key: FilterKey; label: string; icon: string; color: string; types?: HistoryEventType[] }[] = [
-  { key: 'all', label: 'Everything', icon: '📜', color: '#fbbf24' },
-  { key: 'warfare', label: 'War & Conquest', icon: '⚔️', color: '#ef4444', types: ['war', 'peace', 'conquest', 'siege', 'rebellion'] },
-  { key: 'politics', label: 'States & Laws', icon: '👑', color: '#a855f7', types: ['kingdom', 'king', 'law', 'revolution', 'succession', 'diplomacy'] },
-  { key: 'people', label: 'People', icon: '🌟', color: '#f59e0b', types: ['great_person', 'king', 'succession'] },
-  { key: 'economy', label: 'Economy', icon: '⚖️', color: '#22c55e', types: ['trade', 'economy'] },
-  { key: 'culture', label: 'Culture & Knowledge', icon: '📚', color: '#22d3ee', types: ['tech', 'culture', 'wonder'] },
-  { key: 'world', label: 'Cities & Calamity', icon: '🌍', color: '#f97316', types: ['founding', 'disaster', 'famine'] }
+  { key: 'all', label: 'Tudo', icon: '📜', color: '#fbbf24' },
+  { key: 'warfare', label: 'Guerra e Conquista', icon: '⚔️', color: '#ef4444', types: ['war', 'peace', 'conquest', 'siege', 'rebellion'] },
+  { key: 'politics', label: 'Estados e Leis', icon: '👑', color: '#a855f7', types: ['kingdom', 'king', 'law', 'revolution', 'succession', 'diplomacy'] },
+  { key: 'people', label: 'Pessoas', icon: '🌟', color: '#f59e0b', types: ['great_person', 'king', 'succession'] },
+  { key: 'economy', label: 'Economia', icon: '⚖️', color: '#22c55e', types: ['trade', 'economy'] },
+  { key: 'culture', label: 'Cultura e Conhecimento', icon: '📚', color: '#22d3ee', types: ['tech', 'culture', 'wonder'] },
+  { key: 'world', label: 'Cidades e Calamidades', icon: '🌍', color: '#f97316', types: ['founding', 'disaster', 'famine'] }
 ];
 
 const TYPE_STYLE: Record<HistoryEventType, { icon: string; color: string; label: string }> = {
-  founding: { icon: '🏛️', color: '#34d399', label: 'Founding' },
-  kingdom: { icon: '👑', color: '#a855f7', label: 'Kingdom' },
-  war: { icon: '⚔️', color: '#ef4444', label: 'War' },
-  peace: { icon: '🕊️', color: '#38bdf8', label: 'Peace' },
-  king: { icon: '♛', color: '#fbbf24', label: 'Ruler' },
-  disaster: { icon: '💥', color: '#f43f5e', label: 'Disaster' },
-  conquest: { icon: '🚩', color: '#f97316', label: 'Conquest' },
-  trade: { icon: '⚖️', color: '#22c55e', label: 'Trade' },
-  tech: { icon: '💡', color: '#22d3ee', label: 'Discovery' },
-  law: { icon: '⚖', color: '#c084fc', label: 'Law' },
-  revolution: { icon: '🔥', color: '#fb7185', label: 'Revolution' },
-  society: { icon: '👥', color: '#f59e0b', label: 'Society' },
-  economy: { icon: '📈', color: '#10b981', label: 'Economy' },
-  diplomacy: { icon: '🤝', color: '#60a5fa', label: 'Diplomacy' },
-  great_person: { icon: '🌟', color: '#fbbf24', label: 'Great Person' },
-  wonder: { icon: '🏆', color: '#f59e0b', label: 'Wonder' },
-  succession: { icon: '♔', color: '#e879f9', label: 'Succession' },
-  famine: { icon: '🌾', color: '#d97706', label: 'Famine' },
-  siege: { icon: '🏰', color: '#dc2626', label: 'Siege' },
-  rebellion: { icon: '✊', color: '#f43f5e', label: 'Rebellion' },
-  culture: { icon: '🎭', color: '#2dd4bf', label: 'Culture' }
+  founding: { icon: '🏛️', color: '#34d399', label: 'Fundação' },
+  kingdom: { icon: '👑', color: '#a855f7', label: 'Reino' },
+  war: { icon: '⚔️', color: '#ef4444', label: 'Guerra' },
+  peace: { icon: '🕊️', color: '#38bdf8', label: 'Paz' },
+  king: { icon: '♛', color: '#fbbf24', label: 'Governante' },
+  disaster: { icon: '💥', color: '#f43f5e', label: 'Desastre' },
+  conquest: { icon: '🚩', color: '#f97316', label: 'Conquista' },
+  trade: { icon: '⚖️', color: '#22c55e', label: 'Comércio' },
+  tech: { icon: '💡', color: '#22d3ee', label: 'Descoberta' },
+  law: { icon: '⚖', color: '#c084fc', label: 'Lei' },
+  revolution: { icon: '🔥', color: '#fb7185', label: 'Revolução' },
+  society: { icon: '👥', color: '#f59e0b', label: 'Sociedade' },
+  economy: { icon: '📈', color: '#10b981', label: 'Economia' },
+  diplomacy: { icon: '🤝', color: '#60a5fa', label: 'Diplomacia' },
+  great_person: { icon: '🌟', color: '#fbbf24', label: 'Grande Pessoa' },
+  wonder: { icon: '🏆', color: '#f59e0b', label: 'Maravilha' },
+  succession: { icon: '♔', color: '#e879f9', label: 'Sucessão' },
+  famine: { icon: '🌾', color: '#d97706', label: 'Fome' },
+  siege: { icon: '🏰', color: '#dc2626', label: 'Cerco' },
+  rebellion: { icon: '✊', color: '#f43f5e', label: 'Rebelião' },
+  culture: { icon: '🎭', color: '#2dd4bf', label: 'Cultura' }
 };
 
 const IMPORTANCE_RANK: Record<HistoryImportance, number> = {
@@ -75,7 +75,7 @@ export class ChronicleScreen implements Screen {
 
     const search = el('input', {
       class: 'text-input search',
-      attrs: { type: 'search', placeholder: 'Search names, cities, causes, wars…', spellcheck: false },
+      attrs: { type: 'search', placeholder: 'Buscar nomes, cidades, causas, guerras…', spellcheck: false },
       on: {
         input: (ev: Event) => {
           this.query = (ev.target as HTMLInputElement).value.trim().toLowerCase();
@@ -88,19 +88,19 @@ export class ChronicleScreen implements Screen {
     const layout = el('div', { class: 'screen-panel' }, [
       el('header', { class: 'screen-head' }, [
         el('div', {}, [
-          el('h2', { class: 'screen-title', text: '📜 Chronicle of Aethoria' }),
-          el('p', { class: 'screen-sub', text: 'A living historical record — events, causes, consequences and connected stories.' })
+          el('h2', { class: 'screen-title', text: '📜 Crônica de Aethoria' }),
+          el('p', { class: 'screen-sub', text: 'Um registro histórico vivo — eventos, causas, consequências e histórias conectadas.' })
         ]),
         el('div', { class: 'head-actions' }, [
           search,
-          button('Clear', () => {
-            if (confirm('Erase the entire chronicle? The history of this world will be forgotten.')) {
+          button('Limpar', () => {
+            if (confirm('Apagar toda a crônica? A história deste mundo será esquecida.')) {
               chronicle.clear();
               this.render();
-              ctx.toast('The chronicle has been erased', 'warning');
+              ctx.toast('A crônica foi apagada', 'warning');
             }
           }, { icon: '🗑️' }),
-          button('Close', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
+          button('Fechar', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
         ])
       ]),
       this.viewTabsEl,
@@ -124,8 +124,8 @@ export class ChronicleScreen implements Screen {
   private renderViewTabs(): void {
     clear(this.viewTabsEl);
     const modes: { id: ViewMode; label: string; icon: string }[] = [
-      { id: 'timeline', label: 'Timeline', icon: '📜' },
-      { id: 'stories', label: 'Historical Stories', icon: '📖' }
+      { id: 'timeline', label: 'Linha do Tempo', icon: '📜' },
+      { id: 'stories', label: 'Histórias Históricas', icon: '📖' }
     ];
     for (const mode of modes) {
       this.viewTabsEl.appendChild(el('button', {
@@ -141,7 +141,7 @@ export class ChronicleScreen implements Screen {
           this.render();
         }
       }
-    }, [el('span', { text: '★' }), el('span', { text: this.importance === 'major' ? 'Major events only' : 'All importance' })]));
+    }, [el('span', { text: '★' }), el('span', { text: this.importance === 'major' ? 'Apenas eventos maiores' : 'Todas as importâncias' })]));
   }
 
   private renderFilters(): void {
@@ -172,10 +172,10 @@ export class ChronicleScreen implements Screen {
       ? '—'
       : `${summary.earliestYear}–${summary.latestYear}`;
     return el('div', { class: 'stat-grid cols-4' }, [
-      this.tile('📜', 'Recorded events', `${summary.total}`),
-      this.tile('★', 'Major events', `${summary.major}`, `${summary.legendary} legendary`),
-      this.tile('📖', 'Story threads', `${summary.threads}`),
-      this.tile('📅', 'Recorded years', span, `current year ${this.ctx.sim.currentYear}`)
+      this.tile('📜', 'Eventos registrados', `${summary.total}`),
+      this.tile('★', 'Eventos maiores', `${summary.major}`, `${summary.legendary} lendários`),
+      this.tile('📖', 'Linhas de história', `${summary.threads}`),
+      this.tile('📅', 'Anos registrados', span, `ano atual ${this.ctx.sim.currentYear}`)
     ]);
   }
 
@@ -193,10 +193,10 @@ export class ChronicleScreen implements Screen {
     if (events.length === 0) {
       this.bodyEl.appendChild(emptyState(
         '🕯️',
-        chronicle.getEvents().length === 0 ? 'History has yet to unfold' : 'Nothing matches this view',
+        chronicle.getEvents().length === 0 ? 'A história ainda não se desdobrou' : 'Nada corresponde a esta visão',
         chronicle.getEvents().length === 0
-          ? 'Let the simulation run. Foundings, crises, discoveries and wars will write this world’s history.'
-          : 'Try another category, show all importance levels, or clear the search.'
+          ? 'Deixe a simulação rodar. Fundações, crises, descobertas e guerras escreverão a história deste mundo.'
+          : 'Tente outra categoria, mostre todos os níveis de importância ou limpe a busca.'
       ));
       return;
     }
@@ -208,7 +208,7 @@ export class ChronicleScreen implements Screen {
         lastYear = event.year;
         timeline.appendChild(el('div', { class: 'timeline-year' }, [
           el('span', { class: 'year-dot' }),
-          el('span', { class: 'year-label', text: `Year ${event.year}` })
+          el('span', { class: 'year-label', text: `Ano ${event.year}` })
         ]));
       }
       timeline.appendChild(this.eventCard(event));
@@ -221,15 +221,15 @@ export class ChronicleScreen implements Screen {
     if (threads.length === 0) {
       this.bodyEl.appendChild(emptyState(
         '📖',
-        'No connected historical stories yet',
-        'Story chapters appear when structured events share a real thread — for example a siege, war, revolution or major legacy.'
+        'Nenhuma história conectada ainda',
+        'Capítulos da história aparecem quando eventos estruturados compartilham um tema real — por exemplo, um cerco, guerra, revolução ou um grande legado.'
       ));
       return;
     }
 
     for (const thread of threads) {
       const participants = thread.refs.map(ref => ref.name).filter((name): name is string => !!name);
-      const years = thread.startYear === thread.endYear ? `Year ${thread.startYear}` : `Years ${thread.startYear}–${thread.endYear}`;
+      const years = thread.startYear === thread.endYear ? `Ano ${thread.startYear}` : `Anos ${thread.startYear}–${thread.endYear}`;
       const visibleEvents = thread.events.filter(event => this.eventVisible(event));
       if (visibleEvents.length === 0) continue;
 
@@ -237,7 +237,7 @@ export class ChronicleScreen implements Screen {
         el('header', { class: 'panel-head' }, [
           el('div', {}, [
             el('h3', { class: 'panel-title', text: thread.title }),
-            el('p', { class: 'panel-sub', text: `${years} · ${thread.events.length} events${participants.length ? ` · ${participants.slice(0, 4).join(', ')}` : ''}` })
+            el('p', { class: 'panel-sub', text: `${years} · ${thread.events.length} eventos${participants.length ? ` · ${participants.slice(0, 4).join(', ')}` : ''}` })
           ]),
           this.importanceBadge(thread.importance)
         ]),
@@ -258,10 +258,10 @@ export class ChronicleScreen implements Screen {
 
     const details: HTMLElement[] = [];
     if (event.causes.length) {
-      details.push(el('p', { class: 'muted small', text: `Cause: ${event.causes.join(' • ')}` }));
+      details.push(el('p', { class: 'muted small', text: `Causa: ${event.causes.join(' • ')}` }));
     }
     if (event.consequences.length) {
-      details.push(el('p', { class: 'muted small', text: `Consequence: ${event.consequences.join(' • ')}` }));
+      details.push(el('p', { class: 'muted small', text: `Consequência: ${event.consequences.join(' • ')}` }));
     }
 
     return el('article', {
@@ -309,10 +309,10 @@ export class ChronicleScreen implements Screen {
 
   private importanceBadge(importance: HistoryImportance): HTMLElement {
     const labels: Record<HistoryImportance, string> = {
-      minor: 'Minor',
-      notable: 'Notable',
-      major: 'Major',
-      legendary: 'Legendary'
+      minor: 'Menor',
+      notable: 'Notável',
+      major: 'Maior',
+      legendary: 'Lendário'
     };
     return el('span', { class: `badge importance-${importance}`, text: labels[importance] });
   }

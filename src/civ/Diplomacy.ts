@@ -40,6 +40,10 @@ export class DiplomacyManager {
   public activeWars: Map<string, WarRecord> = new Map(); // Key: "k1_id:k2_id" (sorted)
   public warHistory: WarRecord[] = [];
   private truces: Map<string, Truce> = new Map();
+  /** Derived pair schedule; rebuilt only when realm membership changes. */
+  private scheduledPairs: Array<readonly [string, string]> = [];
+  private scheduledFingerprint = '';
+  private scheduledSource: string[] | null = null;
 
   private getPairKey(k1: string, k2: string): string {
     return k1 < k2 ? `${k1}:${k2}` : `${k2}:${k1}`;
@@ -287,6 +291,47 @@ export class DiplomacyManager {
     }
   }
 
+  /** One of N stable pair buckets per simulation tick, eliminating O(R²) spikes. */
+  public tickDiplomacySlice(kingdomIds: string[], year: number, phase: number, buckets: number = 10): void {
+    if (kingdomIds !== this.scheduledSource) {
+      const sorted = [...kingdomIds].sort();
+      const fingerprint = sorted.join('|');
+      this.scheduledSource = kingdomIds;
+      if (fingerprint === this.scheduledFingerprint) return this.tickDiplomacySliceScheduled(year, phase, buckets);
+      this.scheduledFingerprint = fingerprint;
+      this.scheduledPairs = [];
+      for (let i = 0; i < sorted.length; i++) {
+        for (let j = i + 1; j < sorted.length; j++) this.scheduledPairs.push([sorted[i], sorted[j]]);
+      }
+    }
+    this.tickDiplomacySliceScheduled(year, phase, buckets);
+  }
+
+  private tickDiplomacySliceScheduled(year: number, phase: number, buckets: number): void {
+    const bucketCount = Math.max(1, Math.floor(buckets));
+    const start = ((phase % bucketCount) + bucketCount) % bucketCount;
+    for (let i = start; i < this.scheduledPairs.length; i += bucketCount) {
+      const [k1, k2] = this.scheduledPairs[i];
+      const rel = this.getRelation(k1, k2);
+      if (rel > 5) this.changeRelation(k1, k2, -0.75);
+      else if (rel < -5) this.changeRelation(k1, k2, 0.5);
+
+      if (this.isAtWar(k1, k2)) {
+        const war = this.activeWars.get(this.getPairKey(k1, k2));
+        if (war && year - war.startYear > 3) {
+          const duration = year - war.startYear;
+          const casualties = war.attackerKills + war.defenderKills;
+          const peaceChance = Math.min(0.22, 0.02 + duration * 0.012 + casualties * 0.0015);
+          if (rng.chance(peaceChance)) {
+            this.settleWar(k1, k2, year, casualties > 10 ? 'exhaustion' : 'white_peace', null, -25, 4 + Math.floor(duration / 2));
+          }
+        }
+      } else {
+        this.hasTruce(k1, k2, year);
+      }
+    }
+  }
+
   /** Get all wars involving a specific kingdom */
   public getWarsFor(kingdomId: string): WarRecord[] {
     const wars: WarRecord[] = [];
@@ -340,5 +385,8 @@ export class DiplomacyManager {
     this.activeWars = new Map(data.activeWars ?? []);
     this.warHistory = data.warHistory ?? [];
     this.truces = new Map(data.truces ?? []);
+    this.scheduledPairs = [];
+    this.scheduledFingerprint = '';
+    this.scheduledSource = null;
   }
 }

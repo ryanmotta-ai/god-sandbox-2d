@@ -11,18 +11,18 @@ import type { GameContext } from '../core/GameContext';
 type Tab = 'species' | 'traits' | 'terrain' | 'powers';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'species', label: 'Species', icon: '🧬' },
-  { id: 'traits', label: 'Traits', icon: '✨' },
-  { id: 'terrain', label: 'Terrain', icon: '🗺️' },
-  { id: 'powers', label: 'Divine Powers', icon: '⚡' }
+  { id: 'species', label: 'Espécies', icon: '🧬' },
+  { id: 'traits', label: 'Características', icon: '✨' },
+  { id: 'terrain', label: 'Terreno', icon: '🗺️' },
+  { id: 'powers', label: 'Poderes Divinos', icon: '⚡' }
 ];
 
 const SPECIES_LORE: Record<SpeciesType, string> = {
   [SpeciesType.HUMAN]: 'A única espécie civilizada de Aethoria. Sem dom nenhum de nascença: tudo que constroem vem de trabalho, comércio e tecnologia — e é por isso que se espalham por qualquer terreno que dê para arar.',
-  [SpeciesType.DEER]: 'Harmless grazers. Their only strategy is to run, and it usually works.',
-  [SpeciesType.WOLF]: 'Pack hunters that coordinate attacks on stragglers. A lone wolf is a nuisance; a pack is a massacre.',
-  [SpeciesType.BEAR]: 'Territorial and immensely strong. Bears do not chase — they simply refuse to lose ground.',
-  [SpeciesType.DRAGON]: 'An apex disaster with wings. Slaying one showers the nearest hero with legendary equipment.',
+  [SpeciesType.DEER]: 'Herbívoros inofensivos. Sua única estratégia é fugir, e geralmente funciona.',
+  [SpeciesType.WOLF]: 'Caçadores em bando que coordenam ataques aos retardatários. Um lobo solitário é um incômodo; um bando é um massacre.',
+  [SpeciesType.BEAR]: 'Territoriais e imensamente fortes. Ursos não perseguem — eles simplesmente se recusam a ceder terreno.',
+  [SpeciesType.DRAGON]: 'Um desastre alado no topo da cadeia alimentar. Matar um inunda o herói mais próximo com equipamento lendário.',
   [SpeciesType.BOAR]: 'Javali selvagem das florestas. Territorial e agressivo quando ameaçado.',
   [SpeciesType.EAGLE]: 'Águia de rapina que sobrevoa cumes de montanha em busca de presas.',
   [SpeciesType.MAMMOTH]: 'Mamute gigante das tundras congeladas. Titã resistente caçado por tribos primitivas.'
@@ -47,10 +47,10 @@ export class BestiaryScreen implements Screen {
     const layout = el('div', { class: 'screen-panel' }, [
       el('header', { class: 'screen-head' }, [
         el('div', {}, [
-          el('h2', { class: 'screen-title', text: '📖 Codex of Aethoria' }),
-          el('p', { class: 'screen-sub', text: 'Everything that lives, grows, burns and can be summoned.' })
+          el('h2', { class: 'screen-title', text: '📖 Códice de Aethoria' }),
+          el('p', { class: 'screen-sub', text: 'Tudo que vive, cresce, queima e pode ser invocado.' })
         ]),
-        button('Close', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
+        button('Fechar', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
       ]),
       this.tabsEl,
       this.bodyEl
@@ -115,35 +115,35 @@ export class BestiaryScreen implements Screen {
             el('div', {}, [
               el('h3', { class: 'codex-name', style: { color: config.primaryColor }, text: config.name }),
               el('div', { class: 'chip-row' }, [
-                badge(config.isHumanoid ? 'Civilisation' : 'Wildlife', config.primaryColor),
-                alive > 0 ? badge(`${alive} alive`, '#34d399') : badge('None alive', '#64748b')
+                badge(config.isHumanoid ? 'Civilização' : 'Vida Selvagem', config.primaryColor),
+                alive > 0 ? badge(`${alive} vivos`, '#34d399') : badge('Nenhum vivo', '#64748b')
               ])
             ])
           ]),
           el('p', { class: 'codex-lore', text: SPECIES_LORE[config.id] }),
           el('div', { class: 'meter-stack' }, [
-            meter('Health', config.baseHp, 1200, '#ef4444', `${config.baseHp}`),
-            meter('Damage', config.baseDamage, 65, '#f97316', `${config.baseDamage}`),
-            meter('Defense', config.baseDefense, 25, '#38bdf8', `${config.baseDefense}`),
-            meter('Speed', config.baseSpeed, 1.5, '#34d399', config.baseSpeed.toFixed(2)),
-            meter('Lifespan', config.maxAge, 1000, '#a855f7', `${config.maxAge} yrs`)
+            meter('Vida', config.baseHp, 1200, '#ef4444', `${config.baseHp}`),
+            meter('Dano', config.baseDamage, 65, '#f97316', `${config.baseDamage}`),
+            meter('Defesa', config.baseDefense, 25, '#38bdf8', `${config.baseDefense}`),
+            meter('Velocidade', config.baseSpeed, 1.5, '#34d399', config.baseSpeed.toFixed(2)),
+            meter('Expectativa de vida', config.maxAge, 1000, '#a855f7', `${config.maxAge} anos`)
           ]),
           el('div', { class: 'stat-list' }, [
             el('div', { class: 'stat-row' }, [
-              el('span', { class: 'stat-label', text: 'Architecture' }),
+              el('span', { class: 'stat-label', text: 'Arquitetura' }),
               el('span', { class: 'stat-value', text: config.buildingStyle })
             ]),
             el('div', { class: 'stat-row' }, [
-              el('span', { class: 'stat-label', text: 'Prefers' }),
+              el('span', { class: 'stat-label', text: 'Prefere' }),
               el('span', { class: 'stat-value', text: config.preferredBiomes.map(titleCase).join(', ') })
             ])
           ])
         ]);
       }));
 
-    this.bodyEl.appendChild(el('h3', { class: 'codex-section-title', text: 'Civilised Species' }));
+    this.bodyEl.appendChild(el('h3', { class: 'codex-section-title', text: 'Espécies Civilizadas' }));
     this.bodyEl.appendChild(grid(humanoids));
-    this.bodyEl.appendChild(el('h3', { class: 'codex-section-title', text: 'Wildlife & Beasts' }));
+    this.bodyEl.appendChild(el('h3', { class: 'codex-section-title', text: 'Vida Selvagem e Feras' }));
     this.bodyEl.appendChild(grid(fauna));
   }
 
@@ -156,17 +156,17 @@ export class BestiaryScreen implements Screen {
     }
 
     this.bodyEl.appendChild(
-      el('p', { class: 'codex-intro', text: 'Traits stack multiplicatively and are partially inherited by offspring. Divine powers can grant them directly.' })
+      el('p', { class: 'codex-intro', text: 'Características se acumulam multiplicativamente e são parcialmente herdadas pelos filhotes. Poderes divinos podem concedê-las diretamente.' })
     );
 
     this.bodyEl.appendChild(
       el('div', { class: 'codex-grid cols-3' },
         Object.values(TRAIT_DEFINITIONS).map(trait => {
           const mods: string[] = [];
-          if (trait.hpMod) mods.push(`${formatMod(trait.hpMod)} max HP`);
-          if (trait.damageMod) mods.push(`${formatMod(trait.damageMod)} damage`);
-          if (trait.defenseMod) mods.push(`${formatMod(trait.defenseMod)} defense`);
-          if (trait.speedMod) mods.push(`${formatMod(trait.speedMod)} speed`);
+          if (trait.hpMod) mods.push(`${formatMod(trait.hpMod)} HP máx.`);
+          if (trait.damageMod) mods.push(`${formatMod(trait.damageMod)} dano`);
+          if (trait.defenseMod) mods.push(`${formatMod(trait.defenseMod)} defesa`);
+          if (trait.speedMod) mods.push(`${formatMod(trait.speedMod)} velocidade`);
 
           return el('article', {
             class: 'codex-card compact',
@@ -177,11 +177,11 @@ export class BestiaryScreen implements Screen {
             mods.length ? el('div', { class: 'chip-row' }, mods.map(m => badge(m, trait.color))) : null,
             el('div', { class: 'stat-list' }, [
               el('div', { class: 'stat-row' }, [
-                el('span', { class: 'stat-label', text: 'Inherit chance' }),
+                el('span', { class: 'stat-label', text: 'Chance de herança' }),
                 el('span', { class: 'stat-value', text: `${Math.round(trait.inheritChance * 100)}%` })
               ]),
               el('div', { class: 'stat-row' }, [
-                el('span', { class: 'stat-label', text: 'Carriers alive' }),
+                el('span', { class: 'stat-label', text: 'Portadores vivos' }),
                 el('span', { class: 'stat-value', text: `${counts.get(trait.id) ?? 0}` })
               ])
             ])
@@ -205,7 +205,7 @@ export class BestiaryScreen implements Screen {
     const totalTiles = map.width * map.height;
 
     this.bodyEl.appendChild(
-      el('p', { class: 'codex-intro', text: `Composition of the current world (${map.width} × ${map.height} tiles).` })
+      el('p', { class: 'codex-intro', text: `Composição do mundo atual (${map.width} × ${map.height} blocos).` })
     );
 
     this.bodyEl.appendChild(
@@ -218,19 +218,19 @@ export class BestiaryScreen implements Screen {
               el('span', { class: 'terrain-swatch', style: { background: terrain.color } }),
               el('div', {}, [
                 el('h3', { class: 'terrain-name', text: terrain.name }),
-                el('span', { class: 'terrain-share', text: `${share.toFixed(1)}% of the world` })
+                el('span', { class: 'terrain-share', text: `${share.toFixed(1)}% do mundo` })
               ])
             ]),
             el('div', { class: 'chip-row' }, [
-              terrain.isWalkable ? badge('Passable', '#34d399') : badge('Impassable', '#ef4444'),
-              terrain.isWater ? badge('Water', '#38bdf8') : null,
-              terrain.flammability > 0.5 ? badge('Highly flammable', '#f97316') : null,
-              terrain.fertility >= 0.9 ? badge('Fertile', '#22c55e') : null
+              terrain.isWalkable ? badge('Transitável', '#34d399') : badge('Intransitável', '#ef4444'),
+              terrain.isWater ? badge('Água', '#38bdf8') : null,
+              terrain.flammability > 0.5 ? badge('Altamente inflamável', '#f97316') : null,
+              terrain.fertility >= 0.9 ? badge('Fértil', '#22c55e') : null
             ].filter(Boolean) as HTMLElement[]),
             el('div', { class: 'meter-stack' }, [
-              meter('Fertility', terrain.fertility, 1.2, '#22c55e', `${Math.round(terrain.fertility * 100)}%`),
-              meter('Flammability', terrain.flammability, 1, '#f97316', `${Math.round(terrain.flammability * 100)}%`),
-              meter('Move cost', Math.min(terrain.moveCost, 3), 3, '#94a3b8', terrain.moveCost >= 99 ? 'Blocked' : terrain.moveCost.toFixed(1))
+              meter('Fertilidade', terrain.fertility, 1.2, '#22c55e', `${Math.round(terrain.fertility * 100)}%`),
+              meter('Inflamabilidade', terrain.flammability, 1, '#f97316', `${Math.round(terrain.flammability * 100)}%`),
+              meter('Custo de movimento', Math.min(terrain.moveCost, 3), 3, '#94a3b8', terrain.moveCost >= 99 ? 'Bloqueado' : terrain.moveCost.toFixed(1))
             ])
           ]);
         })
@@ -242,7 +242,7 @@ export class BestiaryScreen implements Screen {
 
   private renderPowers(): void {
     this.bodyEl.appendChild(
-      el('p', { class: 'codex-intro', text: 'Every divine power available from the dock, grouped by category. Click one to equip it.' })
+      el('p', { class: 'codex-intro', text: 'Todo poder divino disponível no painel, agrupado por categoria. Clique em um para equipar.' })
     );
 
     for (const category of CATEGORIES) {
@@ -253,24 +253,24 @@ export class BestiaryScreen implements Screen {
         el('section', { class: 'panel' }, [
           el('header', { class: 'panel-head' }, [
             el('h3', { class: 'panel-title', text: `${category.icon} ${category.label}` }),
-            el('p', { class: 'panel-sub', text: `Shift + ${category.hotkey} · ${powers.length} powers` })
+            el('p', { class: 'panel-sub', text: `Shift + ${category.hotkey} · ${powers.length} poderes` })
           ]),
           el('div', { class: 'panel-body' }, [
             el('div', { class: 'power-codex' }, powers.map(power =>
               el('button', {
                 class: 'power-codex-item',
                 style: { '--power-accent': category.accent } as any,
-                title: this.ctx.inGame ? 'Select this power' : 'Start a world to use this power',
+                title: this.ctx.inGame ? 'Selecionar este poder' : 'Crie um mundo para usar este poder',
                 on: {
                   click: () => {
                     if (!this.ctx.inGame) {
-                      this.ctx.toast('Create a world first', 'warning');
+                      this.ctx.toast('Crie um mundo primeiro', 'warning');
                       return;
                     }
                     this.ctx.brush.setCategory(category.id);
                     this.ctx.brush.setPower(power.id);
                     this.ctx.screens.closeAll();
-                    this.ctx.toast(`${power.icon} ${power.name} equipped`, 'divine');
+                    this.ctx.toast(`${power.icon} ${power.name} equipado`, 'divine');
                   }
                 }
               }, [

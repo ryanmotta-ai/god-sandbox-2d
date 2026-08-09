@@ -1,0 +1,12 @@
+[[permission]]
+identifier = "allow-save-storage"
+description = "Allows validated Aethoria save documents to be listed, read, written, transferred, checked, and deleted by numeric slot. No arbitrary paths are accepted."
+commands.allow = [
+    "aethoria_storage_write",
+    "aethoria_storage_read",
+    "aethoria_storage_list",
+    "aethoria_storage_delete",
+    "aethoria_storage_exists",
+    "aethoria_storage_export",
+    "aethoria_storage_import",
+]

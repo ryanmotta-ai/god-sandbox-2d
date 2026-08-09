@@ -94,7 +94,7 @@ export const SPECIES_DEFINITIONS: Record<SpeciesType, SpeciesConfig> = {
   },
   [SpeciesType.DRAGON]: {
     id: SpeciesType.DRAGON,
-    name: 'Dragão Ancião (Boss)',
+    name: 'Dragão Ancião (Chefe)',
     isHumanoid: false,
     baseHp: 1200,
     baseSpeed: 1.2,

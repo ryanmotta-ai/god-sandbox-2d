@@ -20,11 +20,11 @@ export class GameOverScreen implements Screen {
     const finalYear = ctx.sim.currentYear;
     const notableEvents = chronicle.getEvents().slice(0, 5);
 
-    const title = params.reason === 'extinction' ? 'The Last Civilisation Falls' : 'Silence';
+    const title = params.reason === 'extinction' ? 'A Última Civilização Cai' : 'Silêncio';
     const subtitle =
       params.reason === 'extinction'
-        ? `After ${finalYear} years, no civilised being remains in Aethoria.`
-        : `Nothing living remains in Aethoria after ${finalYear} years.`;
+        ? `Após ${finalYear} anos, nenhum ser civilizado permanece em Aethoria.`
+        : `Não resta nada vivo em Aethoria após ${finalYear} anos.`;
 
     return el('div', { class: 'gameover-screen' }, [
       el('div', { class: 'gameover-card' }, [
@@ -33,23 +33,23 @@ export class GameOverScreen implements Screen {
         el('p', { class: 'gameover-sub', text: subtitle }),
 
         el('div', { class: 'stat-grid cols-4' }, [
-          this.tile('📅', 'Years passed', `${finalYear}`),
-          this.tile('👑', 'Peak kingdoms', `${ctx.stats.peakKingdoms}`),
-          this.tile('👥', 'Peak population', formatNumber(ctx.stats.peakPopulation)),
-          this.tile('⚔️', 'Wars fought', `${ctx.sim.diplomacy.warHistory.length + ctx.sim.diplomacy.activeWars.size}`),
-          this.tile('👶', 'Total births', formatNumber(ctx.sim.totalBirths)),
-          this.tile('💀', 'Total deaths', formatNumber(ctx.sim.totalDeaths)),
-          this.tile('🏛️', 'Cities founded', `${ctx.sim.cities.size}`),
-          this.tile('🌍', 'World seed', `${ctx.worldConfig.seed}`)
+          this.tile('📅', 'Anos passados', `${finalYear}`),
+          this.tile('👑', 'Pico de reinos', `${ctx.stats.peakKingdoms}`),
+          this.tile('👥', 'Pico de população', formatNumber(ctx.stats.peakPopulation)),
+          this.tile('⚔️', 'Guerras travadas', `${ctx.sim.diplomacy.warHistory.length + ctx.sim.diplomacy.activeWars.size}`),
+          this.tile('👶', 'Total de nascimentos', formatNumber(ctx.sim.totalBirths)),
+          this.tile('💀', 'Total de mortes', formatNumber(ctx.sim.totalDeaths)),
+          this.tile('🏛️', 'Cidades fundadas', `${ctx.sim.cities.size}`),
+          this.tile('🌍', 'Semente do mundo', `${ctx.worldConfig.seed}`)
         ]),
 
         notableEvents.length
           ? el('section', { class: 'panel' }, [
-              el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Final entries in the chronicle' })]),
+              el('header', { class: 'panel-head' }, [el('h3', { class: 'panel-title', text: 'Últimos registros da crônica' })]),
               el('div', { class: 'panel-body' }, [
                 el('div', { class: 'history-list' }, notableEvents.map(event =>
                   el('div', { class: 'history-row' }, [
-                    el('span', { class: 'history-years', text: `Yr ${event.year}` }),
+                    el('span', { class: 'history-years', text: `Ano ${event.year}` }),
                     el('span', { class: 'history-text', text: event.text })
                   ])
                 ))
@@ -58,12 +58,12 @@ export class GameOverScreen implements Screen {
           : null,
 
         el('div', { class: 'gameover-actions' }, [
-          button('Keep playing', () => ctx.screens.closeAll(), { icon: '👁️', title: 'Stay in this dead world' }),
-          button('View statistics', () => ctx.screens.open('stats'), { icon: '📊' }),
-          button('Reseed this world', () => {
+          button('Continuar jogando', () => ctx.screens.closeAll(), { icon: '👁️', title: 'Permanecer neste mundo morto' }),
+          button('Ver estatísticas', () => ctx.screens.open('stats'), { icon: '📊' }),
+          button('Recriar este mundo', () => {
             ctx.startNewWorld({ ...ctx.worldConfig, seed: Math.floor(Math.random() * 2147483647) });
           }, { variant: 'primary', icon: '🌱' }),
-          button('Main menu', () => ctx.quitToMenu(), { variant: 'danger', icon: '⏏️' })
+          button('Menu principal', () => ctx.quitToMenu(), { variant: 'danger', icon: '⏏️' })
         ])
       ].filter(Boolean) as HTMLElement[])
     ]);

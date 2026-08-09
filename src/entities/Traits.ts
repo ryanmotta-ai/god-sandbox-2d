@@ -28,16 +28,16 @@ export interface TraitDefinition {
 export const TRAIT_DEFINITIONS: Record<TraitId, TraitDefinition> = {
   [TraitId.BLESSED]: {
     id: TraitId.BLESSED,
-    name: 'Blessed',
-    description: '+25% Max HP & Divine Favor',
+    name: 'Abençoado',
+    description: '+25% HP Máx & Favor Divino',
     color: '#fbbf24',
     inheritChance: 0.3,
     hpMod: 1.25
   },
   [TraitId.GIANT]: {
     id: TraitId.GIANT,
-    name: 'Giant',
-    description: '+50% Max HP, +30% Damage, slower movement',
+    name: 'Gigante',
+    description: '+50% HP Máx, +30% Dano, movimento mais lento',
     color: '#f97316',
     inheritChance: 0.25,
     hpMod: 1.5,
@@ -46,23 +46,23 @@ export const TRAIT_DEFINITIONS: Record<TraitId, TraitDefinition> = {
   },
   [TraitId.QUICK]: {
     id: TraitId.QUICK,
-    name: 'Quick',
-    description: '+40% Movement Speed',
+    name: 'Veloz',
+    description: '+40% Velocidade de Movimento',
     color: '#06b6d4',
     inheritChance: 0.4,
     speedMod: 1.4
   },
   [TraitId.GENIUS]: {
     id: TraitId.GENIUS,
-    name: 'Genius',
-    description: 'High intellect, fast work output',
+    name: 'Gênio',
+    description: 'Intelecto alto, trabalho rápido',
     color: '#8b5cf6',
     inheritChance: 0.2
   },
   [TraitId.VETERAN]: {
     id: TraitId.VETERAN,
-    name: 'Veteran',
-    description: '+15 combat experience, +4 Defense',
+    name: 'Veterano',
+    description: '+15 experiência de combate, +4 Defesa',
     color: '#10b981',
     inheritChance: 0.1,
     defenseMod: 1.2,
@@ -70,51 +70,51 @@ export const TRAIT_DEFINITIONS: Record<TraitId, TraitDefinition> = {
   },
   [TraitId.REGENERATOR]: {
     id: TraitId.REGENERATOR,
-    name: 'Regenerator',
-    description: 'Continuously recovers health',
+    name: 'Regenerador',
+    description: 'Recupera HP continuamente',
     color: '#34d399',
     inheritChance: 0.35
   },
   [TraitId.CURSED]: {
     id: TraitId.CURSED,
-    name: 'Cursed',
-    description: '-30% Max HP, prone to accidents',
+    name: 'Amaldiçoado',
+    description: '-30% HP Máx, propenso a acidentes',
     color: '#6b21a8',
     inheritChance: 0.2,
     hpMod: 0.7
   },
   [TraitId.IMMORTAL]: {
     id: TraitId.IMMORTAL,
-    name: 'Immortal',
-    description: 'Does not age or suffer old age death',
+    name: 'Imortal',
+    description: 'Não envelhece ou morre de velhice',
     color: '#ec4899',
     inheritChance: 0.05
   },
   [TraitId.FLAMMABLE]: {
     id: TraitId.FLAMMABLE,
-    name: 'Flammable',
-    description: 'Takes double fire damage',
+    name: 'Inflamável',
+    description: 'Recebe o dobro de dano de fogo',
     color: '#ef4444',
     inheritChance: 0.3
   },
   [TraitId.PACIFIST]: {
     id: TraitId.PACIFIST,
-    name: 'Pacifist',
-    description: 'Avoids combat and violence',
+    name: 'Pacifista',
+    description: 'Evita combate e violência',
     color: '#38bdf8',
     inheritChance: 0.3
   },
   [TraitId.PYROMANIAC]: {
     id: TraitId.PYROMANIAC,
-    name: 'Pyromaniac',
-    description: 'Loves setting fires',
+    name: 'Piromaníaco',
+    description: 'Adora atear fogo',
     color: '#dc2626',
     inheritChance: 0.15
   },
   [TraitId.IRONCLAD]: {
     id: TraitId.IRONCLAD,
-    name: 'Ironclad',
-    description: '+50% Defense boost',
+    name: 'Encouraçado',
+    description: '+50% bônus de Defesa',
     color: '#64748b',
     inheritChance: 0.25,
     defenseMod: 1.5

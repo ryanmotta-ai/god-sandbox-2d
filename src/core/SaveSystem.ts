@@ -7,18 +7,21 @@ import { City } from '../civ/City';
 import { Kingdom } from '../civ/Kingdom';
 import { Household } from '../civ/Household';
 import { createNeeds } from '../entities/Needs';
+import {
+  SAVE_FORMAT_VERSION,
+  parseSaveDocument,
+  serializeSaveDocument,
+  type SaveMetadataInput
+} from '../platform/saveFormat';
+import { getSaveStorage } from '../platform/storage';
+import { readLegacyWebSave, writeLegacyWebSave } from '../platform/storage/legacyWebSave';
 
 /** Slot 0 is reserved for autosave; 1..4 are manual. */
 export const AUTOSAVE_SLOT = 0;
 export const SLOT_COUNT = 5;
 
-const SLOT_KEY = (slot: number) => `aethoria_slot_${slot}`;
-const META_KEY = (slot: number) => `aethoria_slot_${slot}_meta`;
-const LEGACY_KEY = 'aethoria_savegame';
-
-export interface SlotMeta {
+export interface SlotMeta extends SaveMetadataInput {
   name: string;
-  thumbnail?: string;
 }
 
 export interface SlotInfo {
@@ -32,24 +35,55 @@ export interface SlotInfo {
   kingdoms: number;
   timestamp: number;
   thumbnail?: string;
+  corrupted?: boolean;
+  error?: string;
 }
 
 export class SaveSystem {
   // ============================ SLOTS ============================
 
-  public static listSlots(): SlotInfo[] {
-    const slots: SlotInfo[] = [];
-    for (let slot = 0; slot < SLOT_COUNT; slot++) {
-      slots.push(this.readSlotInfo(slot));
-    }
-    return slots;
+  public static async listSlots(): Promise<SlotInfo[]> {
+    const descriptors = await getSaveStorage().list();
+    const bySlot = new Map(descriptors.map(descriptor => [descriptor.slot, descriptor]));
+    return Array.from({ length: SLOT_COUNT }, (_, slot) => {
+      const descriptor = bySlot.get(slot);
+      if (!descriptor) return this.emptySlotInfo(slot);
+      if (!descriptor.valid || !descriptor.metadata) {
+        return {
+          ...this.emptySlotInfo(slot),
+          exists: true,
+          name: 'Save corrompido',
+          timestamp: descriptor.modifiedAt,
+          corrupted: true,
+          error: descriptor.error
+        };
+      }
+
+      const metadata = descriptor.metadata;
+      return {
+        slot,
+        exists: true,
+        name: metadata.worldName || `Mundo ${slot}`,
+        year: metadata.simulationYear ?? 0,
+        era: metadata.era ?? '—',
+        size: metadata.worldDimensions?.width ?? 0,
+        population: metadata.population ?? 0,
+        kingdoms: metadata.kingdoms ?? 0,
+        timestamp: metadata.timestamp || descriptor.modifiedAt,
+        thumbnail: metadata.thumbnail
+      };
+    });
   }
 
-  public static readSlotInfo(slot: number): SlotInfo {
-    const empty: SlotInfo = {
+  public static async readSlotInfo(slot: number): Promise<SlotInfo> {
+    return (await this.listSlots())[slot] ?? this.emptySlotInfo(slot);
+  }
+
+  private static emptySlotInfo(slot: number): SlotInfo {
+    return {
       slot,
       exists: false,
-      name: 'Empty',
+      name: 'Vazio',
       year: 0,
       era: '—',
       size: 0,
@@ -57,72 +91,49 @@ export class SaveSystem {
       kingdoms: 0,
       timestamp: 0
     };
-
-    try {
-      const raw = localStorage.getItem(SLOT_KEY(slot));
-      if (!raw) return empty;
-      const data = JSON.parse(raw);
-      const meta: SlotMeta = JSON.parse(localStorage.getItem(META_KEY(slot)) || '{}');
-
-      return {
-        slot,
-        exists: true,
-        name: meta.name || `World ${slot}`,
-        year: data.year ?? 0,
-        era: data.era ?? '—',
-        size: data.world?.width ?? 0,
-        population: data.entities?.length ?? 0,
-        kingdoms: data.kingdoms?.length ?? 0,
-        timestamp: data.timestamp ?? 0,
-        thumbnail: meta.thumbnail
-      };
-    } catch {
-      return empty;
-    }
   }
 
-  public static readSlot(slot: number): any | null {
-    try {
-      const raw = localStorage.getItem(SLOT_KEY(slot));
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
+  public static async readSlot(slot: number): Promise<any | null> {
+    const serialized = await getSaveStorage().load(slot);
+    return serialized ? parseSaveDocument(serialized).payload : null;
   }
 
-  public static writeSlot(slot: number, data: any, meta: SlotMeta): boolean {
-    try {
-      localStorage.setItem(SLOT_KEY(slot), JSON.stringify(data));
-      localStorage.setItem(META_KEY(slot), JSON.stringify(meta));
-      return true;
-    } catch (err) {
-      // Most likely QuotaExceededError from a large world plus a thumbnail.
-      // Retry without the thumbnail before giving up.
-      console.error('Failed to write save slot:', err);
-      try {
-        localStorage.setItem(SLOT_KEY(slot), JSON.stringify(data));
-        localStorage.setItem(META_KEY(slot), JSON.stringify({ name: meta.name }));
-        return true;
-      } catch {
-        return false;
-      }
-    }
+  public static async writeSlot(slot: number, data: any, meta: SlotMeta): Promise<void> {
+    await getSaveStorage().save(slot, serializeSaveDocument(data, meta));
   }
 
-  public static deleteSlot(slot: number): void {
-    localStorage.removeItem(SLOT_KEY(slot));
-    localStorage.removeItem(META_KEY(slot));
+  public static async deleteSlot(slot: number): Promise<void> {
+    await getSaveStorage().delete(slot);
+  }
+
+  /** Returns a complete `.aethoria` document for the UI to download/share. */
+  public static async exportSlot(slot: number): Promise<string | null> {
+    return getSaveStorage().exportSave(slot);
+  }
+
+  /** Validates a portable `.aethoria` document before it can replace a slot. */
+  public static async importSlot(slot: number, serialized: string): Promise<void> {
+    parseSaveDocument(serialized);
+    await getSaveStorage().importSave(slot, serialized);
+  }
+
+  public static serializePortableSave(data: any, meta: SlotMeta): string {
+    return serializeSaveDocument(data, meta);
+  }
+
+  public static parsePortableSave(serialized: string): any {
+    return parseSaveDocument(serialized).payload;
   }
 
   // ============================ LEGACY QUICK SAVE ============================
 
   public static saveToLocalStorage(tileMap: TileMap, sim: SimulationEngine, eraMgr: EraManager): void {
     const saveData = this.exportSaveData(tileMap, sim, eraMgr);
-    localStorage.setItem(LEGACY_KEY, JSON.stringify(saveData));
+    writeLegacyWebSave(JSON.stringify(saveData));
   }
 
   public static loadFromLocalStorage(tileMap: TileMap, sim: SimulationEngine, eraMgr: EraManager): boolean {
-    const json = localStorage.getItem(LEGACY_KEY);
+    const json = readLegacyWebSave();
     if (!json) return false;
     try {
       const data = JSON.parse(json);
@@ -138,7 +149,7 @@ export class SaveSystem {
 
   public static exportSaveData(tileMap: TileMap, sim: SimulationEngine, eraMgr: EraManager): any {
     return {
-      version: 3,
+      version: SAVE_FORMAT_VERSION,
       timestamp: Date.now(),
       world: tileMap.serialize(),
       year: sim.currentYear,
@@ -219,6 +230,7 @@ export class SaveSystem {
     // Restore Entities
     sim.entities = [];
     sim.spatialHash.clear();
+    sim.entityChunks.clear();
 
     for (const ed of data.entities ?? []) {
       const e = new Entity(ed.id, ed.species, ed.x, ed.y, ed.name);
@@ -272,6 +284,7 @@ export class SaveSystem {
 
       sim.entities.push(e);
       sim.spatialHash.insert(e);
+      sim.entityChunks.insert(e);
     }
 
     // Restore Cities

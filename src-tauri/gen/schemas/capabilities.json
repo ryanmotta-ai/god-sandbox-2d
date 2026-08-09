@@ -1,0 +1,1 @@
+{"main-save-storage":{"identifier":"main-save-storage","description":"Allows only the bundled main window to use Aethoria's slot-based save storage commands.","local":true,"windows":["main"],"permissions":["allow-save-storage"],"platforms":["linux","macOS","windows"]}}

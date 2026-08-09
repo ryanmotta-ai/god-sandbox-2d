@@ -31,6 +31,7 @@ import { describeCity } from '../../civ/UrbanPlanner';
 import { icon } from '../kit';
 import type { OverlayMode } from '../../renderer/Overlays';
 import type { GameContext } from '../core/GameContext';
+import { perfProfiler } from '../../perf/PerformanceProfiler';
 
 /** Overlay cycle order for the V shortcut. */
 const OVERLAY_CYCLE: { id: OverlayMode; label: string }[] = [
@@ -61,6 +62,7 @@ export class HUD {
   private debugEls: Record<string, HTMLElement> = {};
   private hiddenByPlayer = false;
   private lastSelectionRefresh = 0;
+  private lastDebugSync = 0;
 
   constructor(ctx: GameContext, root: HTMLElement) {
     this.ctx = ctx;
@@ -198,7 +200,10 @@ export class HUD {
       this.ctx.selection.refresh();
     }
 
-    if (!this.debugPanel.classList.contains('hidden')) this.syncDebug();
+    if (!this.debugPanel.classList.contains('hidden') && now - this.lastDebugSync >= 250) {
+      this.lastDebugSync = now;
+      this.syncDebug();
+    }
   }
 
   // ============================ INPUT HOOKS ============================
@@ -268,20 +273,29 @@ export class HUD {
         }, [icon('close', { size: 16 })])
       ]),
       row('fps', 'FPS'),
-      row('entities', 'Entities'),
-      row('particles', 'Particles'),
-      row('cities', 'Cities'),
-      row('kingdoms', 'Kingdoms'),
-      row('fires', 'Active fires'),
-      row('speed', 'Sim speed'),
-      row('alerts', 'Alerts'),
+      row('entities', 'Entidades'),
+      row('particles', 'Partículas'),
+      row('cities', 'Cidades'),
+      row('kingdoms', 'Reinos'),
+      row('fires', 'Incêndios ativos'),
+      row('speed', 'Vel. simulação'),
+      row('alerts', 'Alertas'),
+      row('frameTime', 'Frame avg / p95'),
+      row('simTime', 'Sim avg / p95'),
+      row('renderTime', 'Render avg / p95'),
+      row('aiTime', 'IA avg / p95'),
+      row('entityLod', 'HOT / WARM / COLD'),
+      row('visible', 'Entidades visíveis'),
+      row('paths', 'Rotas hit / miss'),
+      row('pathRate', 'Rotas / segundo'),
+      row('draws', 'Draw calls aprox.'),
       el('div', { class: 'debug-actions' }, [
-        el('button', { text: 'Spawn 50', on: { click: () => this.debugSpawn() } }),
-        el('button', { text: 'Force war', on: { click: () => this.debugWar() } }),
-        el('button', { text: 'Meteor', on: { click: () => this.debugMeteor() } }),
-        el('button', { text: 'Next era', on: { click: () => { this.ctx.eras.cycleNextEra(); } } }),
-        el('button', { text: '+1 day', on: { click: () => this.debugAdvanceDay() } }),
-        el('button', { text: 'Urban report', on: { click: () => this.debugUrbanReport() } }),
+        el('button', { text: 'Gerar 50', on: { click: () => this.debugSpawn() } }),
+        el('button', { text: 'Forçar guerra', on: { click: () => this.debugWar() } }),
+        el('button', { text: 'Meteoro', on: { click: () => this.debugMeteor() } }),
+        el('button', { text: 'Próxima era', on: { click: () => { this.ctx.eras.cycleNextEra(); } } }),
+        el('button', { text: '+1 dia', on: { click: () => this.debugAdvanceDay() } }),
+        el('button', { text: 'Relatório urbano', on: { click: () => this.debugUrbanReport() } }),
         el('button', { text: 'UI kit', on: { click: () => this.ctx.screens.open('ui-kit') } })
       ])
     ]);
@@ -298,6 +312,20 @@ export class HUD {
     this.debugEls.fires.textContent = `${this.ctx.activeFires}`;
     this.debugEls.speed.textContent = `${this.ctx.simSpeed}×`;
     this.debugEls.alerts.textContent = `${alerts.active.length}`;
+    const profile = perfProfiler.snapshot();
+    const timing = (key: 'frame' | 'simulation' | 'render' | 'entityAI') => {
+      const metric = profile.metrics[key];
+      return `${metric.averageMs.toFixed(2)} / ${metric.p95Ms.toFixed(2)} ms`;
+    };
+    this.debugEls.frameTime.textContent = timing('frame');
+    this.debugEls.simTime.textContent = timing('simulation');
+    this.debugEls.renderTime.textContent = timing('render');
+    this.debugEls.aiTime.textContent = timing('entityAI');
+    this.debugEls.entityLod.textContent = `${profile.counters.hotEntities} / ${profile.counters.warmEntities} / ${profile.counters.coldEntities}`;
+    this.debugEls.visible.textContent = `${profile.counters.visibleEntities}`;
+    this.debugEls.paths.textContent = `${profile.counters.pathCacheHits} / ${profile.counters.pathCacheMisses}`;
+    this.debugEls.pathRate.textContent = `${profile.counters.pathsPerSecond}`;
+    this.debugEls.draws.textContent = `${profile.counters.approximateDrawCalls}`;
   }
 
   private debugSpawn(): void {
@@ -309,13 +337,13 @@ export class HUD {
       const s = species[Math.floor(Math.random() * species.length)];
       sim.spawnEntity(s, cx + (Math.random() - 0.5) * 20, cy + (Math.random() - 0.5) * 20);
     }
-    this.ctx.toast('Spawned 50 creatures', 'success');
+    this.ctx.toast('50 criaturas geradas', 'success');
   }
 
   private debugWar(): void {
     const kingdoms = Array.from(this.ctx.sim.kingdoms.values());
     if (kingdoms.length < 2) {
-      this.ctx.toast('Need at least two kingdoms to start a war', 'warning');
+      this.ctx.toast('Precisa de pelo menos dois reinos para iniciar uma guerra', 'warning');
       return;
     }
     this.ctx.sim.diplomacy.declareWar(kingdoms[0].id, kingdoms[1].id, this.ctx.sim.currentYear, 'Divine Provocation');
@@ -328,7 +356,7 @@ export class HUD {
     const tile = tileMap.getTile(Math.floor(wx), Math.floor(wy));
     if (!tile) return;
     DisasterSystem.triggerMeteorite(Math.floor(wx), Math.floor(wy), tileMap, this.ctx.sim.spatialHash, this.ctx.particles, camera);
-    this.ctx.toast('A meteor falls from the heavens', 'disaster');
+    this.ctx.toast('Um meteoro cai dos céus', 'disaster');
   }
 
   /**

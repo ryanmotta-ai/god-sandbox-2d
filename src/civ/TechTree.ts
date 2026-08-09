@@ -129,57 +129,57 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   // ========================= STONE AGE =========================
   stone_tools: {
     id: 'stone_tools',
-    name: 'Stone Tools',
+    name: 'Ferramentas de Pedra',
     track: 'craft',
     era: 'stone',
     icon: '🪓',
     cost: 30,
     requires: [],
     unlocks: { modifiers: { production: 1.15 }, buildings: ['lumber_camp'] },
-    description: 'Knapped flint. Everything else in history follows from this.',
-    discovery: 'learned to shape stone into tools'
+    description: 'Sílex lascado. Tudo o mais na história se segue a partir disso.',
+    discovery: 'aprendeu a moldar pedra em ferramentas'
   },
   fire_mastery: {
     id: 'fire_mastery',
-    name: 'Mastery of Fire',
+    name: 'Domínio do Fogo',
     track: 'craft',
     era: 'stone',
     icon: '🔥',
     cost: 40,
     requires: ['stone_tools'],
     unlocks: { modifiers: { growth: 1.1, military: 1.1 } },
-    description: 'Warmth, cooked food and a weapon that spreads on its own.',
-    discovery: 'tamed fire'
+    description: 'Calor, comida cozida e uma arma que se espalha sozinha.',
+    discovery: 'domou o fogo'
   },
   agriculture: {
     id: 'agriculture',
-    name: 'Agriculture',
+    name: 'Agricultura',
     track: 'craft',
     era: 'stone',
     icon: '🌾',
     cost: 60,
     requires: ['stone_tools'],
     unlocks: { buildings: ['farm', 'granary'], goods: ['cotton', 'spices'], modifiers: { growth: 1.35 } },
-    description: 'Planting instead of foraging. Populations stop wandering and start counting.',
-    discovery: 'began to farm the land'
+    description: 'Plantar em vez de forragear. As populações param de vagar e começam a contar.',
+    discovery: 'começou a cultivar a terra'
   },
   animal_husbandry: {
     id: 'animal_husbandry',
-    name: 'Animal Husbandry',
+    name: 'Pecuária',
     track: 'craft',
     era: 'stone',
     icon: '🐄',
     cost: 70,
     requires: ['agriculture'],
     unlocks: { buildings: ['pasture'], goods: ['horses', 'furs'], modifiers: { growth: 1.15, production: 1.1 } },
-    description: 'Herds that follow you are better than herds you chase.',
-    discovery: 'domesticated livestock'
+    description: 'Rebanhos que te seguem são melhores que rebanhos que você persegue.',
+    discovery: 'domesticou o gado'
   },
 
   // ========================= BRONZE AGE =========================
   pottery: {
     id: 'pottery',
-    name: 'Pottery & Weaving',
+    name: 'Cerâmica e Tecelagem',
     track: 'craft',
     era: 'bronze',
     icon: '🏺',
@@ -193,286 +193,286 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
       features: ['trade_routes'],
       modifiers: { production: 1.1, trade: 1.15 }
     },
-    description: 'Storage and cloth. Surplus becomes possible, and so does trade.',
-    discovery: 'mastered pottery and weaving'
+    description: 'Armazenamento e tecido. O excedente torna-se possível, e o comércio também.',
+    discovery: 'dominou a cerâmica e a tecelagem'
   },
   mining: {
     id: 'mining',
-    name: 'Mining',
+    name: 'Mineração',
     track: 'craft',
     era: 'bronze',
     icon: '⛏️',
     cost: 130,
     requires: ['stone_tools'],
     unlocks: { buildings: ['mine', 'quarry'], goods: ['copper', 'tin', 'iron', 'coal', 'salt', 'gold', 'gems', 'saltpeter'], modifiers: { production: 1.2 } },
-    description: 'Digging beneath the surface for what the land refuses to give freely.',
-    discovery: 'sank the first mine shafts'
+    description: 'Cavar abaixo da superfície pelo que a terra se recusa a dar livremente.',
+    discovery: 'escavou os primeiros poços de mina'
   },
   masonry: {
     id: 'masonry',
-    name: 'Masonry',
+    name: 'Alvenaria',
     track: 'craft',
     era: 'bronze',
     icon: '🧱',
     cost: 150,
     requires: ['mining'],
     unlocks: { buildings: ['wall'], modifiers: { military: 1.2, territory: 2 } },
-    description: 'Dressed stone. Cities acquire walls, and walls acquire meaning.',
-    discovery: 'raised its first stone walls'
+    description: 'Pedra talhada. As cidades ganham muros, e os muros ganham significado.',
+    discovery: 'ergueu suas primeiras muralhas de pedra'
   },
   bronze_working: {
     id: 'bronze_working',
-    name: 'Bronze Working',
+    name: 'Metalurgia do Bronze',
     track: 'craft',
     era: 'bronze',
     icon: '⚒️',
     cost: 180,
     requires: ['mining', 'fire_mastery'],
     unlocks: { buildings: ['smithy', 'barracks'], goods: ['bronze', 'tools'], modifiers: { military: 1.25, production: 1.15 } },
-    description: 'Alloyed metal. The first tools that outlast the hands that made them.',
-    discovery: 'smelted bronze'
+    description: 'Metal em liga. As primeiras ferramentas que duram mais que as mãos que as fizeram.',
+    discovery: 'fundiu o bronze'
   },
   writing: {
     id: 'writing',
-    name: 'Writing',
+    name: 'Escrita',
     track: 'craft',
     era: 'bronze',
     icon: '📜',
     cost: 200,
     requires: ['pottery'],
     unlocks: { buildings: ['library', 'temple'], modifiers: { research: 1.4 }, features: ['writing', 'diplomacy_pacts'] },
-    description: 'Memory that survives its owner. Law, debt and history all become possible.',
-    discovery: 'invented writing'
+    description: 'A memória que sobrevive ao seu dono. Lei, dívida e história se tornam possíveis.',
+    discovery: 'inventou a escrita'
   },
 
   // ========================= IRON AGE =========================
   iron_working: {
     id: 'iron_working',
-    name: 'Iron Working',
+    name: 'Metalurgia do Ferro',
     track: 'craft',
     era: 'iron',
     icon: '⚔️',
     cost: 280,
     requires: ['bronze_working'],
     unlocks: { modifiers: { military: 1.4, production: 1.2 } },
-    description: 'Harder, cheaper and far more common than bronze. War gets democratic.',
-    discovery: 'forged iron'
+    description: 'Mais duro, mais barato e muito mais comum que o bronze. A guerra se democratiza.',
+    discovery: 'forjou o ferro'
   },
   mathematics: {
     id: 'mathematics',
-    name: 'Mathematics',
+    name: 'Matemática',
     track: 'craft',
     era: 'iron',
     icon: '📐',
     cost: 300,
     requires: ['writing'],
     unlocks: { modifiers: { research: 1.25, production: 1.1 } },
-    description: 'Counting turns into proof. Buildings get taller and taxes get accurate.',
-    discovery: 'formalised mathematics'
+    description: 'A contagem vira prova. Os edifícios ficam mais altos e os impostos ficam precisos.',
+    discovery: 'formalizou a matemática'
   },
   currency: {
     id: 'currency',
-    name: 'Currency',
+    name: 'Moeda',
     track: 'craft',
     era: 'iron',
     icon: '🪙',
     cost: 340,
     requires: ['mathematics', 'mining'],
     unlocks: { buildings: ['market'], features: ['currency', 'trade_routes'], modifiers: { trade: 1.5 } },
-    description: 'Minted coin. Wealth stops being grain in a barn and becomes a number.',
-    discovery: 'minted its first coinage'
+    description: 'Moeda cunhada. A riqueza deixa de ser grãos no celeiro e se torna um número.',
+    discovery: 'cunhou sua primeira moeda'
   },
   sailing: {
     id: 'sailing',
-    name: 'Sailing',
+    name: 'Navegação',
     track: 'craft',
     era: 'iron',
     icon: '⛵',
     cost: 320,
     requires: ['pottery', 'mathematics'],
     unlocks: { buildings: ['harbor'], features: ['maritime_trade', 'colonisation'], modifiers: { trade: 1.3 } },
-    description: 'The sea stops being a wall and becomes a road.',
-    discovery: 'learned to sail beyond sight of land'
+    description: 'O mar deixa de ser um muro e se torna uma estrada.',
+    discovery: 'aprendeu a navegar além da vista da terra'
   },
   roads: {
     id: 'roads',
-    name: 'Road Building',
+    name: 'Construção de Estradas',
     track: 'craft',
     era: 'iron',
     icon: '🛣️',
     cost: 300,
     requires: ['masonry'],
     unlocks: { modifiers: { trade: 1.25, territory: 3, military: 1.1 } },
-    description: 'Paved routes. Armies and caravans both move faster — usually in that order.',
-    discovery: 'paved the first great roads'
+    description: 'Rotas pavimentadas. Exércitos e caravanas se movem mais rápido — geralmente nessa ordem.',
+    discovery: 'pavimentou as primeiras grandes estradas'
   },
 
   // ========================= CLASSICAL AGE =========================
   engineering: {
     id: 'engineering',
-    name: 'Engineering',
+    name: 'Engenharia',
     track: 'craft',
     era: 'classical',
     icon: '🏗️',
     cost: 480,
     requires: ['mathematics', 'masonry'],
     unlocks: { buildings: ['aqueduct', 'port'], modifiers: { production: 1.3, growth: 1.2, territory: 3 } },
-    description: 'Aqueducts, cranes and siege engines. Cities can finally outgrow their wells.',
-    discovery: 'mastered engineering'
+    description: 'Aquedutos, guindastes e máquinas de cerco. As cidades finalmente podem crescer além de seus poços.',
+    discovery: 'dominou a engenharia'
   },
   philosophy: {
     id: 'philosophy',
-    name: 'Philosophy',
+    name: 'Filosofia',
     track: 'craft',
     era: 'classical',
     icon: '🧠',
     cost: 500,
     requires: ['writing'],
     unlocks: { buildings: ['academy'], modifiers: { research: 1.45 } },
-    description: 'Asking why the king is king. Historically, a dangerous pastime.',
-    discovery: 'gave rise to its first philosophers'
+    description: 'Perguntar por que o rei é rei. Historicamente, um passatempo perigoso.',
+    discovery: 'deu origem aos seus primeiros filósofos'
   },
   medicine: {
     id: 'medicine',
-    name: 'Medicine',
+    name: 'Medicina',
     track: 'craft',
     era: 'classical',
     icon: '⚕️',
     cost: 520,
     requires: ['philosophy'],
     unlocks: { modifiers: { growth: 1.35 } },
-    description: 'Fewer people die of things that did not need to kill them.',
-    discovery: 'developed formal medicine'
+    description: 'Menos pessoas morrem de coisas que não precisavam matá-las.',
+    discovery: 'desenvolveu a medicina formal'
   },
   banking: {
     id: 'banking',
-    name: 'Banking',
+    name: 'Sistema Bancário',
     track: 'craft',
     era: 'classical',
     icon: '🏦',
     cost: 600,
     requires: ['currency', 'mathematics'],
     unlocks: { buildings: ['bank'], features: ['banking'], modifiers: { trade: 1.5 } },
-    description: 'Lending money you do not have, against wealth that does not exist yet.',
-    discovery: 'founded its first banks'
+    description: 'Emprestar dinheiro que você não tem, contra riqueza que ainda não existe.',
+    discovery: 'fundou seus primeiros bancos'
   },
   metallurgy: {
     id: 'metallurgy',
-    name: 'Metallurgy',
+    name: 'Metalurgia',
     track: 'craft',
     era: 'classical',
     icon: '🔩',
     cost: 620,
     requires: ['iron_working', 'engineering'],
     unlocks: { goods: ['steel'], modifiers: { military: 1.35, production: 1.25 } },
-    description: 'Steel, alloys and blast furnaces. Coal stops being a curiosity.',
-    discovery: 'advanced the science of metals'
+    description: 'Aço, ligas e altos-fornos. O carvão deixa de ser uma curiosidade.',
+    discovery: 'avançou a ciência dos metais'
   },
 
   // ========================= INDUSTRIAL AGE =========================
   printing_press: {
     id: 'printing_press',
-    name: 'Printing Press',
+    name: 'Imprensa',
     track: 'craft',
     era: 'industrial',
     icon: '🖨️',
     cost: 850,
     requires: ['philosophy', 'metallurgy'],
     unlocks: { modifiers: { research: 1.6, growth: 1.1 } },
-    description: 'Ideas reproduce faster than the people who censor them.',
-    discovery: 'built the printing press'
+    description: 'As ideias se reproduzem mais rápido do que as pessoas que as censuram.',
+    discovery: 'construiu a imprensa'
   },
   gunpowder: {
     id: 'gunpowder',
-    name: 'Gunpowder',
+    name: 'Pólvora',
     track: 'craft',
     era: 'industrial',
     icon: '💥',
     cost: 900,
     requires: ['metallurgy'],
     unlocks: { goods: ['gunpowder'], features: ['conscription'], modifiers: { military: 1.7 } },
-    description: 'Walls stop being the answer. So do knights.',
-    discovery: 'weaponised gunpowder'
+    description: 'Muralhas deixam de ser a resposta. Cavaleiros também.',
+    discovery: 'transformou a pólvora em arma'
   },
   steam_power: {
     id: 'steam_power',
-    name: 'Steam Power',
+    name: 'Energia a Vapor',
     track: 'craft',
     era: 'industrial',
     icon: '🚂',
     cost: 1100,
     requires: ['engineering', 'metallurgy'],
     unlocks: { modifiers: { production: 1.5, trade: 1.3 } },
-    description: 'Work stops being limited by how many arms you own.',
-    discovery: 'harnessed steam'
+    description: 'O trabalho deixa de ser limitado por quantos braços você tem.',
+    discovery: 'dominou o vapor'
   },
   industrialization: {
     id: 'industrialization',
-    name: 'Industrialization',
+    name: 'Industrialização',
     track: 'craft',
     era: 'industrial',
     icon: '🏭',
     cost: 1400,
     requires: ['steam_power', 'banking'],
     unlocks: { buildings: ['factory', 'oil_well', 'refinery'], goods: ['oil', 'fuel', 'machinery'], features: ['mass_production'], modifiers: { production: 1.8, growth: 1.2 } },
-    description: 'Mass production. Enormous wealth, enormous inequality, and a new kind of politics.',
-    discovery: 'entered the industrial age'
+    description: 'Produção em massa. Riqueza enorme, desigualdade enorme, e um novo tipo de política.',
+    discovery: 'entrou na era industrial'
   },
 
   // ========================= MODERN AGE =========================
   electricity: {
     id: 'electricity',
-    name: 'Electricity',
+    name: 'Eletricidade',
     track: 'craft',
     era: 'modern',
     icon: '⚡',
     cost: 1800,
     requires: ['industrialization'],
     unlocks: { goods: ['uranium'], modifiers: { production: 1.4, research: 1.4, growth: 1.15 } },
-    description: 'Light, motors and instant communication over any distance.',
-    discovery: 'electrified its cities'
+    description: 'Luz, motores e comunicação instantânea a qualquer distância.',
+    discovery: 'eletrificou suas cidades'
   },
   mass_media: {
     id: 'mass_media',
-    name: 'Mass Media',
+    name: 'Mídia de Massa',
     track: 'craft',
     era: 'modern',
     icon: '📡',
     cost: 2100,
     requires: ['electricity', 'printing_press'],
     unlocks: { modifiers: { research: 1.3, trade: 1.2 } },
-    description: 'Whoever controls the broadcast controls what the people believe happened.',
-    discovery: 'built a mass media apparatus'
+    description: 'Quem controla a transmissão controla o que as pessoas acreditam ter acontecido.',
+    discovery: 'construiu um aparato de mídia de massa'
   },
 
   // ========================= POLITICAL TRACK =========================
   tribalism: {
     id: 'tribalism',
-    name: 'Tribalism',
+    name: 'Tribalismo',
     track: 'politics',
     era: 'stone',
     icon: '🪶',
     cost: 0,
     requires: [],
     unlocks: { governments: ['tribe'] },
-    description: 'Kinship and elders. Authority reaches exactly as far as everyone can shout.',
-    discovery: 'organised itself into tribes'
+    description: 'Parentesco e anciãos. A autoridade alcança exatamente até onde todo mundo pode gritar.',
+    discovery: 'organizou-se em tribos'
   },
   chiefdom: {
     id: 'chiefdom',
-    name: 'Chiefdom',
+    name: 'Chefia Tribal',
     track: 'politics',
     era: 'stone',
     icon: '🗿',
     cost: 80,
     requires: ['tribalism', 'agriculture'],
     unlocks: { governments: ['chiefdom'], modifiers: { growth: 1.1, territory: 1 } },
-    description: 'One family claims the surplus, and the others let them.',
-    discovery: 'crowned its first chieftain'
+    description: 'Uma família reivindica o excedente, e os outros permitem.',
+    discovery: 'coroou seu primeiro chefe'
   },
   feudalism: {
     id: 'feudalism',
-    name: 'Feudalism',
+    name: 'Feudalismo',
     track: 'politics',
     era: 'bronze',
     icon: '🛡️',
@@ -483,12 +483,12 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
       buildings: ['keep'],
       modifiers: { military: 1.25, territory: 2, growth: 1.05 }
     },
-    description: 'Land granted in exchange for oaths. Loyalty becomes a form of property.',
-    discovery: 'established the feudal order'
+    description: 'Terra concedida em troca de juramentos. A lealdade se torna uma forma de propriedade.',
+    discovery: 'estabeleceu a ordem feudal'
   },
   monarchy: {
     id: 'monarchy',
-    name: 'Monarchy',
+    name: 'Monarquia',
     track: 'politics',
     era: 'iron',
     icon: '👑',
@@ -499,12 +499,12 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
       buildings: ['palace'],
       modifiers: { growth: 1.15, trade: 1.1, territory: 3 }
     },
-    description: 'The crown outranks the barons. Written law replaces personal loyalty.',
-    discovery: 'consolidated power under a single crown'
+    description: 'A coroa supera os barões. A lei escrita substitui a lealdade pessoal.',
+    discovery: 'consolidou o poder sob uma única coroa'
   },
   imperialism: {
     id: 'imperialism',
-    name: 'Imperialism',
+    name: 'Imperialismo',
     track: 'politics',
     era: 'classical',
     icon: '🦅',
@@ -514,12 +514,12 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
       governments: ['empire'],
       modifiers: { military: 1.3, territory: 6, trade: 1.2 }
     },
-    description: 'Conquered peoples are governed, not absorbed. The realm becomes an empire.',
-    discovery: 'proclaimed itself an empire'
+    description: 'Povos conquistados são governados, não absorvidos. O reino se torna um império.',
+    discovery: 'proclamou-se um império'
   },
   constitutionalism: {
     id: 'constitutionalism',
-    name: 'Constitutionalism',
+    name: 'Constitucionalismo',
     track: 'politics',
     era: 'industrial',
     icon: '📖',
@@ -529,12 +529,12 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
       governments: ['constitutional_monarchy', 'republic'],
       modifiers: { research: 1.2, growth: 1.15, trade: 1.15 }
     },
-    description: 'The sovereign is bound by a document. Everyone pretends this was always the case.',
-    discovery: 'bound its ruler to a constitution'
+    description: 'O soberano é limitado por um documento. Todos fingem que isso sempre foi o caso.',
+    discovery: 'submeteu seu governante a uma constituição'
   },
   capitalism: {
     id: 'capitalism',
-    name: 'Capitalism',
+    name: 'Capitalismo',
     track: 'politics',
     era: 'industrial',
     icon: '📈',
@@ -547,12 +547,12 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
       features: ['stock_market'],
       modifiers: { trade: 1.8, production: 1.3, growth: 1.1 }
     },
-    description: 'Private capital directs production. Growth accelerates; so does the gap.',
-    discovery: 'embraced capitalism'
+    description: 'O capital privado direciona a produção. O crescimento acelera; a desigualdade também.',
+    discovery: 'abraçou o capitalismo'
   },
   communism: {
     id: 'communism',
-    name: 'Communism',
+    name: 'Comunismo',
     track: 'politics',
     era: 'industrial',
     icon: '☭',
@@ -565,8 +565,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
       features: ['central_planning'],
       modifiers: { production: 1.55, growth: 1.25, military: 1.2 }
     },
-    description: 'The state directs production on behalf of the workers. Trade suffers; output does not.',
-    discovery: 'declared a workers’ state'
+    description: 'O estado direciona a produção em nome dos trabalhadores. O comércio sofre; a produção não.',
+    discovery: 'declarou um estado dos trabalhadores'
   }
 };
 

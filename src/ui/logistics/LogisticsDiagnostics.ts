@@ -144,32 +144,32 @@ function diagnoseRoads(m: LogisticsMetrics): LogisticsCondition {
   }
 
   const terms = [
-    { label: 'Tiles com via', value: `${r.tiles}` },
+    { label: 'Blocos com via', value: `${r.tiles}` },
     { label: 'Trilha de terra', value: `${r.byLevel[1]}` },
     { label: 'Via de pedra', value: `${r.byLevel[2]}` },
     { label: 'Estrada imperial', value: `${r.byLevel[3]}` },
     { label: 'Nível médio', value: r.meanLevel !== null ? r.meanLevel.toFixed(2) : '—' },
-    { label: 'Tiles degradados', value: `${r.damagedTiles}`, status: (r.damagedTiles > 0 ? 'warning' : 'positive') as Status }
+    { label: 'Blocos degradados', value: `${r.damagedTiles}`, status: (r.damagedTiles > 0 ? 'warning' : 'positive') as Status }
   ];
 
   const damagedShare = r.tiles > 0 ? r.damagedTiles / r.tiles : 0;
   if (damagedShare >= 0.15) {
     return {
       id: 'roads', label: 'Vias', icon: 'route', status: 'critical',
-      finding: `${r.damagedTiles} de ${r.tiles} tiles de via degradados por dano de guerra`,
+      finding: `${r.damagedTiles} de ${r.tiles} blocos de via degradados por dano de guerra`,
       terms
     };
   }
   if (r.damagedTiles > 0) {
     return {
       id: 'roads', label: 'Vias', icon: 'route', status: 'warning',
-      finding: `${r.damagedTiles} tile(s) de via degradados`,
+      finding: `${r.damagedTiles} bloco(s) de via degradados`,
       terms
     };
   }
   return {
     id: 'roads', label: 'Vias', icon: 'route', status: 'positive',
-    finding: `${r.tiles} tiles de via, nível médio ${r.meanLevel?.toFixed(2) ?? '—'}`,
+    finding: `${r.tiles} blocos de via, nível médio ${r.meanLevel?.toFixed(2) ?? '—'}`,
     terms
   };
 }

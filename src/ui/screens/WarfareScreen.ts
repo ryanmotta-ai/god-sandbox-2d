@@ -1,141 +1,269 @@
-import { el } from '../core/Dom';
-import type { Screen } from '../core/ScreenManager';
+/** Warfare Command Center + War Dossier 2.0 (UI-9). */
+import { el, type Child } from '../core/Dom';
+import { emptyState, screenShell, searchInput, tabs, tooltip, type TabItem, type TabStrip } from '../kit';
+import { LogisticsMetricsCache } from '../logistics/LogisticsMetrics';
+import {
+  WarfareUISnapshotCache, warfareUIPerformance,
+  type ArmyForceView, type WarfareUISnapshot, type WarView
+} from '../warfare/WarfareMetrics';
+import {
+  buildActiveWars, buildArmies, buildBattles, buildHistory, buildMilitaryPower,
+  buildOverview, buildWarDossier, type WarfareScreenHost
+} from '../warfare/WarfareTabs';
+import type { GoodId } from '../../civ/Goods';
+import type { Screen, NavParams } from '../core/ScreenManager';
 import type { GameContext } from '../core/GameContext';
 
-export class WarfareScreen implements Screen {
+type WarfareTab = 'overview' | 'active-wars' | 'armies' | 'battles' | 'military-power' | 'history';
+const ALL_TABS: WarfareTab[] = ['overview', 'active-wars', 'armies', 'battles', 'military-power', 'history'];
+
+export class WarfareScreen implements Screen, WarfareScreenHost {
   public readonly id = 'warfare' as const;
-  public readonly kind = 'overlay' as const;
+  public readonly kind = 'fullscreen' as const;
   public readonly dismissable = true;
+  public ctx!: GameContext;
 
-  public build(ctx: GameContext): HTMLElement {
-    const activeWars = ctx.sim.diplomacy ? Array.from(ctx.sim.diplomacy.activeWars.values()) : [];
-    const kingdoms = Array.from(ctx.sim.kingdoms.values());
-    const totalMilitaryPower = kingdoms.reduce((acc, k) => acc + k.computePower(), 0);
+  private tab: WarfareTab = 'overview';
+  private selectedRealmId: string | null = null;
+  private selectedWarId: string | null = null;
+  private query = '';
+  private shell: ReturnType<typeof screenShell> | null = null;
+  private strip: TabStrip | null = null;
+  private snapshotCache = new WarfareUISnapshotCache();
+  private logisticsCache = new LogisticsMetricsCache();
+  private renderedSignature = '';
 
-    return el('div', { class: 'screen-container glass-panel war-gameawards-container' }, [
-      // Top Bar & Title Header
-      el('div', { class: 'screen-header war-header-hero' }, [
-        el('div', { class: 'header-hero-title' }, [
-          el('span', { class: 'hero-icon', text: '⚔️' }),
-          el('div', {}, [
-            el('h2', { class: 'crimson-gradient-text', text: 'Alto Comando de Guerra, Exércitos & Logística' }),
-            el('p', { class: 'hero-subtitle', text: 'Monitor de Conflitos Ativos, Nível de Armamentos, Cercos Urbanos e Auras de Comando' })
-          ])
-        ]),
-        el('button', { class: 'close-btn-hero', text: '✕', on: { click: () => ctx.screens.back() } })
-      ]),
+  public build(ctx: GameContext, params?: NavParams): HTMLElement {
+    const started = performance.now();
+    this.ctx = ctx;
+    if (params?.focusKingdom && ctx.sim.kingdoms.has(params.focusKingdom)) this.selectedRealmId = params.focusKingdom;
+    if (params?.warId) this.selectedWarId = params.warId;
+    if (params?.tab && this.isTab(params.tab)) this.tab = params.tab;
 
-      el('div', { class: 'screen-body war-hero-body' }, [
-        // WARFARE METRICS BANNER (4 Hero Cards)
-        el('div', { class: 'war-metrics-banner-hero' }, [
-          el('div', { class: 'w-metric-card' }, [
-            el('span', { class: 'w-metric-icon', text: '⚔️' }),
-            el('div', {}, [
-              el('span', { class: 'w-metric-lbl', text: 'Guerra Ativas' }),
-              el('div', { class: `w-metric-val ${activeWars.length > 0 ? 'highlight-red' : 'highlight-green'}`, text: `${activeWars.length} Conflitos` })
-            ])
-          ]),
-          el('div', { class: 'w-metric-card' }, [
-            el('span', { class: 'w-metric-icon', text: '🛡️' }),
-            el('div', {}, [
-              el('span', { class: 'w-metric-lbl', text: 'Poder Militar Mundial' }),
-              el('div', { class: 'w-metric-val highlight-gold', text: `${totalMilitaryPower.toFixed(0)} Pts` })
-            ])
-          ]),
-          el('div', { class: 'w-metric-card' }, [
-            el('span', { class: 'w-metric-icon', text: '🏰' }),
-            el('div', {}, [
-              el('span', { class: 'w-metric-lbl', text: 'Cercos Urbanos Ativos' }),
-              el('div', { class: 'w-metric-val highlight-cyan', text: `${activeWars.length * 2} Cercos` })
-            ])
-          ]),
-          el('div', { class: 'w-metric-card' }, [
-            el('span', { class: 'w-metric-icon', text: '🩸' }),
-            el('div', {}, [
-              el('span', { class: 'w-metric-lbl', text: 'Baixas Estimadas da Era' }),
-              el('div', { class: 'w-metric-val highlight-red', text: '48 Baixas' })
-            ])
-          ])
-        ]),
+    const snapshot = this.snapshotFor();
+    const selectedWar = this.resolveWar(snapshot);
+    const items = this.tabItems(snapshot);
+    if (!items.some(item => item.id === this.tab)) this.tab = 'overview';
 
-        // GRID: ACTIVE CONFLICTS & KINGDOM LOGISTICS
-        el('div', { class: 'war-grid-layout' }, [
-          // COLUMN 1: ACTIVE CONFLICTS MONITOR
-          el('div', { class: 'war-col glass-card-hero' }, [
-            el('div', { class: 'card-hero-header' }, [
-              el('h3', { text: `⚔️ Conflitos Armados Ativos (${activeWars.length})` }),
-              el('span', { class: 'badge-tag-red', text: 'TEATRO DE GUERRA' })
-            ]),
+    const shell = screenShell({
+      title: selectedWar ? 'Dossiê de Guerra' : 'Centro de Comando Bélico',
+      subtitle: selectedWar ? this.warSubtitle(selectedWar) : this.subtitle(snapshot),
+      icon: 'war', width: 'wide', closeKind: selectedWar ? 'back' : 'close',
+      onClose: () => selectedWar ? this.openWar('') : ctx.screens.back(),
+      actions: selectedWar ? [] : [
+        this.realmSelector(),
+        searchInput({ placeholder: this.searchPlaceholder(), value: this.query, onInput: value => { this.query = value; this.renderContent(); } })
+      ]
+    });
+    this.shell = shell;
+    shell.root.classList.add('ae-warfare-screen');
 
-            activeWars.length > 0 ? el('div', { class: 'wars-hero-list' },
-              activeWars.map((w: any) => {
-                const atk = ctx.sim.kingdoms.get(w.attackerId);
-                const def = ctx.sim.kingdoms.get(w.defenderId);
-                return el('div', { class: 'war-hero-card' }, [
-                  el('div', { class: 'war-hero-parties' }, [
-                    el('span', { class: 'party-pill', style: `background: ${atk?.color}22; border: 1px solid ${atk?.color}`, text: `⚔️ ${atk?.name ?? 'Atacante'}` }),
-                    el('span', { class: 'vs-pill', text: 'VS' }),
-                    el('span', { class: 'party-pill', style: `background: ${def?.color}22; border: 1px solid ${def?.color}`, text: `🛡️ ${def?.name ?? 'Defensor'}` })
-                  ]),
-                  el('div', { class: 'war-hero-details' }, [
-                    el('div', { class: 'war-d-row' }, [el('span', { text: 'Motivo Geopolítico: ' }), el('strong', { class: 'highlight-gold', text: w.reason })]),
-                    el('div', { class: 'war-d-row' }, [el('span', { text: 'Início do Conflito: ' }), el('strong', { text: `Ano ${w.startYear}` })]),
-                    el('div', { class: 'war-d-row' }, [el('span', { text: 'Estimativa de Baixas: ' }), el('strong', { class: 'highlight-red', text: `${w.casualties ?? 14} mortos` })])
-                  ]),
-                  el('button', {
-                    class: 'ceasefire-btn-hero',
-                    text: '🕊️ Forçar Cessar-Fogo (Mediar Paz)',
-                    on: { click: () => {
-                      if (ctx.sim.diplomacy) {
-                        ctx.sim.diplomacy.endWar(w.attackerId, w.defenderId, ctx.sim.currentYear);
-                        ctx.screens.refresh();
-                      }
-                    }}
-                  })
-                ]);
-              })
-            ) : el('div', { class: 'peace-hero-box' }, [
-              el('span', { class: 'peace-icon', text: '🕊️' }),
-              el('h4', { text: 'O Mundo Encontra-se em Paz' }),
-              el('p', { text: 'Nenhuma guerra foi declarada no momento. Os reinos estão focados no desenvolvimento interno e comércio.' })
-            ])
-          ]),
-
-          // COLUMN 2: KINGDOM MILITARY POWER & COMMAND AURAS
-          el('div', { class: 'war-col glass-card-hero' }, [
-            el('div', { class: 'card-hero-header' }, [
-              el('h3', { text: '🛡️ Poder de Combate & Armamentos' })
-            ]),
-
-            el('div', { class: 'military-hero-list' },
-              kingdoms.map(k => {
-                const ruler = k.rulerId ? ctx.sim.entities.find(e => e.id === k.rulerId) : null;
-                const hasIron = k.research.knows('iron_working');
-                const hasBronze = k.research.knows('bronze_working');
-                const armorTier = hasIron ? '⚔️ Aço & Ferro Temperado' : hasBronze ? '🏺 Bronze Reforçado' : '🪓 Armas Primitivas';
-
-                return el('div', { class: 'military-hero-card', style: `border-left: 4px solid ${k.color}` }, [
-                  el('div', { class: 'm-card-top' }, [
-                    el('strong', { text: k.name }),
-                    el('span', { class: 'm-power-badge', text: `${k.computePower().toFixed(0)} Pts` })
-                  ]),
-                  el('div', { class: 'm-card-body' }, [
-                    el('div', { class: 'm-row' }, [el('span', { text: 'Nível de Armamento: ' }), el('strong', { text: armorTier })]),
-                    el('div', { class: 'm-row' }, [
-                      el('span', { text: 'Aura de Comando do Rei: ' }),
-                      el('strong', { class: ruler ? 'highlight-green' : 'highlight-red', text: ruler ? `👑 ATIVA (+25% Moral - ${ruler.name})` : '⚠️ INATIVA (Sem Rei)' })
-                    ]),
-                    el('div', { class: 'm-row' }, [el('span', { text: 'Desgaste de Guerra: ' }), el('strong', { class: k.warWeariness > 50 ? 'highlight-red' : '', text: `${k.warWeariness}%` })])
-                  ]),
-                  el('div', { class: 'weariness-bar-bg' }, [
-                    el('div', { class: 'weariness-bar-fill', style: `width: ${k.warWeariness}%; background: ${k.warWeariness > 50 ? '#ef4444' : '#fbbf24'};` })
-                  ])
-                ]);
-              })
-            )
-          ])
-        ])
-      ])
-    ]);
+    if (!selectedWar) {
+      this.strip = tabs(items, this.tab, id => {
+        this.tab = id as WarfareTab;
+        this.query = '';
+        this.renderContent();
+      });
+      shell.root.insertBefore(this.strip.root, shell.body);
+    } else {
+      this.strip = null;
+      shell.root.style.setProperty('--ae-realm', selectedWar.attacker.color);
+    }
+    this.renderContent(snapshot);
+    warfareUIPerformance.screenOpenMs = performance.now() - started;
+    return shell.root;
   }
+
+  public tick(): void {
+    if (!this.shell) return;
+    const started = performance.now();
+    const snapshot = this.snapshotFor();
+    if (this.snapshotSignature(snapshot) !== this.renderedSignature) this.renderContent(snapshot);
+    warfareUIPerformance.updateMs = performance.now() - started;
+  }
+
+  public dispose(): void {
+    tooltip.hide();
+    this.shell = null;
+    this.strip = null;
+  }
+
+  private snapshotFor(): WarfareUISnapshot {
+    const now = performance.now();
+    const logistics = this.logisticsCache.get(this.ctx, now);
+    return this.snapshotCache.get(this.ctx, logistics, now);
+  }
+
+  private resolveWar(snapshot: WarfareUISnapshot): WarView | null {
+    if (!this.selectedWarId) return null;
+    const war = snapshot.allWars.find(item => item.record.id === this.selectedWarId) ?? null;
+    if (!war) this.selectedWarId = null;
+    return war;
+  }
+
+  private subtitle(snapshot: WarfareUISnapshot): string {
+    const scope = this.selectedRealmId ? ctxName(this.ctx, this.selectedRealmId) : 'Todos os reinos';
+    return `${scope} · Ano ${snapshot.year} · ${snapshot.activeWars.length} guerra(s) ativa(s) · ${snapshot.totalSoldiers} soldado(s) vivo(s)`;
+  }
+
+  private warSubtitle(war: WarView): string {
+    return `${war.attacker.name} vs ${war.defender.name} · ${war.active ? 'ativo' : `encerrado em ${war.record.endYear}`} · início em ${war.record.startYear}`;
+  }
+
+  private tabItems(snapshot: WarfareUISnapshot): TabItem[] {
+    const scopedWars = this.selectedRealmId
+      ? snapshot.activeWars.filter(war => war.attacker.id === this.selectedRealmId || war.defender.id === this.selectedRealmId)
+      : snapshot.activeWars;
+    const scopedForces = this.selectedRealmId ? snapshot.forces.filter(force => force.kingdom.id === this.selectedRealmId) : snapshot.forces;
+    const scopedEngagements = this.selectedRealmId ? snapshot.engagements.filter(item => item.participantIds.includes(this.selectedRealmId!)) : snapshot.engagements;
+    const scopedHistory = this.selectedRealmId
+      ? snapshot.history.filter(war => war.attacker.id === this.selectedRealmId || war.defender.id === this.selectedRealmId)
+      : snapshot.history;
+    const items: TabItem[] = [{ id: 'overview', label: 'Visão Geral', icon: 'statistics' }];
+    if (scopedWars.length) items.push({ id: 'active-wars', label: 'Guerras Ativas', icon: 'war', badge: scopedWars.length });
+    if (scopedForces.length) items.push({ id: 'armies', label: 'Exércitos', icon: 'army', badge: scopedForces.length });
+    if (scopedEngagements.length) items.push({ id: 'battles', label: 'Batalhas', icon: 'battle', badge: scopedEngagements.length });
+    if (snapshot.realms.length) items.push({ id: 'military-power', label: 'Poder Militar', icon: 'statistics' });
+    if (scopedHistory.length) items.push({ id: 'history', label: 'Histórico', icon: 'history', badge: scopedHistory.length });
+    return items;
+  }
+
+  private isTab(value: string): value is WarfareTab {
+    return ALL_TABS.includes(value as WarfareTab);
+  }
+
+  private realmSelector(): HTMLElement {
+    return el('select', {
+      class: 'ae-war-realm-select', attrs: { 'aria-label': 'Filtro de reino militar' },
+      on: { change: (event: Event) => {
+        const id = (event.target as HTMLSelectElement).value;
+        this.selectedRealmId = id && this.ctx.sim.kingdoms.has(id) ? id : null;
+        this.tab = 'overview';
+        this.query = '';
+        this.snapshotCache.invalidate();
+        this.ctx.screens.refresh();
+      } }
+    }, [
+      el('option', { text: 'Todos os reinos', attrs: { value: '', selected: this.selectedRealmId === null } }),
+      ...[...this.ctx.sim.kingdoms.values()].map(kingdom => el('option', {
+        text: kingdom.name, attrs: { value: kingdom.id, selected: kingdom.id === this.selectedRealmId }
+      }))
+    ]) as HTMLSelectElement;
+  }
+
+  private searchPlaceholder(): string {
+    if (this.tab === 'armies') return 'Reino, posição ou estado…';
+    if (this.tab === 'military-power') return 'Buscar reino…';
+    if (this.tab === 'history') return 'Reino ou motivo de guerra…';
+    return 'Reino ou conflito ativo…';
+  }
+
+  /** Prevents the live cache cadence from resetting scroll when only positions drift. */
+  private snapshotSignature(snapshot: WarfareUISnapshot): string {
+    return [
+      snapshot.year,
+      ...snapshot.activeWars.map(war => `${war.record.id}:${war.record.battles}:${war.battlefieldCasualties}:${war.sieges.length}:${war.engagements.length}:${war.cities.map(city => `${city.id}:${city.status}`).join(',')}`),
+      ...snapshot.forces.map(force => `${force.id}:${force.soldiers}:${force.status}:${Math.round(force.meanHp * 100)}`),
+      `history:${snapshot.history.length}`
+    ].join('|');
+  }
+
+  private renderContent(existing?: WarfareUISnapshot): void {
+    if (!this.shell) return;
+    const started = performance.now();
+    const snapshot = existing ?? this.snapshotFor();
+    this.renderedSignature = this.snapshotSignature(snapshot);
+    const war = this.resolveWar(snapshot);
+    let content: Child[];
+    if (war) content = buildWarDossier(war, this);
+    else {
+      this.strip?.setActive(this.tab);
+      switch (this.tab) {
+        case 'overview': content = buildOverview(snapshot, this, this.selectedRealmId); break;
+        case 'active-wars': content = buildActiveWars(snapshot, this, this.selectedRealmId, this.query); break;
+        case 'armies': content = buildArmies(snapshot, this, this.selectedRealmId, this.query); break;
+        case 'battles': content = buildBattles(snapshot, this, this.selectedRealmId); break;
+        case 'military-power': content = buildMilitaryPower(snapshot, this, this.selectedRealmId, this.query); break;
+        case 'history': content = buildHistory(snapshot, this, this.selectedRealmId, this.query); break;
+      }
+    }
+    if (!content.length) content = [emptyState({ icon: 'war', title: 'Nada para mostrar nesta visão' })];
+    this.shell.setContent(content);
+    warfareUIPerformance.updateMs = performance.now() - started;
+  }
+
+  // ============================ HOST NAVIGATION ============================
+
+  public openWar(warId: string): void {
+    this.selectedWarId = warId || null;
+    this.query = '';
+    this.ctx.screens.refresh();
+  }
+
+  public openRealm(kingdomId: string): void {
+    if (this.ctx.sim.kingdoms.has(kingdomId)) this.ctx.screens.open('realm', { focusKingdom: kingdomId });
+  }
+
+  public openCity(cityId: string): void {
+    if (this.ctx.sim.cities.has(cityId)) this.ctx.screens.open('city', { cityId });
+  }
+
+  public openGood(good: GoodId): void {
+    this.ctx.screens.open('economy', { good });
+  }
+
+  public openInfrastructure(params: { routeId?: string; cityId?: string; tab?: string } = {}): void {
+    this.ctx.screens.open('infrastructure', params);
+  }
+
+  public openPolitics(kingdomId: string): void {
+    if (this.ctx.sim.kingdoms.has(kingdomId)) this.ctx.screens.open('politics', { focusKingdom: kingdomId });
+  }
+
+  public openTechnology(kingdomId: string, techId?: string | null): void {
+    if (this.ctx.sim.kingdoms.has(kingdomId)) this.ctx.screens.open('techtree', { focusKingdom: kingdomId, techId: techId ?? undefined });
+  }
+
+  public openChronicle(): void {
+    this.ctx.screens.open('chronicle');
+  }
+
+  public viewWarOnMap(war: WarView): void {
+    this.ctx.overlays.setWarFocus({
+      warId: war.record.id,
+      participantIds: [war.attacker.id, war.defender.id, ...war.allies.map(ally => ally.kingdom.id)],
+      entityIds: [...(war.attackerForce?.combatantIds ?? []), ...(war.defenderForce?.combatantIds ?? [])],
+      cityIds: war.cities.map(city => city.id),
+      points: [
+        ...war.engagements.map(item => ({ x: item.x, y: item.y, kind: 'engagement' as const })),
+        ...war.sieges.map(item => ({ x: item.x, y: item.y, kind: 'siege' as const })),
+        ...war.infrastructure.damagedRailLines.map(item => ({ x: item.at.x, y: item.at.y, kind: 'infrastructure' as const })),
+        ...war.infrastructure.disruptedPorts.map(item => ({ x: item.x, y: item.y, kind: 'infrastructure' as const }))
+      ]
+    });
+    this.ctx.focusOn(war.mapFocus.x, war.mapFocus.y, 1.25);
+    this.ctx.screens.closeAll();
+  }
+
+  public viewPointOnMap(x: number, y: number): void {
+    this.ctx.focusOn(x, y, 1.6);
+    this.ctx.screens.closeAll();
+  }
+
+  public followForce(force: ArmyForceView): void {
+    this.ctx.overlays.setWarFocus({
+      warId: force.warIds[0] ?? null,
+      participantIds: [force.kingdom.id],
+      entityIds: force.combatantIds,
+      cityIds: force.objective ? [force.objective.cityId] : [],
+      points: [{ x: force.x, y: force.y, kind: 'force' }]
+    });
+    this.ctx.trackEntity(force.representativeId);
+    this.ctx.focusOn(force.x, force.y, 1.8);
+    this.ctx.screens.closeAll();
+  }
+}
+
+function ctxName(ctx: GameContext, kingdomId: string): string {
+  return ctx.sim.kingdoms.get(kingdomId)?.name ?? kingdomId;
 }

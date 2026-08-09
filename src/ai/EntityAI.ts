@@ -30,6 +30,11 @@ import { WarfareSystem, SIEGE_RADIUS } from '../civ/Warfare';
 import { NavalSystem } from '../civ/NavalSystem';
 import { CaravanSystem } from '../civ/CaravanSystem';
 import { RailwayNetwork } from '../civ/RailwayNetwork';
+import { EntityRelevanceTracker, RELEVANCE_CADENCE, shouldTickEntity, type RelevanceContext } from '../perf/EntityRelevance';
+import { perfProfiler } from '../perf/PerformanceProfiler';
+import { RegionState } from '../world/WorldChunks';
+import { EcologySystem } from '../ecology/EcologySystem';
+import { buildingArchitecturalStamp, refreshArchitecturalProfile } from '../civ/ArchitecturalProfile';
 
 /**
  * World clock.
@@ -78,6 +83,7 @@ const CALM_STATES = new Set<AIState>([
 
 const ATTACK_COOLDOWN = 8; // Ticks between attacks
 const COMBAT_RANGE = 1.8;
+const HUNT_RANGE = 3.5; // thrown spear / bow range for a hunting citizen
 const DETECTION_RANGE = 8;
 const FLEE_THRESHOLD = 0.25; // Flee when HP below 25%
 
@@ -88,6 +94,10 @@ export class SimulationEngine {
   public kingdoms: Map<string, Kingdom> = new Map();
   public diplomacy: DiplomacyManager = new DiplomacyManager();
   public spatialHash: SpatialHash<Entity> = new SpatialHash<Entity>(8);
+  /** Coarse ownership index: every entity belongs to one logical world chunk. */
+  public entityChunks: SpatialHash<Entity> = new SpatialHash<Entity>(32);
+  public citySpatialHash: SpatialHash<City> = new SpatialHash<City>(16);
+  private entitiesById: Map<string, Entity> = new Map();
 
   /** Global price-setting market every realm trades against. */
   public market: WorldMarket = new WorldMarket();
@@ -107,6 +117,8 @@ export class SimulationEngine {
   public civ: CivilizationEngine = new CivilizationEngine();
   /** Resolves sieges and transfers cities taken by force. */
   public warfare: WarfareSystem = new WarfareSystem();
+  /** Habitat and population accounting; individual animal AI remains regional. */
+  public ecology: EcologySystem = new EcologySystem();
 
   public currentYear: number = 1;
   private yearTickCounter: number = 0;
@@ -115,8 +127,56 @@ export class SimulationEngine {
   /** Lifetime counters surfaced by the Statistics screen. */
   public totalBirths: number = 0;
   public totalDeaths: number = 0;
+  /** PERF-V1 kill switch used by reproducible before/after benchmarks. */
+  public performanceFeatures = { entityLOD: true };
+  private simulationTick: number = 0;
+  private entityTickStride: number = 1;
+  private relevanceTracker = new EntityRelevanceTracker();
+  private readonly regionalEntityScratch: Entity[] = [];
+  private readonly regionalQueryScratch: Entity[] = [];
+  private readonly regionalEntityIds = new Set<string>();
 
   constructor() {}
+
+  private rebuildEntityIndex(): void {
+    this.entitiesById.clear();
+    for (const entity of this.entities) this.entitiesById.set(entity.id, entity);
+  }
+
+  public getEntity(id: string | null | undefined): Entity | null {
+    if (!id) return null;
+    if (this.entitiesById.size !== this.entities.length) this.rebuildEntityIndex();
+    return this.entitiesById.get(id) ?? null;
+  }
+
+  public entitiesNear(x: number, y: number, radius: number): Entity[] {
+    return this.spatialHash.queryRadius(x, y, radius);
+  }
+
+  public entitiesInChunk(chunkX: number, chunkY: number): Entity[] {
+    return this.entityChunks.queryRect(chunkX * 32, chunkY * 32, chunkX * 32 + 31.999, chunkY * 32 + 31.999);
+  }
+
+  private regionalTickCandidates(tileMap: TileMap, context?: RelevanceContext): readonly Entity[] {
+    if (!this.performanceFeatures.entityLOD || !context || this.simulationTick % RELEVANCE_CADENCE.cold === 0) return this.entities;
+    const result = this.regionalEntityScratch; result.length = 0; this.regionalEntityIds.clear();
+    for (const chunk of tileMap.chunkStore.chunks) {
+      if (chunk.state === RegionState.SLEEPING) continue;
+      const minX = chunk.cx * tileMap.chunkSize, minY = chunk.cy * tileMap.chunkSize;
+      const local = this.entityChunks.queryRect(minX, minY, minX + tileMap.chunkSize - .001, minY + tileMap.chunkSize - .001, this.regionalQueryScratch);
+      for (const entity of local) if (!this.regionalEntityIds.has(entity.id)) { this.regionalEntityIds.add(entity.id); result.push(entity); }
+    }
+    const priorityIds = [...(context.selectedEntityIds ?? []), ...(context.trackedEntityId ? [context.trackedEntityId] : [])];
+    for (const id of priorityIds) {
+      const entity = this.getEntity(id); if (entity && !this.regionalEntityIds.has(id)) { this.regionalEntityIds.add(id); result.push(entity); }
+    }
+    return result;
+  }
+
+  public citiesNear(x: number, y: number, radius: number): City[] {
+    if (this.citySpatialHash.size !== this.cities.size) this.citySpatialHash.rebuild(this.cities.values());
+    return this.citySpatialHash.queryRadius(x, y, radius);
+  }
 
   public spawnEntity(species: SpeciesType, x: number, y: number, tileMap?: TileMap, forcedGender?: 'male' | 'female'): Entity {
     let spawnX = x;
@@ -138,6 +198,8 @@ export class SimulationEngine {
 
     this.entities.push(entity);
     this.spatialHash.insert(entity);
+    this.entityChunks.insert(entity);
+    this.entitiesById.set(entity.id, entity);
     this.totalBirths++;
 
     // Auto assign to existing nearby city of same species
@@ -157,16 +219,41 @@ export class SimulationEngine {
   }
 
   // ===================== MAIN TICK =====================
-  public tickAI(tileMap: TileMap, particles: ParticleManager): void {
+  public tickAI(tileMap: TileMap, particles: ParticleManager, relevanceContext?: RelevanceContext): void {
     this.lastTileMap = tileMap;
-    // 1. Rebuild spatial hash
-    this.spatialHash.clear();
-    for (const e of this.entities) this.spatialHash.insert(e);
+    this.simulationTick++;
+    const entityAIStarted = performance.now();
+    // The index is maintained incrementally. Rebuild only after load/import or
+    // another bulk replacement that bypassed spawn/death hooks.
+    if (this.spatialHash.size !== this.entities.length) this.spatialHash.rebuild(this.entities);
+    if (this.entityChunks.size !== this.entities.length) this.entityChunks.rebuild(this.entities);
+    if (this.citySpatialHash.size !== this.cities.size) this.citySpatialHash.rebuild(this.cities.values());
+    if (this.entitiesById.size !== this.entities.length) this.rebuildEntityIndex();
+    if (import.meta.env?.DEV && this.simulationTick % 600 === 0 && !this.spatialHash.validate(this.entities)) {
+      console.warn('[PERF-V1] spatial index drift detected; rebuilding derived index');
+      this.spatialHash.rebuild(this.entities);
+    }
 
     // 2. Process each entity
     const deadEntities: Entity[] = [];
+    const tickCandidates = this.regionalTickCandidates(tileMap, relevanceContext);
+    let hotEntities = 0;
+    let warmEntities = 0;
+    let coldEntities = Math.max(0, this.entities.length - tickCandidates.length);
 
-    for (const e of this.entities) {
+    for (const e of tickCandidates) {
+      if (e.hp <= 0) { deadEntities.push(e); continue; }
+      const currentTile = tileMap.getTile(Math.floor(e.x), Math.floor(e.y));
+      let relevance = this.performanceFeatures.entityLOD ? this.relevanceTracker.classify(e, relevanceContext, this.simulationTick) : 'hot';
+      // Environmental hazards and active combat can never be abstracted.
+      if (currentTile?.isOnFire || currentTile?.type === TerrainType.LAVA) relevance = 'hot';
+      if (relevance === 'hot') hotEntities++;
+      else if (relevance === 'warm') warmEntities++;
+      else coldEntities++;
+      if (!shouldTickEntity(e, relevance, this.simulationTick)) continue;
+
+      const stride = RELEVANCE_CADENCE[relevance];
+      this.entityTickStride = stride;
       // Save previous position for facing direction
       e.prevX = e.x;
       e.prevY = e.y;
@@ -178,7 +265,6 @@ export class SimulationEngine {
       if (e.currentSpeed > 0.0001) e.currentSpeed *= 0.86; else e.currentSpeed = 0;
 
       // Anti-water safety check: Units MUST NOT walk on water or be inside water
-      const currentTile = tileMap.getTile(Math.floor(e.x), Math.floor(e.y));
       if (currentTile && TERRAINS[currentTile.type].isWater) {
         const safe = SimplePathfinder.findNearestLand(e.x, e.y, tileMap);
         if (safe) {
@@ -188,10 +274,10 @@ export class SimulationEngine {
       }
 
       // Cooldowns
-      if (e.attackCooldown > 0) e.attackCooldown--;
-      if (e.aiCooldown > 0) e.aiCooldown--;
+      if (e.attackCooldown > 0) e.attackCooldown = Math.max(0, e.attackCooldown - stride);
+      if (e.aiCooldown > 0) e.aiCooldown = Math.max(0, e.aiCooldown - stride);
       if (e.emoteTimer > 0) {
-        e.emoteTimer--;
+        e.emoteTimer -= stride;
         if (e.emoteTimer <= 0) e.emote = null;
       }
 
@@ -200,8 +286,8 @@ export class SimulationEngine {
         if (currentTile.isOnFire || currentTile.type === TerrainType.LAVA) {
           {
             const dmg = e.traits.has(TraitId.FLAMMABLE) ? 30 : 15;
-            e.hp -= dmg;
-            particles.spawnDamageNumber(e.x, e.y, dmg);
+            e.hp -= dmg * stride;
+            particles.spawnDamageNumber(e.x, e.y, dmg * stride);
             // AI: Flee from fire
             if (e.aiState !== 'flee') {
               e.aiState = 'flee';
@@ -213,7 +299,7 @@ export class SimulationEngine {
         // heals off the killing blow before the death check ever sees it, and
         // becomes accidentally immortal.
         if (e.hp > 0 && e.traits.has(TraitId.REGENERATOR) && e.hp < e.maxHp) {
-          e.hp = Math.min(e.maxHp, e.hp + 2);
+          e.hp = Math.min(e.maxHp, e.hp + 2 * stride);
         }
       }
 
@@ -245,12 +331,12 @@ export class SimulationEngine {
         }
 
         // Particle feedback: footstep dust puffs on dry land
-        if (Math.random() < 0.04 && currentTile && !TERRAINS[currentTile.type].isWater) {
+        if (relevance === 'hot' && Math.random() < 0.04 && currentTile && !TERRAINS[currentTile.type].isWater) {
           particles.spawnParticle(e.x, e.y + 0.3, 'rgba(180, 150, 110, 0.25)', (Math.random() - 0.5) * 0.04, -0.02, 0.3);
         }
 
         // Flocking Separation: gentle push so characters walk alongside each other instead of stacking
-        if (isHumanoid) {
+        if (isHumanoid && relevance === 'hot') {
           const neighbors = this.spatialHash.queryRadius(e.x, e.y, 0.4);
           const myFx = Math.cos(e.facingAngle);
           const myFy = Math.sin(e.facingAngle);
@@ -295,7 +381,7 @@ export class SimulationEngine {
       }
 
       if (distMoved < 0.005 && e.aiState !== 'idle' && e.aiState !== 'heal') {
-        e.stuckTicks = (e.stuckTicks || 0) + 1;
+        e.stuckTicks = (e.stuckTicks || 0) + stride;
         if (e.stuckTicks >= 2) {
           e.stuckTicks = 0;
           const jittered = SimplePathfinder.jitterAround(e.x, e.y, tileMap, SPECIES_DEFINITIONS[e.species].baseSpeed * MOVE_PER_TICK);
@@ -314,7 +400,17 @@ export class SimulationEngine {
         e.stuckTicks = 0;
         e._jitterFailures = 0;
       }
+
+      this.spatialHash.update(e, e.prevX, e.prevY);
+      this.entityChunks.update(e, e.prevX, e.prevY);
     }
+
+    this.entityTickStride = 1;
+    perfProfiler.record('entityAI', performance.now() - entityAIStarted);
+    perfProfiler.setCounter('entities', this.entities.length);
+    perfProfiler.setCounter('hotEntities', hotEntities);
+    perfProfiler.setCounter('warmEntities', warmEntities);
+    perfProfiler.setCounter('coldEntities', coldEntities);
 
     // Update maritime ships and overland caravans
     this.naval.updateShips(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
@@ -344,7 +440,7 @@ export class SimulationEngine {
       this.tickAge();
       this.tickFamilies(tileMap);
       this.tickWildlife(tileMap);
-      this.civ.tickYear({
+      perfProfiler.measure('economy', () => this.civ.tickYear({
         year: this.currentYear,
         cities: this.cities,
         kingdoms: this.kingdoms,
@@ -355,15 +451,15 @@ export class SimulationEngine {
         trade: this.trade,
         spawn: (species, x, y) => this.spawnEntity(species, x, y),
         sim: this
-      });
-      this.warfare.tickYear({
+      }));
+      perfProfiler.measure('warfare', () => this.warfare.tickYear({
         year: this.currentYear,
         cities: this.cities,
         kingdoms: this.kingdoms,
         entities: this.entities,
         tileMap,
         diplomacy: this.diplomacy
-      });
+      }));
       this.tickGeopolitics();
       this.musterArmies();
     }
@@ -465,7 +561,7 @@ export class SimulationEngine {
    */
   private mergeHouseholdWithPartner(e: Entity): void {
     if (!e.partnerId || !e.householdId) return;
-    const partner = this.entities.find(o => o.id === e.partnerId);
+    const partner = this.getEntity(e.partnerId);
     if (!partner?.householdId || partner.householdId === e.householdId) return;
 
     const mine = this.households.get(e.householdId);
@@ -478,7 +574,7 @@ export class SimulationEngine {
     keep.pantry.add('food', absorb.pantry.get('food'));
     for (const memberId of absorb.memberIds) {
       keep.memberIds.add(memberId);
-      const member = this.entities.find(o => o.id === memberId);
+      const member = this.getEntity(memberId);
       if (member) member.householdId = keep.id;
     }
     this.households.delete(absorb.id);
@@ -621,7 +717,7 @@ export class SimulationEngine {
 
   // ===================== FAUNA AI (ANIMALS) =====================
   private tickFauna(e: Entity, tileMap: TileMap, particles: ParticleManager): void {
-    const speed = SPECIES_DEFINITIONS[e.species].baseSpeed * MOVE_PER_TICK;
+    const speed = SPECIES_DEFINITIONS[e.species].baseSpeed * MOVE_PER_TICK * Math.min(6, this.entityTickStride);
 
     switch (e.species) {
       case SpeciesType.DEER:
@@ -949,7 +1045,7 @@ export class SimulationEngine {
 
   // ===================== HUMANOID AI =====================
   private tickHumanoid(e: Entity, tileMap: TileMap, particles: ParticleManager): void {
-    const speed = SPECIES_DEFINITIONS[e.species].baseSpeed * MOVE_PER_TICK;
+    const speed = SPECIES_DEFINITIONS[e.species].baseSpeed * MOVE_PER_TICK * Math.min(6, this.entityTickStride);
 
     // 1. Try to join or found a city if homeless
     if (!e.cityId) {
@@ -1077,6 +1173,14 @@ if (e.kingdomId) {
     // ===== PRIORITY 5: Work / Profession-specific tasks (day only) =====
     if (e.cityId && this.cities.has(e.cityId)) {
       const city = this.cities.get(e.cityId)!;
+
+      // Hunting is a fallback food source: it is selected only under shortage
+      // and only if a real prey animal is close enough to pursue.
+      if (!e.isChild && city.stock.get('food') < city.population * 1.25 && this.ecology.findNearbyPrey(e, this.spatialHash.queryRadius(e.x, e.y, 15))) {
+        e.aiState = 'hunt';
+        e.aiCooldown = rng.rangeInt(18, 35);
+        return;
+      }
 
       // Assign profession if none (now job-slot based)
       if (e.profession === 'none') {
@@ -1218,6 +1322,7 @@ if (e.kingdomId) {
     for (const building of city.buildings.values()) {
       const def = building.definition;
       const jobs = def.jobs ?? 0;
+      if (!building.isOperational()) continue;
       if (jobs <= 0 || building.assignedWorkerIds.size >= jobs * building.level) continue;
       if (!unlocked.has(building.type)) continue;
       const score = jobs * building.level
@@ -1261,7 +1366,12 @@ if (e.kingdomId) {
    * which is itself a meaningful signal that the city needs to build.
    */
   private claimHome(e: Entity, city: City): void {
-    if (e.homeBuildingId && city.buildings.has(e.homeBuildingId)) return;
+    if (e.homeBuildingId) {
+      const existing = city.buildings.get(e.homeBuildingId);
+      if (existing?.isOperational()) return;
+      existing?.residentIds.delete(e.id);
+      e.homeBuildingId = null;
+    }
 
     // Prefer moving in with family already housed, then any house with room.
     const familyIds = new Set([e.partnerId, e.fatherId, e.motherId, ...e.childrenIds].filter(Boolean) as string[]);
@@ -1270,6 +1380,7 @@ if (e.kingdomId) {
     let anyWithRoom: Building | null = null;
 
     for (const building of city.buildings.values()) {
+      if (!building.isOperational()) continue;
       if ((building.definition.housing ?? 0) <= 0) continue;
       if (building.freeHousing() <= 0) continue;
       if (!familyHome && [...building.residentIds].some(id => familyIds.has(id))) familyHome = building;
@@ -1294,7 +1405,7 @@ if (e.kingdomId) {
 
     // A household is the set of people under one roof. Partners share one.
     if (!e.householdId) {
-      const partner = e.partnerId ? this.entities.find(o => o.id === e.partnerId) : null;
+      const partner = this.getEntity(e.partnerId);
       if (partner?.householdId && this.households.has(partner.householdId)) {
         e.householdId = partner.householdId;
         this.households.get(partner.householdId)!.memberIds.add(e.id);
@@ -1468,6 +1579,39 @@ if (e.kingdomId) {
           // SIEGE WARFARE: If no enemy soldier nearby, attack enemy city buildings & conquer Town Center!
           this.executeSiegeWarfare(e, tileMap, particles, speed);
         }
+        break;
+      }
+
+      case 'hunt': {
+        if (!e.cityId || !this.cities.has(e.cityId) || e.carrying) {
+          e.aiState = e.carrying ? 'deliver' : 'idle';
+          break;
+        }
+        const prey = this.ecology.findNearbyPrey(e, this.spatialHash.queryRadius(e.x, e.y, 15));
+        if (!prey) { e.aiState = 'gather_food'; e.aiCooldown = 0; break; }
+        const distance = SimplePathfinder.distance(e.x, e.y, prey.x, prey.y);
+        e.targetX = prey.x; e.targetY = prey.y;
+        e.showEmote('🏹', 20);
+        if (distance > HUNT_RANGE) {
+          // A hunter commits to a short pursuit rather than walking at the
+          // civilian pace; otherwise every healthy deer can outrun a human
+          // forever and hunting never resolves into an ecological cost.
+          const pos = this.moveEntityToward(e, prey.x, prey.y, tileMap, speed * 4);
+          if (pos.blocked) { e.targetX = null; e.targetY = null; e.aiCooldown = 0; }
+          break;
+        }
+        if (e.attackCooldown <= 0) {
+          const damage = Math.max(5, e.damage + (e.equipment.weapon?.damageBonus ?? 0) - prey.defense);
+          prey.hp -= damage;
+          prey.huntedById = e.id;
+          e.attackCooldown = ATTACK_COOLDOWN + 2;
+          particles.spawnDamageNumber(prey.x, prey.y, damage);
+          if (prey.hp <= 0) { e.kills++; e.gainXp(4); }
+        }
+        // Keep closing while a fleeing animal remains in throw range. This
+        // prevents the hunter from stopping after each throw and letting prey
+        // reset the whole pursuit.
+        if (prey.hp > 0 && distance > COMBAT_RANGE) this.moveEntityToward(e, prey.x, prey.y, tileMap, speed * 4);
         break;
       }
 
@@ -1957,7 +2101,11 @@ if (e.kingdomId) {
         if (hit.hp <= 0) {
           enemyCity.removeBuilding(hit.id);
           const tile = tileMap.getTile(hit.x, hit.y);
-          if (tile && tile.buildingId === hit.id) tile.buildingId = null;
+          if (tile && tile.buildingId === hit.id) {
+            tile.buildingId = null;
+            tileMap.markRenderDirty(hit.x, hit.y);
+            if (hit.fortificationRole) tileMap.markRoadNetworkChanged(hit.x, hit.y);
+          }
         }
       }
     }
@@ -2028,20 +2176,21 @@ if (e.kingdomId) {
       const city = new City(cityId, cityName, e.species, tile.x, tile.y, e.name, this.currentYear);
       city.population = 1;
       this.cities.set(cityId, city);
+      this.citySpatialHash.insert(city);
       e.cityId = cityId;
       tile.cityId = cityId;
       if (!e.birthCityId) {
         e.birthCityId = cityId;
         e.birthCityName = cityName;
       }
-      chronicle.log(this.currentYear, 'founding', `The settlement of ${cityName} was founded by ${e.name}.`);
-      this.checkKingdomFounding(city, e);
+      chronicle.log(this.currentYear, 'founding', `O assentamento de ${cityName} foi fundado por ${e.name}.`);
+      this.checkKingdomFounding(city, e, tileMap);
       // Founded last so the claim is stamped with the kingdom that now owns it.
       city.seedFoundingClaim(tileMap, 4);
     }
   }
 
-  private checkKingdomFounding(city: City, rulerCandidate: Entity): void {
+  private checkKingdomFounding(city: City, rulerCandidate: Entity, tileMap: TileMap): void {
     if (!city.kingdomId) {
       const kingdomId = nextId('king');
       const color = getNextKingdomColor();
@@ -2062,8 +2211,13 @@ if (e.kingdomId) {
       this.kingdoms.set(kingdomId, kingdom);
       city.kingdomId = kingdomId;
       rulerCandidate.kingdomId = kingdomId;
+      refreshArchitecturalProfile(city, kingdom, tileMap, this.currentYear);
+      if (city.architecturalProfile) {
+        for (const building of city.buildings.values()) building.recordArchitecture(buildingArchitecturalStamp(city.architecturalProfile, city.foundingYear));
+        city.markBuildingTopologyChanged();
+      }
 
-      chronicle.log(this.currentYear, 'kingdom', `The ${kingdom.name} was established. ${rulerCandidate.fullName} leads its people.`);
+      chronicle.log(this.currentYear, 'kingdom', `O ${kingdom.name} foi estabelecido. ${rulerCandidate.fullName} lidera seu povo.`);
     }
   }
 
@@ -2133,12 +2287,12 @@ if (e.kingdomId) {
         const confidence = Math.min(2, powerRatio);
         const hostility = Math.max(0.01, -relation / 120);
         if (rng.chance(0.10 * aggression * confidence * (1 + hostility + proximity * borderAmbition * 0.8))) {
-          const reason = aggressor.isEmpire ? 'Imperial Expansion'
+          const reason = aggressor.isEmpire ? 'Expansão Imperial'
             : powerRatio > 1.8 ? 'Conquest'
-            : relation <= -80 ? 'Blood Feud'
-            : 'Border Dispute';
+            : relation <= -80 ? 'Vingança de Sangue'
+            : 'Disputa de Fronteira';
           if (this.diplomacy.declareWar(aggressor.id, defender.id, this.currentYear, reason)) {
-            chronicle.log(this.currentYear, 'war', `${aggressor.name} declared war upon ${defender.name}. Reason: ${reason}`);
+            chronicle.log(this.currentYear, 'war', `${aggressor.name} declarou guerra contra ${defender.name}. Motivo: ${reason}`);
           }
         }
       }
@@ -2166,7 +2320,7 @@ if (e.kingdomId) {
         const city = this.cities.get(cityId);
         if (!city) continue;
 
-        const barracksList = [...city.buildings.values()].filter(b => b.type === 'barracks');
+        const barracksList = [...city.buildings.values()].filter(b => b.type === 'barracks' && b.isOperational());
         let openSlots = 0;
         for (const b of barracksList) {
           const cap = (b.definition.jobs ?? 0) * b.level;
@@ -2256,7 +2410,7 @@ if (e.kingdomId) {
       for (const parent of residents) {
         if (parent.gender !== 'female' || parent.isPregnant) continue;
         if (!parent.partnerId || couples.has(parent.id)) continue;
-        const partner = this.entities.find(e => e.id === parent.partnerId);
+        const partner = this.getEntity(parent.partnerId);
         if (!partner || partner.cityId !== cityId) continue;
 
         couples.add(parent.id);
@@ -2471,6 +2625,14 @@ if (e.kingdomId) {
    * up empty of animals within a decade. Herds recover where there is room.
    */
   private tickWildlife(tileMap: TileMap): void {
+    const ecology = this.ecology.advanceYear(tileMap, this.entities);
+    for (const dead of ecology.deaths) this.handleEntityDeath(dead, null!);
+    if (ecology.migrated) {
+      // ECO-V3 may relocate animals between chunks in its coarse sleeping-world
+      // pass, so the frame-level local queries resume from a correct index.
+      this.spatialHash.rebuild(this.entities);
+      this.entityChunks.rebuild(this.entities);
+    }
     const counts = new Map<SpeciesType, Entity[]>();
     for (const e of this.entities) {
       if (SPECIES_DEFINITIONS[e.species].isHumanoid || e.hp <= 0) continue;
@@ -2480,26 +2642,20 @@ if (e.kingdomId) {
     }
 
     // Carrying capacity scales with the land, so a big map holds a big ecosystem.
-    const area = tileMap.width * tileMap.height;
-    const isPredator = (s: SpeciesType) =>
-      s === SpeciesType.WOLF || s === SpeciesType.BEAR || s === SpeciesType.DRAGON || s === SpeciesType.EAGLE;
-
     for (const [species, members] of counts) {
       // Predators sit at the top of the chain, so there are far fewer of them.
-      const cap = isPredator(species)
-        ? Math.max(2, Math.round((area / 900) * 0.22))
-        : Math.max(6, Math.round((area / 900) * 1.8));
+      const cap = this.ecology.getCapacity(species);
       if (members.length >= cap) continue;
 
       // A lone survivor cannot repopulate; a pair can.
-      const breeding = members.filter(m => m.age >= 1 && m.hp > m.maxHp * 0.5);
+      const breeding = members.filter(m => m.age >= 1 && m.hp > m.maxHp * 0.5 && this.ecology.canReproduce(m, tileMap));
       if (breeding.length < 2) continue;
 
       // Prey breed fast — that is the whole reason a herd survives being hunted.
-      const litters = Math.max(1, Math.floor(breeding.length / (isPredator(species) ? 4 : 2)));
+      const litters = Math.max(1, Math.floor(breeding.length / (this.ecology.isPredator(species) ? 4 : 2)));
       for (let i = 0; i < litters; i++) {
         if (this.entities.filter(e => e.species === species).length >= cap) break;
-        if (!rng.chance(isPredator(species) ? 0.35 : 0.6)) continue;
+        if (!rng.chance(this.ecology.birthChance(species))) continue;
         const parent = rng.pick(breeding);
         const calf = this.spawnEntity(species, parent.x + rng.range(-1, 1), parent.y + rng.range(-1, 1), tileMap);
         calf.age = 0;
@@ -2516,7 +2672,7 @@ if (e.kingdomId) {
     const kingdom = mother.kingdomId ? this.kingdoms.get(mother.kingdomId) : null;
 
     let fatherEntity: Entity;
-    const fatherMember = mother.pregnantFatherId ? (this.entities.find(e => e.id === mother.pregnantFatherId) || this.deceasedAncestors.get(mother.pregnantFatherId)) : null;
+    const fatherMember = mother.pregnantFatherId ? (this.getEntity(mother.pregnantFatherId) || this.deceasedAncestors.get(mother.pregnantFatherId)) : null;
 
     if (fatherMember && !('isDeceased' in fatherMember)) {
       fatherEntity = fatherMember as Entity;
@@ -2569,6 +2725,8 @@ if (e.kingdomId) {
 
       this.entities.push(child);
       this.spatialHash.insert(child);
+      this.entityChunks.insert(child);
+      this.entitiesById.set(child.id, child);
       this.totalBirths++;
     }
 
@@ -2577,6 +2735,22 @@ if (e.kingdomId) {
   }
 
   private handleEntityDeath(dead: Entity, particles: ParticleManager): void {
+    // Only a human hunt yields food. Predation and ordinary combat cannot turn
+    // into a free city supply source.
+    if (!SPECIES_DEFINITIONS[dead.species].isHumanoid && dead.huntedById) {
+      const hunter = this.getEntity(dead.huntedById);
+      const food = this.ecology.foodYield(dead.species);
+      if (hunter && hunter.hp > 0 && food > 0) {
+        if (hunter.carrying) {
+          const city = hunter.cityId ? this.cities.get(hunter.cityId) : null;
+          const stored = city?.stock.add('food', food) ?? 0;
+          if (city && stored > 0) city.ledger.recordProduced('food', stored);
+        } else {
+          hunter.carrying = { good: 'food', amount: food };
+          hunter.aiState = 'deliver';
+        }
+      }
+    }
     // Release the house and the job slot. Without this the dead keep occupying
     // beds and workplaces forever and the settlement silently stops hiring.
     const homeCity = dead.cityId ? this.cities.get(dead.cityId) : null;
@@ -2620,6 +2794,9 @@ if (e.kingdomId) {
     const idx = this.entities.indexOf(dead);
     if (idx !== -1) this.entities.splice(idx, 1);
     this.spatialHash.remove(dead);
+    this.entityChunks.remove(dead);
+    this.entitiesById.delete(dead.id);
+    this.relevanceTracker.forget(dead.id);
     this.totalDeaths++;
 
     // Death particles (skip if called from infant mortality with no particle manager)
@@ -2647,7 +2824,7 @@ if (e.kingdomId) {
     }
 
     if (dead.partnerId) {
-      const partner = this.entities.find(e => e.id === dead.partnerId);
+      const partner = this.getEntity(dead.partnerId);
       if (partner) partner.partnerId = null;
     }
 

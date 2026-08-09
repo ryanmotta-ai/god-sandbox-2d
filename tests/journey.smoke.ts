@@ -32,7 +32,7 @@ const tileMap = new TileMap(MAP_SIZE, MAP_SIZE, 'single_continent', 20260802);
 const sim = new SimulationEngine();
 const particles = new ParticleManager();
 
-const species = [SpeciesType.LUMINI, SpeciesType.SYLVANII];
+const species = [SpeciesType.HUMAN, SpeciesType.HUMAN];
 const spawnPoints = species.map(() => {
   for (let i = 0; i < 400; i++) {
     const x = rng.rangeInt(2, tileMap.width - 3);

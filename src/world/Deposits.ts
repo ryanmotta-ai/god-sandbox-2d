@@ -67,7 +67,9 @@ function setResource(tile: Tile, good: GoodId, amount: number, maxAmount: number
 
 function countForArea(width: number, height: number, baseAt128: number, minimum: number = 1): number {
   const scale = (width * height) / (128 * 128);
-  return Math.max(minimum, Math.round(baseAt128 * scale));
+  // Province count grows sub-linearly. Large worlds gain broader deposits, not
+  // sixteen repetitions of the 128x128 distribution.
+  return Math.max(minimum, Math.round(baseAt128 * Math.pow(scale, 0.58)));
 }
 
 type TilePredicate = (tile: Tile, x: number, y: number, grid: Tile[][]) => boolean;
@@ -105,8 +107,10 @@ function buildFaciesGrid(
   }
   for (let x = 0; x < width; x++) {
     for (let y = 0; y < height; y++) {
-      const bandA = Math.min(2, Math.floor(noiseA.octave2D(x, y, 3, 0.5, 0.02) * 3));
-      const bandB = Math.min(2, Math.floor(noiseB.octave2D(x, y, 3, 0.5, 0.02) * 3));
+      const u = (x + 0.5) / width;
+      const v = (y + 0.5) / height;
+      const bandA = Math.min(2, Math.floor(noiseA.octave2D(u, v, 3, 0.5, 1.65) * 3));
+      const bandB = Math.min(2, Math.floor(noiseB.octave2D(u, v, 3, 0.5, 1.85) * 3));
       grid[x * height + y] = provinceFacies[bandA * 3 + bandB];
     }
   }
@@ -160,7 +164,9 @@ function placeClusteredResource(
   if (eligible.length === 0) return;
 
   const usedCenters: Array<{ x: number; y: number }> = [];
-  const minimumCenterDistance = Math.max(4, spec.radius * 2.2);
+  const geographicScale = Math.sqrt(Math.max(1, Math.min(width, height) / 128));
+  const geographicRadius = Math.max(1, Math.round(spec.radius * geographicScale));
+  const minimumCenterDistance = Math.max(5, geographicRadius * 2.35);
 
   for (let cluster = 0; cluster < spec.clusters; cluster++) {
     let center = rng.pick(eligible);
@@ -176,7 +182,7 @@ function placeClusteredResource(
 
     // Geological veins are elongated and rotated, not perfect circles: each
     // cluster gets its own strike direction and aspect ratio.
-    const r = spec.radius;
+    const r = geographicRadius;
     const angle = rng.range(0, Math.PI);
     const elongation = rng.range(0.4, 0.9);
     const cosA = Math.cos(angle);
@@ -241,7 +247,7 @@ export function generateDeposits(grid: Tile[][], width: number, height: number, 
 
       // Timber: densest in damp, fertile stands, sparse elsewhere.
       if (tile.type === TerrainType.FOREST) {
-        if (rng.chance(0.85)) {
+        if (rng.chance(0.72)) {
           const max = rng.range(80, 170) * (0.75 + tile.moisture * 0.5);
           setResource(tile, 'wood', max * rng.range(0.72, 1), max);
         } else if (rng.chance(0.25)) {
@@ -249,15 +255,15 @@ export function generateDeposits(grid: Tile[][], width: number, height: number, 
           const max = rng.range(50, 120) * (0.8 + tile.fertility * 0.5);
           setResource(tile, 'food', max * rng.range(0.6, 0.95), max);
         }
-      } else if (dampWoodland && rng.chance(0.5)) {
+      } else if (dampWoodland && rng.chance(0.18)) {
         const max = rng.range(50, 130) * (0.8 + tile.fertility * 0.5);
         setResource(tile, 'wood', max * rng.range(0.65, 1), max);
-      } else if (rng.chance(0.08)) {
+      } else if (rng.chance(0.025)) {
         const max = rng.range(30, 75);
         setResource(tile, 'wood', max * rng.range(0.6, 0.95), max);
       }
 
-      if ((tile.type === TerrainType.GRASS || tile.type === TerrainType.SAVANNA || tile.type === TerrainType.SOIL) && rng.chance(0.35 + tile.moisture * 0.25)) {
+      if ((tile.type === TerrainType.GRASS || tile.type === TerrainType.SAVANNA || tile.type === TerrainType.SOIL) && rng.chance(0.055 + tile.fertility * 0.09)) {
         // Generous wild food, fruit trees and berry bush deposits
         const max = rng.range(60, 150) * (0.8 + tile.fertility * 0.6);
         setResource(tile, 'food', max * rng.range(0.65, 1.0), max);

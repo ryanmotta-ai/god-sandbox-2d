@@ -46,6 +46,7 @@ function portThroughput(city: City): number {
   let throughput = 0;
   for (const b of city.buildings.values()) {
     if (b.type !== 'harbor' && b.type !== 'port') continue;
+    if (!b.isOperational()) continue;
     const health = b.hp / b.maxHp;
     if (health <= 0.5) continue; // knocked out of action
     throughput += (b.type === 'harbor' ? 6 : 18) * health;
@@ -67,7 +68,7 @@ export function portCapacityFactor(fromCity: City, toCity: City): number {
 /** Whether a city still has a usable harbor/port (HP above half). Gates sea routes. */
 export function portOperational(city: City): boolean {
   for (const b of city.buildings.values()) {
-    if ((b.type === 'harbor' || b.type === 'port') && b.hp / b.maxHp > 0.5) return true;
+    if ((b.type === 'harbor' || b.type === 'port') && b.isOperational() && b.hp / b.maxHp > 0.5) return true;
   }
   return false;
 }
@@ -77,14 +78,19 @@ export function portOperational(city: City): boolean {
  * Roads inside the radius take damage that only a real repair pass can undo.
  */
 export function damageRoadsAround(tileMap: TileMap, cx: number, cy: number, radius: number): void {
+  let changed = false;
   for (let dx = -radius; dx <= radius; dx++) {
     for (let dy = -radius; dy <= radius; dy++) {
       if (Math.hypot(dx, dy) > radius) continue;
       const tile = tileMap.getTile(Math.floor(cx) + dx, Math.floor(cy) + dy);
       if (!tile || tile.roadLevel <= 0) continue;
       tile.roadDamage = Math.min(1, tile.roadDamage + rng.range(0.18, 0.42));
+      tileMap.markRenderDirty(tile.x, tile.y);
+      tileMap.markRoadNetworkChanged(tile.x, tile.y);
+      changed = true;
     }
   }
+  void changed;
 }
 
 /**
@@ -92,21 +98,26 @@ export function damageRoadsAround(tileMap: TileMap, cx: number, cy: number, radi
  * sustained siege degrades and eventually severs, cutting its freight routes.
  */
 export function damageRailAround(tileMap: TileMap, cx: number, cy: number, radius: number): void {
+  let changed = false;
   for (let dx = -radius; dx <= radius; dx++) {
     for (let dy = -radius; dy <= radius; dy++) {
       if (Math.hypot(dx, dy) > radius) continue;
       const tile = tileMap.getTile(Math.floor(cx) + dx, Math.floor(cy) + dy);
       if (!tile || tile.railLevel <= 0) continue;
       tile.railDamage = Math.min(1, tile.railDamage + rng.range(0.18, 0.42));
+      tileMap.markRenderDirty(tile.x, tile.y);
+      tileMap.markRailNetworkChanged(tile.x, tile.y);
+      changed = true;
     }
   }
+  void changed;
 }
 
 /**
  * A besieger breaks the settlement's economic arteries. Strategic commerce and
  * infrastructure buildings are hit before the rest.
  */
-export function damageStrategicBuildings(city: City): void {
+export function damageStrategicBuildings(city: City, tileMap?: TileMap, year: number = 0): void {
   const vital = [...city.buildings.values()]
     .filter(b => STRATEGIC_BUILDINGS.includes(b.type))
     .sort((a, b) => STRATEGIC_BUILDINGS.indexOf(a.type) - STRATEGIC_BUILDINGS.indexOf(b.type));
@@ -114,7 +125,9 @@ export function damageStrategicBuildings(city: City): void {
   const hits = rng.rangeInt(1, Math.min(3, pool.length));
   for (let i = 0; i < hits; i++) {
     const target = pool[rng.rangeInt(0, pool.length - 1)];
-    target.hp = Math.max(1, Math.round(target.hp * rng.range(0.72, 0.95)));
+    const nextHp = Math.max(1, Math.round(target.hp * rng.range(0.72, 0.95)));
+    target.applyDamage(target.hp - nextHp, year, 'war');
+    tileMap?.markRenderDirty(target.x, target.y);
   }
 }
 
@@ -147,9 +160,11 @@ const REPAIR_PRIORITY: Record<string, number> = {
  * the damage closes per year.
  */
 export function repairInfrastructure(city: City, tileMap: TileMap): void {
+  let roadsChanged = false;
+  let railsChanged = false;
   // --- Buildings ---
   const damaged = [...city.buildings.values()]
-    .filter(b => b.hp < b.maxHp)
+    .filter(b => (b.lifecycleState === 'damaged' || b.lifecycleState === 'normal') && b.hp < b.maxHp)
     .sort((a, b) => (REPAIR_PRIORITY[a.type] ?? 50) - (REPAIR_PRIORITY[b.type] ?? 50));
   for (const b of damaged) {
     const missing = b.maxHp - b.hp;
@@ -170,6 +185,7 @@ export function repairInfrastructure(city: City, tileMap: TileMap): void {
     if (wood > 0) city.ledger.recordConsumed('wood', wood);
     if (tools > 0) city.ledger.recordConsumed('tools', tools);
     b.hp = Math.min(b.maxHp, b.hp + (stone / 0.55 + wood / 0.35 + tools / 0.1) * 0.55);
+    tileMap.markRenderDirty(b.x, b.y);
   }
 
   // --- Roads ---
@@ -194,6 +210,9 @@ export function repairInfrastructure(city: City, tileMap: TileMap): void {
     if (stone > 0) city.ledger.recordConsumed('stone', stone);
     if (wood > 0) city.ledger.recordConsumed('wood', wood);
     tile.roadDamage = Math.max(0, tile.roadDamage - fix);
+    tileMap.markRenderDirty(tile.x, tile.y);
+    tileMap.markRoadNetworkChanged(tile.x, tile.y);
+    roadsChanged = true;
   }
 
   // --- Railways ---
@@ -215,7 +234,11 @@ export function repairInfrastructure(city: City, tileMap: TileMap): void {
     if (steel > 0) city.ledger.recordConsumed('steel', steel);
     if (stone > 0) city.ledger.recordConsumed('stone', stone);
     tile.railDamage = Math.max(0, tile.railDamage - fix);
+    tileMap.markRenderDirty(tile.x, tile.y);
+    tileMap.markRailNetworkChanged(tile.x, tile.y);
+    railsChanged = true;
   }
+  void roadsChanged; void railsChanged;
 }
 
 /**
@@ -233,5 +256,9 @@ export function damagePrimaryRoads(tileMap: TileMap, cx: number, cy: number, rad
       if (score > bestScore) { bestScore = score; best = tile; }
     }
   }
-  if (best) best.roadDamage = Math.min(1, best.roadDamage + 0.6);
+  if (best) {
+    best.roadDamage = Math.min(1, best.roadDamage + 0.6);
+    tileMap.markRenderDirty(best.x, best.y);
+    tileMap.markRoadNetworkChanged(best.x, best.y);
+  }
 }

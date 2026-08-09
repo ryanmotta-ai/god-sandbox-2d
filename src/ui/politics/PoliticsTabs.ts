@@ -800,6 +800,9 @@ export function buildPoliticalChronicle(m: PoliticsMetrics, host: PoliticsScreen
     .sort((a, b) => b.year - a.year)
     .slice(0, 12);
 
+  const EVENT_TYPE_PT: Record<string, string> = { kingdom: 'reino', king: 'rei', succession: 'sucessão', law: 'lei', revolution: 'revolução', society: 'sociedade', rebellion: 'rebelião', diplomacy: 'diplomacia', war: 'guerra', peace: 'paz', conquest: 'conquista' };
+  const IMPORTANCE_PT: Record<string, string> = { minor: 'menor', moderate: 'moderada', major: 'maior', notable: 'notável', legendary: 'lendária' };
+
   if (!events.length) return null;
 
   return panel({
@@ -815,7 +818,7 @@ export function buildPoliticalChronicle(m: PoliticsMetrics, host: PoliticsScreen
           el('span', { class: 'ae-pol-event-title', text: event.title ?? event.text }),
           event.title ? el('span', { class: 'ae-pol-event-text', text: event.text }) : null
         ]),
-        badge(event.type, { size: 'sm', variant: 'outline' })
+        badge(EVENT_TYPE_PT[event.type] ?? event.type, { size: 'sm', variant: 'outline' })
       ]),
       {
         title: event.title ?? `Ano ${event.year}`,
@@ -823,8 +826,8 @@ export function buildPoliticalChronicle(m: PoliticsMetrics, host: PoliticsScreen
         icon: 'history',
         rows: [
           { label: 'Ano', value: `${event.year}` },
-          { label: 'Importância', value: event.importance },
-          { label: 'Tipo', value: event.type }
+          { label: 'Importância', value: IMPORTANCE_PT[event.importance] ?? event.importance },
+          { label: 'Tipo', value: EVENT_TYPE_PT[event.type] ?? event.type }
         ],
         footnote: event.causes.length ? `Causa: ${event.causes[0]}` : undefined
       }
