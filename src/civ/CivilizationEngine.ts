@@ -17,6 +17,8 @@ import { GreatPersonManager } from './GreatPersons';
 import { chronicle } from './Chronicle';
 import { Entity } from '../entities/Entity';
 import { SpeciesType, SPECIES_DEFINITIONS } from '../entities/Species';
+import { remember } from '../entities/Psyche';
+import { uproot } from './Generations';
 import { TileMap } from '../world/TileMap';
 import { TerrainType, TERRAINS } from '../world/Biomes';
 import { tileResourceToGood } from '../world/Tile';
@@ -2750,7 +2752,10 @@ export class CivilizationEngine {
   /** CITY-V3 profile changes are event/year driven; existing buildings retain their stamps. */
   private refreshCityArchitecture(city: City, kingdom: Kingdom | null, world: CivWorld): void {
     const metropole = kingdom?.metropoleId ? world.kingdoms.get(kingdom.metropoleId) ?? null : null;
-    refreshArchitecturalProfile(city, kingdom, world.tileMap, world.year, metropole);
+    // The people who live here nudge what gets built; buildings already standing
+    // keep the stamp of the culture that raised them (CULT-V1 §11).
+    const identity = world.sim?.cultures.get(city.dominantCultureId) ?? null;
+    refreshArchitecturalProfile(city, kingdom, world.tileMap, world.year, metropole, identity?.lean ?? null);
     if (!city.architecturalProfile) return;
     let backfilled = false;
     for (const building of city.buildings.values()) {
@@ -3466,7 +3471,7 @@ export class CivilizationEngine {
   }
 
   private relocateColonists(source: City, destination: City, kingdomId: string, count: number, world: CivWorld): void {
-    const movers = world.entities.filter(entity => entity.cityId === source.id && !entity.isChild).slice(0, count);
+    const movers = this.chooseSettlers(source, world, count);
     for (const mover of movers) {
       if (mover.homeBuildingId) source.buildings.get(mover.homeBuildingId)?.residentIds.delete(mover.id);
       if (mover.workplaceId) source.buildings.get(mover.workplaceId)?.assignedWorkerIds.delete(mover.id);
@@ -3474,7 +3479,32 @@ export class CivilizationEngine {
       mover.cityId = destination.id; mover.kingdomId = kingdomId;
       mover.x = destination.x + rng.range(-1.5, 1.5); mover.y = destination.y + rng.range(-1.5, 1.5);
       mover.homeX = destination.x; mover.homeY = destination.y; mover.targetX = null; mover.targetY = null;
+      uproot(mover);
+      remember(mover.memories, 'moved', world.year, 0.45);
     }
+  }
+
+  /**
+   * Who actually volunteers to leave.
+   *
+   * Colonists used to be whoever the entity list happened to name first, which
+   * meant a colony was staffed by an arbitrary slice of the population and the
+   * decision to emigrate belonged to nobody. SOC-V2 already computes, once a
+   * year, how badly each citizen wants to be somewhere else — so the people who
+   * go are the people who wanted to go: the young, the jobless, the ambitious,
+   * the ones with nothing holding them here.
+   *
+   * Sorting a settlement's adults is cheap and happens only when a colony is
+   * actually being supplied, so this costs nothing in an ordinary year.
+   */
+  private chooseSettlers(source: City, world: CivWorld, count: number): Entity[] {
+    const candidates = (this.entitiesByCity.get(source.id) ?? world.entities.filter(e => e.cityId === source.id))
+      .filter(entity => entity.hp > 0 && !entity.isChild);
+    // A settlement never sends its ruler abroad, whatever they might want.
+    return candidates
+      .filter(entity => entity.profession !== 'king' && entity.profession !== 'leader')
+      .sort((a, b) => b.migrationUrge - a.migrationUrge)
+      .slice(0, count);
   }
 
   private generateColonialName(metropole: Kingdom, capitalName: string, world: CivWorld): string {
@@ -3550,7 +3580,8 @@ export class CivilizationEngine {
       colony.seedFoundingClaim(world.tileMap, 4);
 
       // Move some real citizens to the new settlement so the map shows it living.
-      const movers = world.entities.filter(e => e.cityId === city.id && !e.isChild).slice(0, settlers);
+      // They are the ones who most wanted out, not the first names on the list.
+      const movers = this.chooseSettlers(city, world, settlers);
       for (const mover of movers) {
         // Leave the old house and job behind, or the settler keeps a bed and a
         // workplace in a settlement they no longer live in.
@@ -3567,6 +3598,11 @@ export class CivilizationEngine {
         mover.homeY = site.y;
         mover.targetX = null;
         mover.targetY = null;
+        mover.migrationUrge = 0;
+        // Colonists are the first generation of their line in the new land; their
+        // children will be the ones actually born there.
+        uproot(mover);
+        remember(mover.memories, 'moved', world.year, 0.45);
       }
 
       chronicle.log(

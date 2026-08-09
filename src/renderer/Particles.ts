@@ -95,6 +95,41 @@ export class ParticleManager {
     }
   }
 
+  public spawnWaterSplash(x: number, y: number, count: number = 6): void {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.2 + Math.random() * 1.0;
+      const color = Math.random() > 0.4 ? '#e0fbff' : '#5fd0e8';
+      this.spawnParticle(
+        x,
+        y,
+        color,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        0.25 + Math.random() * 0.35,
+        1.5 + Math.random() * 2
+      );
+    }
+  }
+
+  public spawnWaterWake(x: number, y: number, vx: number = 0, vy: number = 0): void {
+    const foamColor = Math.random() > 0.3 ? '#f0ffff' : '#b2ebf2';
+    const side = (Math.random() - 0.5) * 0.4;
+    this.spawnParticle(
+      x,
+      y,
+      foamColor,
+      -vx * 0.3 + Math.cos(side) * 0.15,
+      -vy * 0.3 + Math.sin(side) * 0.15,
+      0.4 + Math.random() * 0.4,
+      2 + Math.random() * 2.5
+    );
+  }
+
+  public spawnWaterRipple(x: number, y: number): void {
+    this.spawnParticle(x, y, '#a5f3fc', 0, 0, 0.4, 2);
+  }
+
   public spawnDamageNumber(x: number, y: number, damage: number): void {
     const p = this.obtainParticle(x, y, true);
     if (!p) return;

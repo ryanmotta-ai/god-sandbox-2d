@@ -5,6 +5,8 @@ export type PerformanceMetric =
   | 'entityAI'
   | 'pathfinding'
   | 'economy'
+  /** SOC-V2's yearly per-citizen pass: memory, work, housing and migration. */
+  | 'lives'
   | 'warfare'
   | 'trade'
   | 'ui';

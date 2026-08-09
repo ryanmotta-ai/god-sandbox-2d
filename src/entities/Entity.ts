@@ -2,6 +2,7 @@ import { SpeciesType, SPECIES_DEFINITIONS } from './Species';
 import { TraitId, TRAIT_DEFINITIONS } from './Traits';
 import { Profession, PersonalityType, AIState, EntityNeeds, createNeeds } from './Needs';
 import { SocialClass, deriveSocialClass, startingWealthFor } from './Identity';
+import { Psyche, Memory, Bond, createPsyche, traumaLoad, wellbeing } from './Psyche';
 import type { GoodId } from '../civ/Goods';
 import { HasPosition } from '../core/SpatialHash';
 import { rng, hashString, hashToUnit } from '../core/Random';
@@ -119,6 +120,24 @@ export class Entity implements HasPosition {
   /** Days in a row spent starving. Drives real harm rather than instant death. */
   public starvingDays: number = 0;
 
+  // ============ PSYCHE (SOC-V2) ============
+  /**
+   * Fixed disposition, inherited from the parents. Read wherever a decision has
+   * more than one defensible answer — who runs, who stays, who leaves for work.
+   */
+  public psyche: Psyche = createPsyche(() => rng.next());
+  /** What this person still carries. Capped at MEMORY_CAP and fades yearly. */
+  public memories: Memory[] = [];
+  /** Friends and rivals outside the family. Capped at BOND_CAP. */
+  public bonds: Bond[] = [];
+  /**
+   * How badly this citizen wants to be somewhere else, 0..1. Recomputed once a
+   * year from needs, family and the state of the settlement; kept on the entity
+   * so migration, colonisation and the UI all read the same number instead of
+   * each deriving their own.
+   */
+  public migrationUrge: number = 0;
+
   // ============ REAL WORK (layer 3) ============
   /** What this citizen is physically carrying back to the settlement. */
   public carrying: { good: GoodId; amount: number } | null = null;
@@ -140,6 +159,43 @@ export class Entity implements HasPosition {
   public pregnantFatherId: string | null = null;
   /** Generations from the world's first settlers. */
   public generation: number = 1;
+
+  // ============ LINEAGE (SOC-V3) ============
+  /**
+   * The settlement this citizen's *family* came from, inherited rather than
+   * observed. A colonist's grandchild is still of the old country by record even
+   * though they have never seen it — which is what makes colonial identity
+   * something that can be measured instead of assumed.
+   */
+  public originCityId: string | null = null;
+  public originCityName: string = '';
+  /**
+   * How many generations of this line have been born where it now lives. One for
+   * a newcomer, ROOTED_GENERATIONS for a family that belongs to the place.
+   */
+  public localGenerations: number = 1;
+  /** What the house does. A leaning when a young heir picks a trade, never a rule. */
+  public familyTrade: Profession = 'none';
+
+  // ============ CULTURE (CULT-V1) ============
+  /**
+   * Who this person is, as opposed to who rules them. Inherited from the family
+   * and from the street they grew up on, carried unchanged when they migrate, and
+   * completely unaffected by a border moving over their head.
+   */
+  public cultureId: string = '';
+  /**
+   * 0..1 how much the place they live has worn off on them. Rises while living
+   * among another culture, falls among their own. Crossing 0.85 is what makes a
+   * change of identity *possible* — never automatic.
+   */
+  public localAffinity: number = 0;
+  /**
+   * Marked worth remembering after death. Set by whatever decides someone
+   * mattered; read only by the ancestor-retention policy, so marking a citizen
+   * costs one boolean and buys them a permanent place in the genealogy.
+   */
+  public historic: boolean = false;
 
   public isFavorite: boolean = false;
   public inventory: Record<string, number> = { wood: 0, stone: 0, food: 0 };
@@ -294,6 +350,28 @@ export class Entity implements HasPosition {
   /** True once this citizen has claimed a real house rather than a spot of ground. */
   public get hasHome(): boolean {
     return this.homeBuildingId !== null;
+  }
+
+  /** Everything bad this citizen is still carrying, 0..1. */
+  public get trauma(): number {
+    return traumaLoad(this.memories);
+  }
+
+  /**
+   * How well life is going, 0..1. Derived like `socialClass`, so it can never
+   * disagree with the needs, job and family that produce it.
+   */
+  public get wellbeing(): number {
+    return wellbeing({
+      hunger: this.needs.hunger,
+      comfort: this.needs.comfort,
+      safety: this.needs.safety,
+      social: this.needs.social,
+      hasJob: this.profession !== 'none',
+      hasHome: this.hasHome,
+      hasFamily: !!this.partnerId || this.childrenIds.length > 0 || !!this.motherId || !!this.fatherId,
+      trauma: this.trauma
+    });
   }
 
   private generateName(species: SpeciesType): string {

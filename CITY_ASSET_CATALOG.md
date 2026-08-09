@@ -140,3 +140,31 @@ src/assets/
 ```
 
 O atlas não depende da ordem dos arquivos. IDs e `atlasKey` são estáveis; o shelf packer distribui automaticamente centenas de sprites em páginas de até 512×512 e o renderer continua agrupando instâncias por página.
+
+## ART-V2 — MASTER PACK
+
+O catálogo mestre agora vive em `src/assets/MasterAssetManifest.ts`. Ele contém **113 entradas estáveis**, das quais **72 têm PNG final produzido** e **41 permanecem na fila de produção**. Cada entrada inclui domínio, categoria, família, função, era, cultura, estado, tamanho, variante, canvas, footprint, âncora, atlas e página automática.
+
+### Cidade — produzidos (33)
+
+- **Residencial (10):** casas pobres `v03/v04`, casas comuns `v05/v06`, residências iron `v02/v03`, mansões classical `v02/v03` e apartamentos industrial/modern.
+- **Comercial (6):** duas lojas, taverna, mercado coberto, armazém industrial e galeria comercial clássica.
+- **Cívico/religioso (4):** escola, hospital, capela e catedral.
+- **Produção/agricultura (3):** oficina iron, fundição industrial e celeiro.
+- **Transporte (3):** estação ferroviária pequena, galpão de locomotivas e guindaste portuário, somados às famílias ferroviárias do ART-V1.
+- **Fortificação (2):** torre de muralha e portão fortificado.
+- **Construção (3):** fundação, andaime e pilha de materiais.
+- **Ruínas (2):** fábrica de tijolos destruída e muralha colapsada.
+
+### Bibliotecas futuras já produzidas (39)
+
+- **WAR (12):** cinco unidades por era, duas tendas, catapulta, canhão, carro de suprimentos, forte colonial e posto destruído.
+- **COL (6):** cabana, entreposto, missão, casa colonial, paliçada e doca.
+- **ECO (6):** carvalho, pinheiro, palmeira, acácia, rochas e tronco caído.
+- **Efeitos (8):** fumaça, fogo, vapor, faíscas, poeira, chuva, neve e neblina.
+- **Água (4):** água calma, ondas oceânicas, corrente de rio e espuma costeira.
+- **Máscaras de luz (3):** janelas, poste e tocha.
+
+### Próxima fila (41)
+
+Prioridade seguinte: universidade/tribunal/praça/monumento; mosteiro e santuário desert; textile mill/refinery/power plant/oil well/shipyard; watermill/vineyard/orchard/greenhouse; estação média/plataforma/water tower/ponte ferroviária/pier/lighthouse/barcos/vagão; muralhas culturais; fortaleza/barricada; props de densidade; ruínas civic/warehouse/market; vegetação de pântano e microflora.

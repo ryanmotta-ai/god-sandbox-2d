@@ -43,6 +43,8 @@ export interface DeceasedEntityRecord {
   profession: string;
   title: string | null;
   isGreatPerson: boolean;
+  /** Explicitly marked worth keeping (SOC-V3). Exempt from ancestor pruning. */
+  historic?: boolean;
   fatherId: string | null;
   motherId: string | null;
   partnerId: string | null;

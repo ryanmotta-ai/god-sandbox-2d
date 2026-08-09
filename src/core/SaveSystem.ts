@@ -206,9 +206,32 @@ export class SaveSystem {
         // and as loaded as they were when the game was saved.
         needs: e.needs,
         starvingDays: e.starvingDays,
-        carrying: e.carrying
+        carrying: e.carrying,
+        // SOC-V2. Disposition, memory and relations are the person, not a cache —
+        // a reload that regenerated them would hand the player a settlement of
+        // strangers wearing the same names.
+        psyche: e.psyche,
+        memories: e.memories,
+        bonds: e.bonds,
+        // SOC-V3 lineage. Where the family is from, how deep it is where it
+        // lives, what it does and whether history should keep it. All four are
+        // inherited rather than observed, so none can be rebuilt on load.
+        originCityId: e.originCityId,
+        originCityName: e.originCityName,
+        localGenerations: e.localGenerations,
+        familyTrade: e.familyTrade,
+        historic: e.historic,
+        // CULT-V1. Identity is carried by the person; the settlement's share
+        // table is a cache and is rebuilt by the first census after load.
+        cultureId: e.cultureId,
+        localAffinity: e.localAffinity,
+        // Derived, and normally it would not be saved. It is here because
+        // colonisation reads it to choose who emigrates, and a world reloaded in
+        // midwinter must send the same people out as the one that was saved.
+        migrationUrge: e.migrationUrge
       })),
       households: Array.from(sim.households.values()).map(h => h.serialize()),
+      cultures: sim.cultures.serialize(),
       cities: Array.from(sim.cities.values()).map(c => c.serialize()),
       kingdoms: Array.from(sim.kingdoms.values()).map(k => k.serialize()),
       market: sim.market.serialize(),
@@ -273,9 +296,30 @@ export class SaveSystem {
       e.homeBuildingId = ed.homeBuildingId ?? null;
       e.householdId = ed.householdId ?? null;
       e.wealth = ed.wealth ?? 0;
-      e.needs = ed.needs ?? createNeeds();
+      e.needs = { ...createNeeds(), ...(ed.needs ?? {}) };
       e.starvingDays = ed.starvingDays ?? 0;
       e.carrying = ed.carrying ?? null;
+
+      // SOC-V2 (absent from pre-SOC saves). A citizen who predates the psyche
+      // keeps the disposition the constructor already rolled for them rather
+      // than loading as a blank — but never re-rolls one that was saved.
+      if (ed.psyche) e.psyche = { ...e.psyche, ...ed.psyche };
+      e.memories = ed.memories ?? [];
+      e.bonds = ed.bonds ?? [];
+      e.migrationUrge = ed.migrationUrge ?? 0;
+
+      // SOC-V3 (absent from pre-SOC-V3 saves). A citizen with no recorded family
+      // origin is treated as being of the place they were born, which is exactly
+      // what they were before the concept existed.
+      e.originCityId = ed.originCityId ?? e.birthCityId;
+      e.originCityName = ed.originCityName ?? e.birthCityName;
+      e.localGenerations = ed.localGenerations ?? 1;
+      e.familyTrade = ed.familyTrade ?? 'none';
+      e.historic = ed.historic ?? false;
+      // Pre-CULT saves have no identity; the first census gives everyone the
+      // culture of the settlement they are standing in.
+      e.cultureId = ed.cultureId ?? '';
+      e.localAffinity = ed.localAffinity ?? 0;
 
       e.traits = new Set(ed.traits);
       e.recalculateStats();
@@ -300,6 +344,8 @@ export class SaveSystem {
       const kingdom = Kingdom.deserialize(kd);
       sim.kingdoms.set(kingdom.id, kingdom);
     }
+
+    sim.cultures.deserialize(data.cultures);
 
     // Restore households (absent from pre-layer-5 saves; they rebuild on demand).
     sim.households.clear();

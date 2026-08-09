@@ -146,6 +146,22 @@ export class City {
   // ============ SIEGE ============
   /** Realm currently besieging this settlement, if any. */
   public besiegerId: string | null = null;
+
+  // ============ CULTURE (CULT-V1) ============
+  /**
+   * Cultural composition of the residents, as shares summing to 1. A cache,
+   * rebuilt once a year from a walk the simulation was already making — never
+   * recomputed per frame and never trusted as durable state.
+   */
+  public cultureMix: Record<string, number> = {};
+  /** Largest share in `cultureMix`. Null until the first census runs. */
+  public dominantCultureId: string | null = null;
+  /**
+   * Year the dominant culture last changed here. A settlement has to be
+   * culturally settled for a long time before it can produce a culture of its
+   * own, and this is what "a long time" is measured against.
+   */
+  public culturallySettledSince: number = 0;
   /** 0..1 — how close the besieger is to taking the walls. */
   public siegeProgress: number = 0;
   /** Years this settlement has been under siege without relief. */
@@ -505,6 +521,10 @@ export class City {
       prosperity: this.prosperity,
       famineYears: this.famineYears,
       besiegerId: this.besiegerId,
+      // CULT-V1: dominant identity and how long it has held. The share table
+      // itself is a cache and rebuilds on the first census after load.
+      dominantCultureId: this.dominantCultureId,
+      culturallySettledSince: this.culturallySettledSince,
       siegeProgress: this.siegeProgress,
       siegeYears: this.siegeYears,
       capturedYear: this.capturedYear,
@@ -566,6 +586,8 @@ export class City {
     city.prosperity = data.prosperity ?? 0.5;
     city.famineYears = data.famineYears ?? 0;
     city.besiegerId = data.besiegerId ?? null;
+    city.dominantCultureId = data.dominantCultureId ?? null;
+    city.culturallySettledSince = data.culturallySettledSince ?? 0;
     city.siegeProgress = data.siegeProgress ?? 0;
     city.siegeYears = data.siegeYears ?? 0;
     city.capturedYear = data.capturedYear ?? null;

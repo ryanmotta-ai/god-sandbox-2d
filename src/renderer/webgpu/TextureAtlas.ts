@@ -7,6 +7,7 @@ import { SpriteRegistry } from '../SpriteRegistry';
 import { caravanSprite, CARAVAN_FRAMES, type CaravanView } from '../CaravanSprites';
 import { TERRAIN_VISUALS } from '../TerrainPalette';
 import { CITY_ASSET_MANIFEST, resolveCityAssetUrl, type CityAssetEntry } from '../../assets/CityAssetManifest';
+import { MASTER_ASSET_MANIFEST, resolveMasterAssetUrl, type MasterAssetEntry } from '../../assets/MasterAssetManifest';
 import {
   ENTITY_ASSET_MANIFEST, ENTITY_SHEET_ANIMATIONS, ENTITY_SHEET_CELL,
   ENTITY_SHEET_DIRECTIONS, ENTITY_SHEET_FRAMES, entityArtAtlasKey,
@@ -51,7 +52,7 @@ export interface TextureAtlasPage {
 interface AtlasSource {
   key: string;
   canvas: HTMLCanvasElement;
-  asset?: CityAssetEntry;
+  asset?: CityAssetEntry | MasterAssetEntry;
 }
 
 /** A page is bounded so CITY-V1 can add sprite families without reallocating a giant atlas. */
@@ -83,8 +84,7 @@ function terrainSprite(type: TerrainType): HTMLCanvasElement {
     ctx.fillStyle = visual.base;
     ctx.fillRect(0, 0, 16, 16);
 
-    // Fixed one-pixel material marks retain the deliberately quantised look of
-    // the Canvas palette without creating a per-world terrain texture.
+    // Fixed one-pixel material marks retain the quantised pixel art look
     ctx.fillStyle = visual.low;
     ctx.fillRect(1, 2, 2, 1);
     ctx.fillRect(10, 11, 3, 1);
@@ -94,12 +94,35 @@ function terrainSprite(type: TerrainType): HTMLCanvasElement {
     ctx.fillRect(3, 13, 2, 1);
     ctx.fillRect(8, 5, 1, 1);
 
-    if (type === TerrainType.DEEP_OCEAN || type === TerrainType.SHALLOW_WATER) {
+    if (type === TerrainType.SHALLOW_WATER) {
+      // Wave crest lines & caustics highlights for WebGPU atlas
+      ctx.fillStyle = visual.high;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(1, 4, 6, 1);
+      ctx.fillRect(8, 10, 7, 1);
+      ctx.fillRect(4, 14, 5, 1);
+
+      // Caustics glint pixels
       ctx.fillStyle = visual.accent;
-      ctx.globalAlpha = 0.38;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(3, 4, 2, 1);
+      ctx.fillRect(11, 10, 2, 1);
+      ctx.fillRect(13, 2, 1, 1);
+      ctx.fillRect(2, 11, 1, 1);
+      ctx.globalAlpha = 1.0;
+    } else if (type === TerrainType.DEEP_OCEAN) {
+      // Abyssal swells & specular sparkles for WebGPU atlas
+      ctx.fillStyle = visual.high;
+      ctx.globalAlpha = 0.40;
       ctx.fillRect(2, 5, 5, 1);
       ctx.fillRect(9, 12, 4, 1);
-      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = visual.accent;
+      ctx.globalAlpha = 0.70;
+      ctx.fillRect(4, 5, 1, 1);
+      ctx.fillRect(10, 12, 1, 1);
+      ctx.fillRect(14, 7, 1, 1);
+      ctx.globalAlpha = 1.0;
     } else if (type === TerrainType.LAVA) {
       ctx.fillStyle = visual.accent;
       ctx.fillRect(2, 9, 6, 1);
@@ -204,6 +227,32 @@ async function collectExternalCitySources(): Promise<AtlasSource[]> {
       return { key: asset.atlasKey ?? `asset:${asset.id}`, canvas, asset } satisfies AtlasSource;
     } catch (error) {
       console.warn(`[ART-V1] Could not load ${asset.id}; keeping current fallback.`, error);
+      return undefined;
+    }
+  }));
+  const sources: AtlasSource[] = [];
+  for (const source of loaded) if (source) sources.push(source);
+  return sources;
+}
+
+async function collectExternalMasterSources(): Promise<AtlasSource[]> {
+  const loaded = await Promise.all(MASTER_ASSET_MANIFEST.assets.map(async asset => {
+    const url = resolveMasterAssetUrl(asset);
+    if (!url) return undefined;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const bitmap = await createImageBitmap(await response.blob(), { premultiplyAlpha: 'premultiply' });
+      if (bitmap.width !== asset.canvas[0] || bitmap.height !== asset.canvas[1]) {
+        bitmap.close();
+        console.warn(`[ART-V2] Ignoring ${asset.id}: expected ${asset.canvas[0]}x${asset.canvas[1]}, got ${bitmap.width}x${bitmap.height}`);
+        return undefined;
+      }
+      const canvas = makeCanvas(bitmap.width, bitmap.height, ctx => ctx.drawImage(bitmap, 0, 0));
+      bitmap.close();
+      return { key: `asset:${asset.id}`, canvas, asset } satisfies AtlasSource;
+    } catch (error) {
+      console.warn(`[ART-V2] Could not load ${asset.id}; asset remains available to future packs.`, error);
       return undefined;
     }
   }));
@@ -318,6 +367,7 @@ export async function createInitialTextureAtlas(device: GPUDevice): Promise<Text
   // preserve the existing generated assets during the incremental art rollout.
   const sourceMap = new Map(collectSources().map(source => [source.key, source]));
   for (const source of await collectExternalCitySources()) sourceMap.set(source.key, source);
+  for (const source of await collectExternalMasterSources()) sourceMap.set(source.key, source);
   for (const source of await collectExternalEntitySources()) sourceMap.set(source.key, source);
   const sources = [...sourceMap.values()];
   const regions = new Map<string, AtlasRegion>();

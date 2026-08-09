@@ -23,8 +23,20 @@ import { events } from '../core/EventBus';
 import { CivilizationEngine } from '../civ/CivilizationEngine';
 import { canPairWith, formPartnership, conceiveChild, chooseSuccessor, generateDynastyName, DeceasedEntityRecord } from '../civ/Lineage';
 import { Household } from '../civ/Household';
+import {
+  DemographicsAccumulator, emptyDemographics, familyAdvantage, inheritFamilyMarks,
+  inheritOrigin, pruneAncestors, rootedness, settleEstate, uproot, type Demographics
+} from '../civ/Generations';
+import type { Profession } from '../entities/Needs';
+import {
+  CultureRegistry, CultureCensus, assimilate, considerEmergence, inheritCulture
+} from '../civ/CulturalIdentity';
 import { startingWealthFor } from '../entities/Identity';
-import { HUNGER_PER_DAY, HUNGER_SEEK_FOOD, HUNGER_STARVING, ENERGY_EXHAUSTED, MEAL_ADULT, MEAL_CHILD, MEAL_RELIEF } from '../entities/Needs';
+import { HUNGER_PER_DAY, HUNGER_SEEK_FOOD, HUNGER_STARVING, ENERGY_EXHAUSTED, MEAL_ADULT, MEAL_CHILD, MEAL_RELIEF, SOCIAL_DECAY_PER_DAY, SOCIAL_LONELY } from '../entities/Needs';
+import {
+  bondWith, decayBonds, decayMemories, huntWillingness, inheritPsyche, migrationUrge,
+  remember, standGroundChance
+} from '../entities/Psyche';
 import { GOVERNMENTS } from '../civ/Government';
 import { WarfareSystem, SIEGE_RADIUS } from '../civ/Warfare';
 import { NavalSystem } from '../civ/NavalSystem';
@@ -87,6 +99,50 @@ const HUNT_RANGE = 3.5; // thrown spear / bow range for a hunting citizen
 const DETECTION_RANGE = 8;
 const FLEE_THRESHOLD = 0.25; // Flee when HP below 25%
 
+/**
+ * SOC-V2 migration limits.
+ *
+ * `MAX_RELOCATIONS_PER_YEAR` is the cost ceiling, not a balance value: each move
+ * rewrites two settlements' resident and worker tables, so an unbounded exodus in
+ * a famine year is a frame spike. Wanting to leave is unbounded and is what the
+ * player sees; actually leaving is metered.
+ */
+const MAX_RELOCATIONS_PER_YEAR = 12;
+/** How far a citizen will consider moving, in tiles. Beyond this is MIG-V1's job. */
+const MIGRATION_RANGE = 60;
+/** Urge above which a citizen starts looking for somewhere else to live. */
+const RELOCATION_URGE = 0.5;
+
+/**
+ * The trade a workplace implies.
+ *
+ * Lifted out of `assignProfession` because SOC-V3 needs to ask the same question
+ * in reverse — "which open job matches what this family has always done" — and
+ * two copies of this mapping would drift apart the first time a building is added.
+ */
+function professionForBuilding(type: BuildingType): Profession {
+  switch (type) {
+    case 'farm': case 'pasture': return 'farmer';
+    case 'lumber_camp': return 'woodcutter';
+    case 'mine': case 'quarry': case 'oil_well': return 'miner';
+    case 'barracks': return 'soldier';
+    case 'library': case 'academy': return 'scout';
+    default: return 'builder';
+  }
+}
+
+/** A settlement's condition, read once a year and shared by all its residents. */
+interface CityMood {
+  /** 0..1 perceptible danger: besieged, at war, or at peace. */
+  danger: number;
+  foodPerHead: number;
+  prosperity: number;
+  /** Open job slots across every operational building. */
+  vacancies: number;
+  /** 0..1 how good a place this is to live right now. */
+  opportunity: number;
+}
+
 export class SimulationEngine {
   public entities: Entity[] = [];
   public deceasedAncestors: Map<string, DeceasedEntityRecord> = new Map();
@@ -111,6 +167,8 @@ export class SimulationEngine {
   public railways: RailwayNetwork = new RailwayNetwork();
   /** Family economic units. Keyed by householdId. */
   public households: Map<string, Household> = new Map();
+  /** Every cultural identity that exists (CULT-V1). Small, serialized whole. */
+  public cultures: CultureRegistry = new CultureRegistry();
   /** Last map ticked. The daily pass needs terrain but is not handed one. */
   private lastTileMap: TileMap | null = null;
   /** Runs everything slow and structural, once per simulated year. */
@@ -127,6 +185,13 @@ export class SimulationEngine {
   /** Lifetime counters surfaced by the Statistics screen. */
   public totalBirths: number = 0;
   public totalDeaths: number = 0;
+  /**
+   * SOC-V3 population snapshot, rebuilt once a year by `tickLives` from the walk
+   * it was already making. Derived — never saved, never trusted as state.
+   */
+  public demographics: Demographics = emptyDemographics();
+  private birthsThisYear: number = 0;
+  private deathsThisYear: number = 0;
   /** PERF-V1 kill switch used by reproducible before/after benchmarks. */
   public performanceFeatures = { entityLOD: true };
   private simulationTick: number = 0;
@@ -292,6 +357,8 @@ export class SimulationEngine {
             if (e.aiState !== 'flee') {
               e.aiState = 'flee';
               e.aiCooldown = 20;
+              // Burning is not something anyone puts behind them.
+              if (SPECIES_DEFINITIONS[e.species].isHumanoid) remember(e.memories, 'fire', this.currentYear, 0.5);
             }
           }
         }
@@ -439,6 +506,7 @@ export class SimulationEngine {
       this.currentYear++;
       this.tickAge();
       this.tickFamilies(tileMap);
+      perfProfiler.measure('lives', () => this.tickLives());
       this.tickWildlife(tileMap);
       perfProfiler.measure('economy', () => this.civ.tickYear({
         year: this.currentYear,
@@ -520,12 +588,25 @@ export class SimulationEngine {
       const safetyTarget = Math.max(5, 88 - threats * 22);
       needs.safety += (safetyTarget - needs.safety) * 0.35;
 
+      // Company. Loneliness accrues on its own and is only paid off by other
+      // people being nearby, which is what makes an isolated frontier settler
+      // measurably worse off than a townsman without needing a second system.
+      // The 7-tile query above is reused rather than repeated — the same sweep
+      // that counts threats also counts neighbours.
+      const neighbours = this.spatialHash.queryRadius(e.x, e.y, 7)
+        .filter(o => o.id !== e.id && o.hp > 0 && SPECIES_DEFINITIONS[o.species].isHumanoid).length;
+      const company = Math.min(4, neighbours) * 9;
+      needs.social = Math.max(0, Math.min(100, needs.social - SOCIAL_DECAY_PER_DAY + company));
+
       // Starvation. Deliberately slow: hunger should be a crisis the player can
       // see building and respond to, not a silent culling every few days.
       if (needs.hunger >= HUNGER_STARVING) {
         e.starvingDays++;
         if (e.starvingDays > 2) e.hp -= 1.5 + e.starvingDays * 0.6;
         e.showEmote('💀', 60);
+        // Real hunger is remembered. This is the link between one bad harvest and
+        // a citizen who leaves at the first sign of the next one.
+        if (e.starvingDays === 3) remember(e.memories, 'famine', this.currentYear, 0.5);
       } else {
         e.starvingDays = 0;
       }
@@ -1086,23 +1167,20 @@ export class SimulationEngine {
 if (e.kingdomId) {
       const enemies = nearby.filter(o => this.isEnemy(e, o) && o.age >= 3); // Skip infants
       if (enemies.length > 0) {
-        // Who stands and who runs is decided by role and by whether the odds are
-        // survivable — the things a person can actually see — rather than by any
-        // innate disposition.
-        const isFighter = e.profession === 'soldier' || e.profession === 'king';
-        const armed = !!e.equipment.weapon;
-        if (isFighter) {
+        // Who stands and who runs. The observable facts still dominate — being
+        // outnumbered and being empty-handed are what anyone can see — but between
+        // two people reading the same odds it is disposition and history that
+        // decide, so a war does not produce one uniform reaction on a whole street.
+        const stand = this.willStandGround(e, enemies.length);
+        if (stand) {
           e.aiState = 'attack';
-          e.aiCooldown = 5;
+          e.aiCooldown = e.profession === 'soldier' || e.profession === 'king' ? 5 : 6;
+          remember(e.memories, 'battle', this.currentYear, 0.35);
           return;
         }
-        // A civilian with a tool in hand will face one attacker. Facing a group,
-        // or facing anyone empty-handed, they run.
-        if (armed && enemies.length <= 1) {
-          e.aiState = 'attack';
-          e.aiCooldown = 6;
-          return;
-        }
+        // Fleeing an enemy at close quarters is the kind of thing that stays with
+        // someone, and is why the same person leaves earlier next time.
+        remember(e.memories, 'war_survived', this.currentYear, 0.3);
         e.aiState = 'flee';
         e.aiCooldown = 12;
         return;
@@ -1114,14 +1192,12 @@ if (e.kingdomId) {
       (o.species === SpeciesType.WOLF || o.species === SpeciesType.BEAR || o.species === SpeciesType.DRAGON) &&
       SimplePathfinder.distance(e.x, e.y, o.x, o.y) < 5
     );
-    if (faunaThreats.length > 0 && e.profession !== 'soldier') {
-      e.aiState = 'flee';
-      e.aiCooldown = 12;
-      return;
-    }
-    if (faunaThreats.length > 0 && e.profession === 'soldier') {
-      e.aiState = 'attack';
-      e.aiCooldown = 5;
+    if (faunaThreats.length > 0) {
+      // A soldier always turns and fights a beast; a civilian usually runs, but a
+      // brave and armed one will not, and that is a decision worth watching.
+      const stand = e.profession === 'soldier' || this.willStandGround(e, faunaThreats.length);
+      e.aiState = stand ? 'attack' : 'flee';
+      e.aiCooldown = stand ? 5 : 12;
       return;
     }
 
@@ -1175,10 +1251,23 @@ if (e.kingdomId) {
       const city = this.cities.get(e.cityId)!;
 
       // Hunting is a fallback food source: it is selected only under shortage
-      // and only if a real prey animal is close enough to pursue.
-      if (!e.isChild && city.stock.get('food') < city.population * 1.25 && this.ecology.findNearbyPrey(e, this.spatialHash.queryRadius(e.x, e.y, 15))) {
+      // and only if a real prey animal is close enough to pursue. Who actually
+      // goes after a boar rather than waiting for the granary is a matter of
+      // nerve and of how hungry they personally are — ECO decides what there is
+      // to hunt, this decides who is willing to try.
+      if (!e.isChild && city.stock.get('food') < city.population * 1.25 &&
+          rng.chance(huntWillingness(e.psyche, e.needs.hunger)) &&
+          this.ecology.findNearbyPrey(e, this.spatialHash.queryRadius(e.x, e.y, 15))) {
         e.aiState = 'hunt';
         e.aiCooldown = rng.rangeInt(18, 35);
+        return;
+      }
+
+      // Company, when nothing more pressing is owed. Sociable people break off
+      // for it sooner, and it is the only way friendships and rivalries form.
+      if (!e.isChild && e.needs.social < SOCIAL_LONELY && rng.chance(0.25 + e.psyche.sociability * 0.5)) {
+        e.aiState = 'socialize';
+        e.aiCooldown = rng.rangeInt(20, 45);
         return;
       }
 
@@ -1318,6 +1407,12 @@ if (e.kingdomId) {
     const soldierTarget = Math.max(2, city.population * 0.05);
     const soldierBoost = fed ? Math.max(0, soldierTarget - barracksFilled) * 300 : 0;
 
+    // What the family does, when the family does anything. A leaning worth about
+    // as much as one category of preference — enough that farming households
+    // visibly stay farming households across generations, nowhere near enough to
+    // stop a farmer's son taking the smithy job that is actually open.
+    const familyPull = e.familyTrade !== 'none' && rng.chance(0.55 + e.psyche.loyalty * 0.25) ? e.familyTrade : null;
+
     let best: { building: import('../civ/Building').Building; score: number } | null = null;
     for (const building of city.buildings.values()) {
       const def = building.definition;
@@ -1327,20 +1422,14 @@ if (e.kingdomId) {
       if (!unlocked.has(building.type)) continue;
       const score = jobs * building.level
         + (def.category === 'food' ? 1000 : def.category === 'extraction' ? 800 : def.category === 'craft' ? 600 : 400)
-        + (building.type === 'barracks' ? soldierBoost : 0);
+        + (building.type === 'barracks' ? soldierBoost : 0)
+        + (familyPull && professionForBuilding(building.type) === familyPull ? 450 : 0);
       if (!best || score > best.score) best = { building, score };
     }
 
     if (best) {
       const b = best.building;
-      const type = b.type;
-      if (type === 'farm' || type === 'pasture') e.profession = 'farmer';
-      else if (type === 'lumber_camp') e.profession = 'woodcutter';
-      else if (type === 'mine' || type === 'quarry' || type === 'oil_well') e.profession = 'miner';
-      else if (type === 'workshop' || type === 'smithy' || type === 'factory' || type === 'refinery') e.profession = 'builder';
-      else if (type === 'barracks') e.profession = 'soldier';
-      else if (type === 'library' || type === 'academy') e.profession = 'scout';
-      else e.profession = 'builder';
+      e.profession = professionForBuilding(b.type);
 
       e.workplaceId = b.id;
       b.assignedWorkerIds.add(e.id);
@@ -1348,9 +1437,13 @@ if (e.kingdomId) {
       // Personal wealth is seeded from the profession, and the profession is only
       // known here — the Entity constructor always ran before anyone had a job, so
       // every citizen alive was starting on a pauper's purse.
-      const seeded = startingWealthFor(e.profession, (min, max) => rng.rangeInt(min, max));
+      const household = this.householdFor(e);
+      // SOC-V3. A young adult from a household with something behind it starts
+      // ahead — better tools, a stake, a name that opens a door. Capped well
+      // below certainty, because the point is advantage, not inheritance of rank.
+      const advantage = 1 + familyAdvantage(e, household);
+      const seeded = startingWealthFor(e.profession, (min, max) => rng.rangeInt(min, max)) * advantage;
       if (seeded > e.wealth) {
-        const household = this.householdFor(e);
         if (household) household.earn(seeded - e.wealth);
         e.wealth = seeded;
       }
@@ -1365,12 +1458,15 @@ if (e.kingdomId) {
    * back to the old drifting offset only when the settlement has no housing left,
    * which is itself a meaningful signal that the city needs to build.
    */
-  private claimHome(e: Entity, city: City): void {
-    if (e.homeBuildingId) {
-      const existing = city.buildings.get(e.homeBuildingId);
-      if (existing?.isOperational()) return;
-      existing?.residentIds.delete(e.id);
-      e.homeBuildingId = null;
+  private claimHome(e: Entity, city: City, seekBetter: boolean = false): void {
+    const existing = e.homeBuildingId ? city.buildings.get(e.homeBuildingId) ?? null : null;
+    const housed = !!existing?.isOperational();
+    if (housed && !seekBetter) return;
+    if (e.homeBuildingId && !housed) {
+      // The roof is gone — burned, ruined or taken. That is a thing a person
+      // carries, and it is why some citizens leave at the first hint of the next
+      // war while their neighbours stay.
+      remember(e.memories, 'lost_home', this.currentYear, 0.55);
     }
 
     // Prefer moving in with family already housed, then any house with room.
@@ -1383,14 +1479,22 @@ if (e.kingdomId) {
       if (!building.isOperational()) continue;
       if ((building.definition.housing ?? 0) <= 0) continue;
       if (building.freeHousing() <= 0) continue;
+      if (building.id === e.homeBuildingId) continue;
       if (!familyHome && [...building.residentIds].some(id => familyIds.has(id))) familyHome = building;
-      if (!houseWithRoom && building.type === 'house') houseWithRoom = building;
+      // Coin buys a better address: a household that can afford it holds out for
+      // the best house going rather than the first one with a spare bed.
+      if (building.type === 'house' && (!houseWithRoom || building.level > houseWithRoom.level)) houseWithRoom = building;
       if (!anyWithRoom) anyWithRoom = building;
     }
 
     // Live with family first, then in proper housing, then wherever there is room.
-    const home = familyHome ?? houseWithRoom ?? anyWithRoom;
+    let home = familyHome ?? houseWithRoom ?? anyWithRoom;
+    // Someone trading up only moves for a genuinely better address. Nothing
+    // better on offer means they stay exactly where they are — the old home is
+    // never given up before a replacement is found.
+    if (housed && home && home !== familyHome && home.level <= existing!.level) home = null;
     if (!home) {
+      if (housed) return;
       if (e.homeX == null) {
         e.homeX = city.x + rng.range(-3, 3) * 0.8 + 0.5;
         e.homeY = city.y + rng.range(-3, 3) * 0.8 + 0.5;
@@ -1398,6 +1502,9 @@ if (e.kingdomId) {
       return;
     }
 
+    // Only now is the old bed released, so a failed search can never leave
+    // someone homeless in a settlement that had a roof for them.
+    existing?.residentIds.delete(e.id);
     home.residentIds.add(e.id);
     e.homeBuildingId = home.id;
     e.homeX = home.x + 0.5;
@@ -1885,6 +1992,32 @@ if (e.kingdomId) {
         break;
       }
 
+      case 'socialize': {
+        // Walk to the nearest neighbour and stand with them. Arriving is what
+        // pays off loneliness and what opens a tie — a friendship if they get on,
+        // a rivalry if two abrasive people end up in the same yard.
+        const company = this.spatialHash.queryRadius(e.x, e.y, DETECTION_RANGE)
+          .find(o => o.id !== e.id && o.hp > 0 && SPECIES_DEFINITIONS[o.species].isHumanoid && o.kingdomId === e.kingdomId);
+        if (!company) { e.aiState = 'wander'; e.aiCooldown = 0; break; }
+
+        if (SimplePathfinder.distance(e.x, e.y, company.x, company.y) < 1.4) {
+          e.showEmote('💬', 25);
+          e.needs.social = Math.min(100, e.needs.social + 22);
+          company.needs.social = Math.min(100, company.needs.social + 14);
+          // Two aggressive people rub each other the wrong way; anyone else gets
+          // on well enough. One code path, both outcomes, no compatibility matrix.
+          const friction = (e.psyche.aggression + company.psyche.aggression) / 2;
+          const kind = friction > 0.68 ? 'rival' : 'friend';
+          bondWith(e.bonds, company.id, kind, 0.18);
+          bondWith(company.bonds, e.id, kind, 0.18);
+          e.aiState = 'idle';
+          e.aiCooldown = rng.rangeInt(20, 50);
+        } else {
+          this.moveEntityToward(e, company.x, company.y, tileMap, speed);
+        }
+        break;
+      }
+
       case 'return_home': {
         e.showEmote('🏠', 15);
         const hx = e.homeX ?? (e.cityId ? this.cities.get(e.cityId)?.x : null) ?? e.x;
@@ -2113,6 +2246,25 @@ if (e.kingdomId) {
 
   // ===================== HELPER CHECKS =====================
 
+  /**
+   * Whether this citizen faces a threat instead of running from it.
+   *
+   * The single place that question is answered, so a wolf at the treeline and an
+   * enemy soldier in the street are weighed the same way: by the odds, by what
+   * is in their hands, by who is behind them, and by who they are.
+   */
+  private willStandGround(e: Entity, threats: number): boolean {
+    const family = this.spatialHash.queryRadius(e.x, e.y, 5)
+      .some(o => o.id !== e.id && o.hp > 0 && (o.id === e.partnerId || e.childrenIds.includes(o.id)));
+    return rng.chance(standGroundChance(e.psyche, {
+      outnumbered: threats,
+      armed: !!e.equipment.weapon,
+      protectingFamily: family,
+      trauma: e.trauma,
+      isFighter: e.profession === 'soldier' || e.profession === 'king'
+    }));
+  }
+
   private isEnemy(self: Entity, other: Entity): boolean {
     if (self.id === other.id) return false;
     if (!self.kingdomId || !other.kingdomId) return false;
@@ -2163,6 +2315,8 @@ if (e.kingdomId) {
           e.birthCityId = city.id;
           e.birthCityName = city.name;
         }
+        this.rootFounder(e, city.id, city.name);
+        if (!e.cultureId) e.cultureId = this.foundCultureFor(city);
         this.claimHome(e, city);
         return;
       }
@@ -2183,6 +2337,13 @@ if (e.kingdomId) {
         e.birthCityId = cityId;
         e.birthCityName = cityName;
       }
+      this.rootFounder(e, cityId, cityName);
+      // The first population to hold a place defines the culture of that place;
+      // a founder who already belongs to one carries it in instead.
+      if (e.cultureId) { city.dominantCultureId = e.cultureId; city.cultureMix = { [e.cultureId]: 1 }; city.culturallySettledSince = this.currentYear; }
+      else e.cultureId = this.foundCultureFor(city);
+      // Whoever puts the first stone down is worth keeping in the record for good.
+      e.historic = true;
       chronicle.log(this.currentYear, 'founding', `O assentamento de ${cityName} foi fundado por ${e.name}.`);
       this.checkKingdomFounding(city, e, tileMap);
       // Founded last so the claim is stamped with the kingdom that now owns it.
@@ -2448,6 +2609,405 @@ if (e.kingdomId) {
     }
   }
 
+  // ===================== LIVES (SOC-V2, YEARLY) =====================
+
+  /**
+   * A year in the life of every citizen: what they remember, what they do about
+   * work and housing, and whether they still want to live where they live.
+   *
+   * One pass a year, not one a tick. Everything charged to every person here is
+   * O(memories) or O(bonds) — both hard-capped — plus a handful of comparisons.
+   * The expensive parts (searching for a job, searching for somewhere to live,
+   * choosing a destination) are behind cheap triggers and behind a global budget,
+   * so a world of ten thousand people does not pay ten thousand searches.
+   *
+   * The settlement's own condition is read once per settlement and shared by
+   * everyone in it. That is what produces a *tendency* — a besieged town empties,
+   * a prosperous one fills — while the disposition each person brings to the same
+   * reading is what keeps the tendency from being a hundred identical answers.
+   */
+  private tickLives(): void {
+    const mood = new Map<string, CityMood>();
+    for (const city of this.cities.values()) mood.set(city.id, this.readCityMood(city));
+
+    // SOC-V3 demography rides along on a walk that was already happening. There
+    // is no separate census pass and no scan of its own.
+    const census = new DemographicsAccumulator();
+    // CULT-V1 rides on the same walk. Assimilation reads *last* year's mix, which
+    // is already on the settlement, while this year's is accumulated alongside —
+    // one pass, no second scan, and no half-updated table being read mid-count.
+    const cultures = new CultureCensus();
+    let relocations = 0;
+
+    // Hard ceiling on relocations per year. Migration is the one decision here
+    // that costs real work (destination search, two building tables rewritten),
+    // and an uncapped exodus in a bad year is exactly the frame spike PERF-V1
+    // exists to prevent. MIG-V1 can lift this when it owns the movement.
+    let movesLeft = MAX_RELOCATIONS_PER_YEAR;
+
+    for (const e of this.entities) {
+      if (e.hp <= 0 || !SPECIES_DEFINITIONS[e.species].isHumanoid) continue;
+
+      // Everyone forgets, including children and wanderers.
+      decayMemories(e.memories);
+      decayBonds(e.bonds);
+      census.count(e);
+
+      if (!e.cityId) continue;
+      const city = this.cities.get(e.cityId);
+      const here = city ? mood.get(city.id) : undefined;
+      if (!city || !here) continue;
+
+      // CULT-V1. Children count toward the composition and absorb the place they
+      // are growing up in — they are the generation assimilation actually runs
+      // through, so excluding them would remove the mechanism entirely.
+      if (!e.cultureId) e.cultureId = city.dominantCultureId ?? this.foundCultureFor(city);
+      e.cultureId = assimilate(e, city.cultureMix, city.dominantCultureId, this.cultures, here.prosperity);
+      cultures.count(city.id, e.cultureId, e.localGenerations >= 3);
+
+      if (e.isChild) continue;
+
+      // What this year did to this person. The cause is shared by the whole
+      // settlement; what each of them takes from it is not.
+      if (here.danger > 0.5) remember(e.memories, 'war_survived', this.currentYear, here.danger * 0.6);
+      if (here.foodPerHead < 1) remember(e.memories, 'famine', this.currentYear, 0.4);
+      if (e.profession === 'none') remember(e.memories, 'jobless', this.currentYear, 0.35);
+      if (here.prosperity > 0.65 && e.wealth > 40) remember(e.memories, 'prospered', this.currentYear, 0.3);
+
+      this.settleFortune(e);
+      this.seekWork(e, city, here);
+      this.reconsiderHousing(e, city);
+
+      // How badly they want out of here, before they know whether anywhere else
+      // is better. Kept on the entity so colonisation, the inspector and any
+      // future migration system all read one agreed number.
+      const situation = {
+        wellbeing: e.wellbeing,
+        jobless: e.profession === 'none' ? 1 : 0,
+        hunger: e.needs.hunger,
+        danger: here.danger,
+        familyTies: this.familyTiesIn(e, city.id),
+        rootedness: rootedness(e),
+        opportunityElsewhere: 0,
+        trauma: e.trauma,
+        age: e.age
+      };
+      e.migrationUrge = migrationUrge(e.psyche, situation);
+
+      // Wanting to leave is not leaving. Looking for somewhere better is the
+      // expensive step, so it is gated twice: at half the relocation bar, because
+      // a merely dissatisfied person will still glance at a boom town next door
+      // and a settled one will not, and then again on the year's move budget.
+      if (movesLeft <= 0 || e.migrationUrge < RELOCATION_URGE * 0.5) continue;
+      if (!rng.chance(0.25 + e.migrationUrge * 0.5)) continue;
+
+      const destination = this.findBetterSettlement(e, city, mood);
+      if (!destination) continue;
+
+      // Asked again, now that somewhere real is on offer. This is where a
+      // prosperous neighbour actually pulls people in — and where ambition and
+      // curiosity finally weigh against loyalty over the same open door.
+      situation.opportunityElsewhere = Math.max(0, mood.get(destination.id)!.opportunity - here.opportunity);
+      e.migrationUrge = migrationUrge(e.psyche, situation);
+      if (e.migrationUrge > RELOCATION_URGE) {
+        this.relocateCitizen(e, city, destination);
+        movesLeft--;
+        relocations++;
+      }
+    }
+
+    this.demographics = census.finish(
+      this.currentYear, this.households.size, this.birthsThisYear, this.deathsThisYear, relocations
+    );
+    this.birthsThisYear = 0;
+    this.deathsThisYear = 0;
+    this.publishCultures(cultures);
+  }
+
+  /**
+   * Writes the year's cultural composition onto the settlements and asks each of
+   * them whether it has earned an identity of its own.
+   *
+   * Only the settlements that actually had residents counted are touched, and
+   * emergence is checked once per settlement per year against thresholds that
+   * take decades to satisfy — so in an ordinary year this does nothing but copy
+   * a small table.
+   */
+  private publishCultures(census: CultureCensus): void {
+    for (const cityId of census.cityIds()) {
+      const city = this.cities.get(cityId);
+      if (!city) continue;
+      const { mix, dominant, counted, rootedShare } = census.mixFor(cityId);
+      // A change of dominant culture restarts the clock a new identity is
+      // measured against — a town that just flipped is not a settled one.
+      if (dominant !== city.dominantCultureId) city.culturallySettledSince = this.currentYear;
+      city.cultureMix = mix;
+      city.dominantCultureId = dominant;
+
+      // A settlement is isolated from a culture's homeland when it no longer
+      // shares a realm with it. Distance alone is not isolation; a shared state,
+      // roads and trade are what keep a population attached to the old country.
+      const home = this.cultures.get(dominant)?.homeCityId ?? null;
+      const homeCity = home ? this.cities.get(home) : null;
+      const isolated = !!home && home !== cityId && (!homeCity || homeCity.kingdomId !== city.kingdomId);
+
+      const emergence = considerEmergence({
+        cityId, cityName: city.name, year: this.currentYear, population: counted,
+        mix, dominant, rootedShare,
+        yearsStable: this.currentYear - city.culturallySettledSince,
+        isolated
+      }, this.cultures);
+      if (!emergence) continue;
+
+      // The people who actually produced it adopt it. Only residents of the
+      // parent culture(s) convert, and only here — a culture is born in a place.
+      let converted = 0;
+      for (const resident of this.entities) {
+        if (resident.cityId !== cityId || resident.hp <= 0) continue;
+        if (!emergence.fromIds.includes(resident.cultureId)) continue;
+        // A hybrid takes the people who had already blended; a divergence takes
+        // the ones whose line is deep enough here to have become something else.
+        const eligible = emergence.kind === 'hybrid'
+          ? resident.localAffinity > 0.35 || rng.chance(0.4)
+          : resident.localGenerations >= 2;
+        if (!eligible) continue;
+        resident.cultureId = emergence.identity.id;
+        resident.localAffinity = 0.5;
+        converted++;
+      }
+      if (converted === 0) continue;
+
+      city.dominantCultureId = emergence.identity.id;
+      city.culturallySettledSince = this.currentYear;
+      chronicle.log(
+        this.currentYear,
+        'society',
+        emergence.kind === 'hybrid'
+          ? `🎭 Gerações de convivência em ${city.name} deram origem a uma identidade própria: ${emergence.identity.name} (${converted} pessoas).`
+          : `🎭 Isolada da terra de origem, a população de ${city.name} tornou-se um povo distinto: ${emergence.identity.name} (${converted} pessoas).`,
+        {
+          title: `Nasce ${emergence.identity.name}`,
+          importance: 'major',
+          scope: 'city',
+          refs: [{ kind: 'city', id: city.id, name: city.name }],
+          tags: ['culture', emergence.kind]
+        }
+      );
+    }
+  }
+
+  /**
+   * The culture of a settlement that has none.
+   *
+   * The first population to hold a place defines the culture of that place. Named
+   * for the settlement, because that is how peoples are usually named — after
+   * where they are from.
+   */
+  private foundCultureFor(city: City): string {
+    if (city.dominantCultureId) return city.dominantCultureId;
+    const identity = this.cultures.create(`Povo de ${city.name}`, this.currentYear, city.id);
+    city.dominantCultureId = identity.id;
+    city.cultureMix = { [identity.id]: 1 };
+    city.culturallySettledSince = this.currentYear;
+    return identity.id;
+  }
+
+  /**
+   * Personal fortune follows the family's, both ways.
+   *
+   * Wages only ever added to a citizen's purse, so wealth — and with it the
+   * social class derived from it — could rise and never fall. A house could not
+   * decline, which meant it could not really rise either: there was nothing for
+   * a rise to be measured against. Personal coin is now pulled toward the
+   * household's per-head share each year, so a family that spends more than it
+   * earns visibly slides down, and one that prospers carries its members up.
+   */
+  private settleFortune(e: Entity): void {
+    const household = e.householdId ? this.households.get(e.householdId) : null;
+    if (!household || household.size === 0) return;
+    const share = household.coin / household.size;
+    e.wealth += (share - e.wealth) * 0.25;
+    if (e.wealth < 0) e.wealth = 0;
+  }
+
+  /**
+   * Stamps the family origin of someone who predates every settlement.
+   *
+   * The first generation has no parents to inherit an origin from, so the place
+   * they settle becomes the origin their descendants carry — including the
+   * descendants who will eventually leave it.
+   */
+  private rootFounder(e: Entity, cityId: string, cityName: string): void {
+    if (e.originCityId) return;
+    e.originCityId = cityId;
+    e.originCityName = cityName;
+    e.localGenerations = 1;
+  }
+
+  /** Records a death in the family on whoever is still alive to feel it. */
+  private bereave(survivorId: string | null, severity: number): void {
+    const survivor = this.getEntity(survivorId);
+    if (survivor && survivor.hp > 0) remember(survivor.memories, 'bereavement', this.currentYear, severity);
+  }
+
+  /** The settlement's condition, read once a year and shared by everyone in it. */
+  private readCityMood(city: City): CityMood {
+    let vacancies = 0;
+    for (const building of city.buildings.values()) {
+      if (!building.isOperational()) continue;
+      const jobs = (building.definition.jobs ?? 0) * building.level;
+      if (jobs > 0) vacancies += Math.max(0, jobs - building.assignedWorkerIds.size);
+    }
+
+    // Danger is what a resident could actually perceive: an army at the wall, or
+    // a realm that is at war somewhere.
+    const atWar = city.kingdomId ? this.diplomacy.getEnemies(city.kingdomId).length > 0 : false;
+    const danger = city.besiegerId ? 1 : atWar ? 0.45 : 0;
+
+    const foodPerHead = city.stock.get('food') / Math.max(1, city.population);
+    const opportunity = Math.max(0, Math.min(1,
+      city.prosperity * 0.45 +
+      Math.min(1, vacancies / Math.max(4, city.population * 0.25)) * 0.35 +
+      Math.min(1, foodPerHead / 3) * 0.2 -
+      danger * 0.6
+    ));
+    return { danger, foodPerHead, prosperity: city.prosperity, vacancies, opportunity };
+  }
+
+  /** How much of this citizen's family is anchored to the settlement, 0..1. */
+  private familyTiesIn(e: Entity, cityId: string): number {
+    let ties = 0;
+    const partner = this.getEntity(e.partnerId);
+    if (partner?.cityId === cityId) ties += 0.5;
+    for (const childId of e.childrenIds) {
+      if (this.getEntity(childId)?.cityId === cityId) { ties += 0.2; if (ties >= 1) break; }
+    }
+    if (this.getEntity(e.motherId)?.cityId === cityId) ties += 0.15;
+    if (this.getEntity(e.fatherId)?.cityId === cityId) ties += 0.15;
+    return Math.min(1, ties);
+  }
+
+  /**
+   * Looking for work, or for better work.
+   *
+   * The unemployed always look. Someone already employed only looks when they
+   * are ambitious enough to be dissatisfied with a job they have and there is
+   * somewhere open to go — otherwise the whole workforce would reshuffle itself
+   * every year for nothing.
+   */
+  private seekWork(e: Entity, city: City, here: CityMood): void {
+    if (e.profession === 'none') {
+      // The old do not start over. An elder with no work has retired, and a
+      // settlement that hands its last farm slot to an eighty-year-old is one
+      // that has quietly stopped ageing.
+      if (e.lifeStage !== 'elder') this.assignProfession(e, city);
+      return;
+    }
+    if (here.vacancies <= 0 || e.lifeStage === 'elder') return;
+    // Ambition is the whole trigger, damped by loyalty to the place they are.
+    const restless = e.psyche.ambition * 0.5 - e.psyche.loyalty * 0.2 - Math.min(0.3, e.wealth / 400);
+    if (restless <= 0 || !rng.chance(restless * 0.35)) return;
+
+    const previous = e.profession;
+    if (e.workplaceId) city.buildings.get(e.workplaceId)?.assignedWorkerIds.delete(e.id);
+    e.workplaceId = null;
+    e.profession = 'none';
+    this.assignProfession(e, city);
+    // A search that found nothing leaves them out of work, which is a real
+    // outcome of quitting and is recorded as such next year.
+    if (e.profession === 'none') remember(e.memories, 'jobless', this.currentYear, 0.3);
+    else if (e.profession !== previous) e.showEmote('🧰', 40);
+  }
+
+  /**
+   * Moving house within the settlement.
+   *
+   * Wealth buys comfort: a family that has done well and is living badly looks
+   * for a better roof, and CITY's own housing stock decides whether one exists.
+   */
+  private reconsiderHousing(e: Entity, city: City): void {
+    if (e.needs.comfort > 55 || e.wealth < 45) return;
+    if (!rng.chance(0.2 + e.psyche.ambition * 0.3)) return;
+    this.claimHome(e, city, true);
+  }
+
+  /**
+   * The best settlement within walking reach that is plainly better than this one.
+   *
+   * Bounded by a spatial query rather than a scan of every city in the world, and
+   * only run for citizens who already want to leave.
+   */
+  private findBetterSettlement(e: Entity, from: City, mood: Map<string, CityMood>): City | null {
+    const here = mood.get(from.id)!;
+    let best: City | null = null;
+    let bestScore = here.opportunity + 0.1; // must be clearly better, not marginally
+
+    for (const candidate of this.citiesNear(e.x, e.y, MIGRATION_RANGE)) {
+      if (candidate.id === from.id || candidate.population <= 0) continue;
+      // Nobody walks into a realm that is at war with their own.
+      if (candidate.kingdomId && e.kingdomId && this.diplomacy.isAtWar(candidate.kingdomId, e.kingdomId)) continue;
+      if (candidate.population >= candidate.housingCapacity()) continue;
+      const there = mood.get(candidate.id);
+      if (!there) continue;
+
+      // Distance is a real cost, and the incurious feel it more.
+      const distance = Math.hypot(candidate.x - e.x, candidate.y - e.y) / MIGRATION_RANGE;
+      const score = there.opportunity - distance * (0.35 - e.psyche.curiosity * 0.2);
+      if (score > bestScore) { bestScore = score; best = candidate; }
+    }
+    return best;
+  }
+
+  /** Moves a citizen and their dependants to another settlement, for good. */
+  private relocateCitizen(e: Entity, from: City, to: City): void {
+    // A parent does not walk out on their household. Partner and children move
+    // with them, which is the single most visible consequence of family mattering
+    // to the decision at all.
+    const party = [e];
+    const partner = this.getEntity(e.partnerId);
+    if (partner && partner.cityId === from.id) party.push(partner);
+    for (const childId of e.childrenIds) {
+      const child = this.getEntity(childId);
+      if (child && child.cityId === from.id && child.isChild) party.push(child);
+    }
+
+    for (const mover of party) {
+      if (mover.homeBuildingId) from.buildings.get(mover.homeBuildingId)?.residentIds.delete(mover.id);
+      if (mover.workplaceId) from.buildings.get(mover.workplaceId)?.assignedWorkerIds.delete(mover.id);
+      mover.homeBuildingId = null;
+      mover.workplaceId = null;
+      mover.profession = 'none';
+      mover.cityId = to.id;
+      mover.kingdomId = to.kingdomId;
+      mover.x = to.x + rng.range(-1.5, 1.5);
+      mover.y = to.y + rng.range(-1.5, 1.5);
+      mover.homeX = to.x;
+      mover.homeY = to.y;
+      mover.targetX = null;
+      mover.targetY = null;
+      mover.migrationUrge = 0;
+      // However long the family had been in the old town, it is not from here.
+      uproot(mover);
+      remember(mover.memories, 'moved', this.currentYear, 0.45);
+      this.spatialHash.update(mover, mover.prevX, mover.prevY);
+      this.entityChunks.update(mover, mover.prevX, mover.prevY);
+    }
+
+    // The household follows the family, so the purse and pantry go with them.
+    const household = e.householdId ? this.households.get(e.householdId) : null;
+    if (household) { household.cityId = to.id; household.homeBuildingId = null; }
+
+    from.population = Math.max(0, from.population - party.length);
+    to.population += party.length;
+    chronicle.log(
+      this.currentYear,
+      'society',
+      party.length > 1
+        ? `🧳 ${e.fullName} deixou ${from.name} com a família e recomeçou em ${to.name}.`
+        : `🧳 ${e.fullName} deixou ${from.name} em busca de vida melhor em ${to.name}.`
+    );
+  }
+
   private findWalkableNear(x: number, y: number, radius: number, tileMap: TileMap): { x: number; y: number } {
     for (let i = 0; i < 10; i++) {
       const nx = x + rng.rangeInt(-radius, radius);
@@ -2703,6 +3263,28 @@ if (e.kingdomId) {
       child.homeX = mother.homeX;
       child.homeY = mother.homeY;
       child.wealth = 0;
+      // Disposition is inherited like anything else in the bloodline, so a line
+      // of cautious people tends to stay cautious — but only tends to, because
+      // `inheritPsyche` pulls every generation back toward the middle.
+      child.psyche = inheritPsyche(fatherEntity.psyche, mother.psyche, () => rng.next());
+
+      // SOC-V3. Where the family is from, how deep it now is in this place, what
+      // the house does, and the handful of things it has been through. None of it
+      // decides the child's life — all of it weighs on it.
+      inheritOrigin(child, fatherEntity, mother);
+      inheritFamilyMarks(child, fatherEntity, mother);
+      child.familyTrade = mother.familyTrade !== 'none' ? mother.familyTrade
+        : fatherEntity.familyTrade !== 'none' ? fatherEntity.familyTrade
+        : rng.chance(0.5) ? mother.profession : fatherEntity.profession;
+
+      // CULT-V1. Mostly the family's culture, partly the street's. A child of a
+      // small minority is genuinely likely to grow up belonging to the majority
+      // instead — one probability, and it is the whole of assimilation.
+      const cultural = inheritCulture(
+        fatherEntity, mother, city?.cultureMix ?? {}, city?.dominantCultureId ?? null
+      );
+      child.cultureId = cultural.cultureId || mother.cultureId || fatherEntity.cultureId;
+      child.localAffinity = cultural.localAffinity;
 
       // Check for Royal Birth
       const isRoyal = (fatherEntity.profession === 'king' || mother.profession === 'king') || (kingdom && kingdom.rulerId === mother.id);
@@ -2728,6 +3310,7 @@ if (e.kingdomId) {
       this.entityChunks.insert(child);
       this.entitiesById.set(child.id, child);
       this.totalBirths++;
+      this.birthsThisYear++;
     }
 
     if (city) city.ledger.recordConsumed('food', city.stock.take('food', 4));
@@ -2754,18 +3337,38 @@ if (e.kingdomId) {
     // Release the house and the job slot. Without this the dead keep occupying
     // beds and workplaces forever and the settlement silently stops hiring.
     const homeCity = dead.cityId ? this.cities.get(dead.cityId) : null;
+    const vacatedJob = homeCity && dead.workplaceId ? homeCity.buildings.get(dead.workplaceId) ?? null : null;
     if (homeCity) {
       if (dead.homeBuildingId) homeCity.buildings.get(dead.homeBuildingId)?.residentIds.delete(dead.id);
-      if (dead.workplaceId) homeCity.buildings.get(dead.workplaceId)?.assignedWorkerIds.delete(dead.id);
+      vacatedJob?.assignedWorkerIds.delete(dead.id);
+    }
+
+    const household = dead.householdId ? this.households.get(dead.householdId) ?? null : null;
+
+    // SOC-V3. Coin, a roof and a trade pass to whoever is actually there to take
+    // them. This is the single mechanism behind a family line rising or falling:
+    // a fortune divided between six children is not a fortune, and a fortune
+    // with one heir is a dynasty.
+    if (SPECIES_DEFINITIONS[dead.species].isHumanoid) {
+      const estate = settleEstate(dead, id => this.getEntity(id), household, !!vacatedJob?.isOperational());
+      if (estate.home && estate.heirs.length > 0) {
+        const roofed = estate.heirs.find(heir => heir.homeBuildingId === dead.homeBuildingId);
+        if (roofed) homeCity?.buildings.get(roofed.homeBuildingId!)?.residentIds.add(roofed.id);
+      }
+      if (estate.trade) {
+        const successor = estate.heirs.find(heir => heir.workplaceId === dead.workplaceId);
+        if (successor) {
+          vacatedJob?.assignedWorkerIds.add(successor.id);
+          chronicle.log(this.currentYear, 'society',
+            `⚒️ ${successor.fullName} assumiu o ofício de ${dead.fullName} em ${homeCity?.name ?? 'sua terra'}.`);
+        }
+      }
     }
 
     // Leave the household. What they were carrying is simply lost with them.
-    if (dead.householdId) {
-      const household = this.households.get(dead.householdId);
-      if (household) {
-        household.memberIds.delete(dead.id);
-        if (household.memberIds.size === 0) this.households.delete(dead.householdId);
-      }
+    if (household) {
+      household.memberIds.delete(dead.id);
+      if (household.memberIds.size === 0) this.households.delete(household.id);
     }
     dead.carrying = null;
 
@@ -2788,8 +3391,14 @@ if (e.kingdomId) {
       partnerId: dead.partnerId,
       childrenIds: [...dead.childrenIds],
       generation: dead.generation,
+      historic: dead.historic,
       isDeceased: true
     });
+    // The genealogy is the one structure that can only ever grow, so it is the
+    // one that has to be pruned. Rulers, great persons and anyone explicitly
+    // marked are kept forever; the ordinary dead are forgotten oldest first.
+    pruneAncestors(this.deceasedAncestors);
+    this.deathsThisYear++;
 
     const idx = this.entities.indexOf(dead);
     if (idx !== -1) this.entities.splice(idx, 1);
@@ -2827,6 +3436,14 @@ if (e.kingdomId) {
       const partner = this.getEntity(dead.partnerId);
       if (partner) partner.partnerId = null;
     }
+
+    // Grief. The people who were close to this person carry it, and it is read
+    // later by every decision that weighs risk — which is how one death in a war
+    // still changes behaviour a decade after the war ended.
+    this.bereave(dead.partnerId, 0.75);
+    this.bereave(dead.motherId, 0.4);
+    this.bereave(dead.fatherId, 0.4);
+    for (const childId of dead.childrenIds) this.bereave(childId, 0.6);
 
     if (dead.profession === 'king' && dead.kingdomId && this.kingdoms.has(dead.kingdomId)) {
       const kingdom = this.kingdoms.get(dead.kingdomId)!;

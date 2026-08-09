@@ -13,11 +13,22 @@ export interface EntityNeeds {
   comfort: number;
   /** 0 = in danger, 100 = secure. Driven by threats and walls. */
   safety: number;
+  /**
+   * 0 = isolated, 100 = well connected. Falls on its own and is only restored by
+   * being near other people, so a citizen with no family and no neighbours ends
+   * up measurably worse off than one in the middle of a crowded street.
+   */
+  social: number;
 }
 
 export function createNeeds(): EntityNeeds {
-  return { hunger: 12, comfort: 55, safety: 70 };
+  return { hunger: 12, comfort: 55, safety: 70, social: 60 };
 }
+
+/** Loneliness gained per day with nobody around. */
+export const SOCIAL_DECAY_PER_DAY = 6;
+/** Below this a citizen will break off what they are doing to seek company. */
+export const SOCIAL_LONELY = 35;
 
 /** Hunger gained per day when nothing is eaten. */
 export const HUNGER_PER_DAY = 16;

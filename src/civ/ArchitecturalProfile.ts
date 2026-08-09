@@ -1,6 +1,7 @@
 import type { City } from './City';
 import type { Kingdom } from './Kingdom';
 import type { CulturalProfile } from './Culture';
+import type { CulturalLean } from './CulturalIdentity';
 import type { TechEra } from './TechTree';
 import type { TileMap } from '../world/TileMap';
 import { TerrainType } from '../world/Biomes';
@@ -153,13 +154,26 @@ function wealthFor(prosperity: number): ArchitecturalWealth {
   return 'wealthy';
 }
 
-function blendedCulture(kingdom: Kingdom | null, metropole: Kingdom | null): CulturalProfile | null {
+const CULTURAL_KEYS = ['militarism', 'expansionism', 'tradition', 'authority', 'openness', 'mercantilism', 'stewardship', 'innovation', 'collectivism', 'warTrauma', 'diplomaticTrust'] as const;
+
+function blendedCulture(kingdom: Kingdom | null, metropole: Kingdom | null, identityLean: CulturalLean | null): CulturalProfile | null {
   if (!kingdom) return null;
-  if (!metropole || !kingdom.isColony) return kingdom.culture;
-  const localWeight = clamp01(.2 + kingdom.colonialIdentity * .65);
-  const result = { ...kingdom.culture, memories: [...kingdom.culture.memories] };
-  const numeric = ['militarism', 'expansionism', 'tradition', 'authority', 'openness', 'mercantilism', 'stewardship', 'innovation', 'collectivism', 'warTrauma', 'diplomaticTrust'] as const;
-  for (const key of numeric) result[key] = kingdom.culture[key] * localWeight + metropole.culture[key] * (1 - localWeight);
+  let result = kingdom.culture;
+  if (metropole && kingdom.isColony) {
+    const localWeight = clamp01(.2 + kingdom.colonialIdentity * .65);
+    result = { ...kingdom.culture, memories: [...kingdom.culture.memories] };
+    for (const key of CULTURAL_KEYS) result[key] = kingdom.culture[key] * localWeight + metropole.culture[key] * (1 - localWeight);
+  }
+
+  // CULT-V1: the population living here nudges what gets built. Small, and
+  // applied on top of the realm's own values rather than replacing them — a
+  // conquered city keeps building like its people, not like its new flag.
+  if (identityLean && Object.keys(identityLean).length > 0) {
+    result = { ...result, memories: [...result.memories] };
+    for (const [key, bias] of Object.entries(identityLean) as [keyof CulturalLean, number][]) {
+      result[key] = clamp01(result[key] + bias);
+    }
+  }
   return result;
 }
 
@@ -268,15 +282,23 @@ function profileSignature(city: City, kingdom: Kingdom | null, metropole: Kingdo
  * when a discrete architectural input crosses a band. Render frames merely
  * read the persisted result.
  */
-export function refreshArchitecturalProfile(city: City, kingdom: Kingdom | null, tileMap: TileMap, year: number, metropole: Kingdom | null = null): boolean {
+export function refreshArchitecturalProfile(
+  city: City,
+  kingdom: Kingdom | null,
+  tileMap: TileMap,
+  year: number,
+  metropole: Kingdom | null = null,
+  /** CULT-V1 lean of the settlement's dominant population, if any. */
+  identityLean: CulturalLean | null = null
+): boolean {
   const environment = surveyEnvironment(city, tileMap);
   const climate = climateFor(environment);
   const wealth = wealthFor(city.prosperity);
   const era = kingdom?.operatingEra ?? kingdom?.research.currentEra() ?? 'stone';
-  const signature = profileSignature(city, kingdom, metropole, environment, climate, wealth, era);
+  const signature = profileSignature(city, kingdom, metropole, environment, climate, wealth, era) + `|${city.dominantCultureId ?? ''}`;
   if (city.architecturalProfile?.signature === signature) return false;
 
-  const culture = blendedCulture(kingdom, metropole);
+  const culture = blendedCulture(kingdom, metropole, identityLean);
   const [primaryTradition, secondaryTradition] = chooseTraditions(city, environment, culture, era);
   const [primaryMaterial, secondaryMaterial] = chooseMaterials(city, environment, climate, era);
   const urbanForm = urbanFormFor(city, primaryTradition, climate, culture, wealth);

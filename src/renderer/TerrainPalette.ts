@@ -20,18 +20,18 @@ export const TERRAIN_VISUALS: Record<TerrainType, TerrainVisual> = {
   // Palette philosophy: each biome owns a compact, readable material family.
   // The renderer should read the biome first and the texture second.
   [TerrainType.DEEP_OCEAN]: {
-    base: '#153a5b',
-    low: '#0a2138',
-    high: '#2a668b',
-    shadow: '#061625',
-    accent: '#72c7e8'
+    base: '#103254',
+    low: '#0a1d33',
+    high: '#1c4975',
+    shadow: '#061324',
+    accent: '#64d2ff'
   },
   [TerrainType.SHALLOW_WATER]: {
-    base: '#2b83a9',
-    low: '#1e607f',
-    high: '#55b7c8',
-    shadow: '#17485f',
-    accent: '#c8f3f5'
+    base: '#227f9e',
+    low: '#175c75',
+    high: '#3eb8cb',
+    shadow: '#114457',
+    accent: '#d8fcff'
   },
   [TerrainType.SAND]: {
     base: '#d5ba78',
@@ -261,10 +261,14 @@ export function terrainAccentColor(tile: Tile, x: number, y: number, animTimer: 
   const sparse = hash2(x, y, 97);
 
   if (tile.type === TerrainType.SHALLOW_WATER) {
-    const crest = Math.sin(x * 0.22 + y * 0.18 + animTimer * 0.7) * 0.5 + 0.5;
-    return sparse > 0.88 && crest > 0.62 ? visual.accent : null;
+    const crest = Math.sin(x * 0.28 + y * 0.22 + animTimer * 0.85) * 0.5 + 0.5;
+    const caustic = Math.cos(x * 0.15 - y * 0.25 + animTimer * 0.45) * 0.5 + 0.5;
+    return sparse > 0.84 && (crest > 0.58 || caustic > 0.72) ? visual.accent : null;
   }
-  if (tile.type === TerrainType.DEEP_OCEAN) return sparse > 0.96 ? visual.accent : null;
+  if (tile.type === TerrainType.DEEP_OCEAN) {
+    const deepWave = Math.sin((x + y * 0.6) * 0.2 + animTimer * 0.4) * 0.5 + 0.5;
+    return sparse > 0.94 && deepWave > 0.7 ? visual.accent : null;
+  }
   if (tile.type === TerrainType.GRASS) return sparse > 0.91 ? visual.accent : null;
   if (tile.type === TerrainType.FOREST) return sparse > 0.95 ? visual.accent : null;
   if (tile.type === TerrainType.SAND) return sparse > 0.94 ? visual.accent : null;

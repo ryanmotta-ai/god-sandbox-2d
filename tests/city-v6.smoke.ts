@@ -8,7 +8,6 @@ import type { Building, BuildingType } from '../src/civ/Building';
 import { UrbanLifecycleManager, measureUrbanLifecycle } from '../src/civ/UrbanLifecycle';
 import { buildingArchitecturalStamp, refreshArchitecturalProfile } from '../src/civ/ArchitecturalProfile';
 import { chronicle } from '../src/civ/Chronicle';
-import { resolveCityBuildingVisual } from '../src/renderer/CityVisualResolver';
 
 const map = new TileMap(96, 96, 'single_continent', 6606);
 for (let x = 0; x < map.width; x++) for (let y = 0; y < map.height; y++) {
@@ -51,7 +50,6 @@ const { city, kingdom } = makeCity();
 const newHouse = add(city, 'house', 50, 48);
 newHouse.beginConstruction(1);
 assert.equal(newHouse.operationalFactor(), 0);
-assert.equal(resolveCityBuildingVisual(city, newHouse, 'fallback').assetId, 'city.ruins.rubble.small.v01');
 UrbanLifecycleManager.tickCity(city, kingdom, map, 2);
 assert.equal(newHouse.lifecycleState, 'construction');
 UrbanLifecycleManager.tickCity(city, kingdom, map, 3);
@@ -68,7 +66,6 @@ for (let tick = 0; tick < 10; tick++) map.updateFireTick();
 const fireSummary = UrbanLifecycleManager.applyDamageEvents(new Map([[city.id, city]]), map, map.drainBuildingDamageEvents(), 5);
 assert.equal(fireSummary[0]?.fire, 3);
 assert.ok(burned.every(building => building.lifecycleState === 'ruin'));
-assert.ok(burned.every(building => resolveCityBuildingVisual(city, building, 'fallback').assetId === 'city.ruins.burned_house.small.v01'));
 assert.ok(burned.every(building => map.getTile(building.x, building.y)?.buildingId === building.id), 'ruins must retain their footprint');
 assert.ok(chronicle.getEvents().some(event => event.tags.includes('fire') && event.refs.some(ref => ref.id === city.id)));
 

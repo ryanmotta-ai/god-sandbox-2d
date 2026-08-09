@@ -912,10 +912,11 @@ export class PixelRenderer {
     }
   }
 
-  /** Cheap animated accent over the cached water/lava base. */
-  private drawAnimatedTerrainAccent(tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+  /** Animated surface pass over the cached water/lava base. */
+  private drawAnimatedTerrainAccent(tileMap: TileMap, tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
     this.setHashBase(x, y);
     this.drawTerrainTexture(tile, x, y, screenX, screenY, tileSize);
+    this.drawTerrainEdges(tileMap, tile, x, y, screenX, screenY, tileSize);
     if (tile.type === TerrainType.LAVA && tileSize >= 8) this.drawTerrainDetails(tile, x, y, screenX, screenY, tileSize);
   }
 
@@ -947,29 +948,42 @@ export class PixelRenderer {
       const shallow = tile.type === TerrainType.SHALLOW_WATER;
       const macro = valueNoise2D(x, y, 8, 601);
       const roll = this.h(220);
-      // Deep ocean is deliberately quiet; shallow water carries a little more life.
-      if (roll > (shallow ? 0.56 : 0.78)) {
-        const wavePhase = Math.sin((x + y * 0.72) * 0.33 + this.animTimer * (shallow ? 0.72 : 0.42));
-        const lineY = screenY + tileSize * (0.28 + ((wavePhase + 1) * 0.5) * 0.42);
-        const lineX = screenX + tileSize * (0.12 + this.h(222) * 0.28);
-        const lineW = tileSize * (0.24 + macro * 0.32);
-        this.ctx.fillStyle = withAlpha(visual.accent, shallow ? 0.17 : 0.09);
+
+      // Primary wave crests
+      if (roll > (shallow ? 0.45 : 0.72)) {
+        const wavePhase = Math.sin((x + y * 0.72) * 0.33 + this.animTimer * (shallow ? 0.78 : 0.45));
+        const lineY = screenY + tileSize * (0.22 + ((wavePhase + 1) * 0.5) * 0.48);
+        const lineX = screenX + tileSize * (0.10 + this.h(222) * 0.30);
+        const lineW = tileSize * (0.28 + macro * 0.36);
+        this.ctx.fillStyle = withAlpha(visual.accent, shallow ? 0.22 : 0.12);
         this.ctx.fillRect(
           Math.floor(lineX),
           Math.floor(lineY),
           Math.max(1, Math.floor(lineW)),
-          Math.max(1, Math.floor(tileSize * 0.045))
+          Math.max(1, Math.floor(tileSize * 0.05))
         );
       }
 
-      // Very rare specular pixel. This is intentionally much rarer than the old
-      // per-tile wave lines and keeps ships readable over the ocean.
+      // Shallow water caustics light webs
+      if (shallow && tileSize >= 6) {
+        const causticA = Math.sin(x * 0.4 - y * 0.3 + this.animTimer * 0.65);
+        const causticB = Math.cos(x * 0.35 + y * 0.45 + this.animTimer * 0.5);
+        if (causticA * causticB > 0.38) {
+          const cx = screenX + tileSize * (0.15 + this.h(223) * 0.55);
+          const cy = screenY + tileSize * (0.18 + this.h(226) * 0.52);
+          this.ctx.fillStyle = withAlpha(visual.accent, 0.18);
+          this.ctx.fillRect(Math.floor(cx), Math.floor(cy), Math.max(1, tileSize * 0.15), Math.max(1, tileSize * 0.04));
+        }
+      }
+
+      // Specular sparkles on wave crests
       const accent = terrainAccentColor(tile, x, y, this.animTimer);
-      if (accent && tileSize >= 9) {
-        this.ctx.fillStyle = withAlpha(accent, shallow ? 0.42 : 0.28);
-        const px = screenX + tileSize * (0.24 + this.h(224) * 0.52);
-        const py = screenY + tileSize * (0.2 + this.h(225) * 0.54);
-        this.ctx.fillRect(Math.floor(px), Math.floor(py), Math.max(1, tileSize * 0.055), Math.max(1, tileSize * 0.035));
+      if (accent && tileSize >= 8) {
+        const glintPulse = 0.35 + (Math.sin(this.animTimer * 2.2 + x * 1.4 + y * 0.9) + 1) * 0.32;
+        this.ctx.fillStyle = withAlpha(accent, shallow ? glintPulse : glintPulse * 0.7);
+        const px = screenX + tileSize * (0.22 + this.h(224) * 0.56);
+        const py = screenY + tileSize * (0.18 + this.h(225) * 0.58);
+        this.ctx.fillRect(Math.floor(px), Math.floor(py), Math.max(1, tileSize * 0.065), Math.max(1, tileSize * 0.045));
       }
       return;
     }
@@ -1525,7 +1539,7 @@ export class PixelRenderer {
         if (!useBake) {
           this.drawTerrainTile(tileMap, tile, x, y, sx, sy, tileSize, overlayMode);
         } else if (this.isWater(tile.type) || tile.type === TerrainType.LAVA) {
-          this.drawAnimatedTerrainAccent(tile, x, y, sx, sy, tileSize);
+          this.drawAnimatedTerrainAccent(tileMap, tile, x, y, sx, sy, tileSize);
         }
 
         // Roads are drawn afterwards as a connected network (drawRoadsPass),
