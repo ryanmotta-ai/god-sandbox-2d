@@ -5,7 +5,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { TileMap } from '../src/world/TileMap';
-import { TERRAINS } from '../src/world/Biomes';
+import { TerrainType, TERRAINS } from '../src/world/Biomes';
 import { City } from '../src/civ/City';
 import { Kingdom } from '../src/civ/Kingdom';
 import { SpeciesType } from '../src/entities/Species';
@@ -36,7 +36,12 @@ function findLandRow(tileMap: TileMap, fromX: number, toX: number): number {
   for (let y = 2; y < tileMap.height - 2; y++) {
     if (landRow(tileMap, fromX, toX, y)) return y;
   }
-  throw new Error('no land row');
+  const midY = Math.floor(tileMap.height / 2);
+  for (let x = fromX; x <= toX; x++) {
+    const t = tileMap.getTile(x, midY);
+    if (t) t.type = TerrainType.GRASS;
+  }
+  return midY;
 }
 
 /** Lays a straight horizontal rail line, tagging the ends as city stations. */

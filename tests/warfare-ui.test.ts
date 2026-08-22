@@ -184,7 +184,7 @@ chronicle.clear();
   f.entities.push(soldier('a1', 'a', 34, 10, 'raid'));
   const s = snapshot(f);
   assert.equal(s.activeWars[0].cities.find(city => city.id === 'city-b')?.status, 'threatened');
-  assert.ok(warfareConditions(s).some(condition => condition.title === 'Capital threatened'));
+  assert.ok(warfareConditions(s).some(condition => condition.title === 'Capital threatened' || condition.title === 'Capital ameaçada'));
 }
 
 // 11. Captured-city territory uses structured Chronicle refs and current ownership.
@@ -294,7 +294,7 @@ chronicle.clear();
   assert.equal(political.warWeariness, 72);
   assert.equal(political.legitimacy, 0.43);
   assert.equal(political.peacePressure, 0.8);
-  assert.ok(warfareConditions(s).some(condition => condition.title === 'High war weariness'));
+  assert.ok(warfareConditions(s).some(condition => condition.title === 'High war weariness' || condition.title === 'Alto desgaste de guerra'));
 }
 
 // 18. Peace moves the same WarRecord into history with settlement and victor.

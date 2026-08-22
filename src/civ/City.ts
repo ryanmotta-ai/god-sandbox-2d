@@ -32,6 +32,21 @@ export interface UrbanLifecycleChronicle {
   lastRecoveryYear: number | null;
 }
 
+export type SiegePhase = 'encirclement' | 'bombardment' | 'assault' | 'starvation' | 'negotiation';
+
+export interface SiegeState {
+  phase: SiegePhase;
+  wallBreaches: number;
+  towersCaptured: number;
+  gatesForced: number;
+  siegeEnginesDeployed: number;
+  defenderFood: number;
+  defenderMorale: number;
+  attackerMorale: number;
+  surrenderWillingness: number; // 0..1
+  assaultAttempts: number;
+}
+
 const URBAN_PHASE_ORDER: readonly UrbanHistoricalPhase[] = ['settlement', 'village', 'city', 'great_city', 'metropolis'];
 
 export function historicalPhaseForTier(tier: SettlementTier): UrbanHistoricalPhase {
@@ -146,6 +161,8 @@ export class City {
   // ============ SIEGE ============
   /** Realm currently besieging this settlement, if any. */
   public besiegerId: string | null = null;
+  /** Detailed phase and breach state for active sieges (WAR-V5). */
+  public siegeState: SiegeState | null = null;
 
   // ============ CULTURE (CULT-V1) ============
   /**
@@ -366,6 +383,27 @@ export class City {
     return multiplier * (1 + Math.min(2.2, fortification));
   }
 
+  /** Current integrity (0..1) of all wall and fortification segments combined. */
+  public wallIntegrity(): number {
+    let totalHp = 0;
+    let totalMaxHp = 0;
+    for (const b of this.buildings.values()) {
+      if (b.type === 'wall' || b.fortificationRole) {
+        totalHp += Math.max(0, b.hp);
+        totalMaxHp += b.maxHp;
+      }
+    }
+    if (totalMaxHp === 0) return 1.0;
+    return totalHp / totalMaxHp;
+  }
+
+  /** Estimated months of food remaining under current population demand. */
+  public foodMonthsRemaining(): number {
+    const annualDemand = Math.max(1, this.population * 0.3);
+    const storedFood = this.stock.get('food');
+    return (storedFood / annualDemand) * 12;
+  }
+
   // ============================ BUILDINGS ============================
 
   public countOfType(type: BuildingType): number {
@@ -527,6 +565,7 @@ export class City {
       culturallySettledSince: this.culturallySettledSince,
       siegeProgress: this.siegeProgress,
       siegeYears: this.siegeYears,
+      siegeState: this.siegeState,
       capturedYear: this.capturedYear,
       formerOwnerId: this.formerOwnerId,
       stock: this.stock.serialize(),
@@ -590,6 +629,7 @@ export class City {
     city.culturallySettledSince = data.culturallySettledSince ?? 0;
     city.siegeProgress = data.siegeProgress ?? 0;
     city.siegeYears = data.siegeYears ?? 0;
+    city.siegeState = data.siegeState ?? null;
     city.capturedYear = data.capturedYear ?? null;
     city.formerOwnerId = data.formerOwnerId ?? null;
     city.urbanHistory = Array.isArray(data.urbanHistory) && data.urbanHistory.length > 0

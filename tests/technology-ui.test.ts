@@ -179,8 +179,8 @@ chronicle.clear();
   for (const good of ['saltpeter', 'coal'] as const) cities.get('c1')!.stock.add(good, 20);
   refreshEngineCapacity(kingdom, cities);
   const entities = [
-    { kingdomId: kingdom.id, hp: 10, profession: 'soldier', equipment: { weapon: { name: 'Matchlock Musket' } } },
-    { kingdomId: kingdom.id, hp: 10, profession: 'soldier', equipment: { weapon: { name: 'Iron Broadsword' } } }
+    { kingdomId: kingdom.id, hp: 10, profession: 'soldier', equipment: { weapon: { name: 'Mosquete de Mecha' } } },
+    { kingdomId: kingdom.id, hp: 10, profession: 'soldier', equipment: { weapon: { name: 'Espada Larga de Ferro' } } }
   ];
   const snapshot = computeTechnologyUISnapshot(kingdom, context(kingdom, cities, entities), logisticsFor(kingdom));
   const deployment = capability(snapshot, 'gunpowder').military;

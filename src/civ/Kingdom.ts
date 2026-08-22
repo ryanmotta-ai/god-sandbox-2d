@@ -39,6 +39,7 @@ export function generateKingdomName(): string {
 }
 
 const KINGDOM_COLORS = [
+
   '#e74c3c', '#2ecc71', '#3498db', '#f39c12', '#9b59b6',
   '#1abc9c', '#e67e22', '#2980b9', '#c0392b', '#27ae60',
   '#8e44ad', '#d35400', '#16a085', '#f1c40f', '#e84393',
@@ -47,7 +48,10 @@ const KINGDOM_COLORS = [
 
 let colorIndex = 0;
 export function getNextKingdomColor(): string {
-
+  const color = KINGDOM_COLORS[colorIndex % KINGDOM_COLORS.length];
+  colorIndex++;
+  return color;
+}
 
 export interface WarReparations {
   creditorId: string;
@@ -161,12 +165,13 @@ export class Kingdom {
   /** Current legal code: taxes, rights, land, trade, army, labour and reforms. */
   public laws: LawProfile;
 
-  // ============ WARFARE & MILITARY STRATEGY (WAR-V1) ============
+  // ============ WARFARE & MILITARY STRATEGY (WAR-V1 & WAR-V6) ============
   public armyIds: Set<string> = new Set();
   public militaryUpkeepGold: number = 0;
   public militaryUpkeepFood: number = 0;
   public mercenaryCompanyIds: Set<string> = new Set();
   public commanderIds: Set<string> = new Set();
+  public doctrine: MilitaryDoctrine;
 
   // ============ TRADE BALANCE & MERCANTILISM STATS ============
   public exportVolume: number = 0;
@@ -234,6 +239,7 @@ export class Kingdom {
     this.culture = createCulturalProfile(species);
     this.society = createSocietyProfile(this.government);
     this.laws = createLawProfile(this.government);
+    this.doctrine = createDefaultDoctrine(name);
 
     const num = parseInt(color.replace('#', ''), 16);
     this.rgbColor = {
@@ -465,7 +471,8 @@ export class Kingdom {
       militaryUpkeepGold: this.militaryUpkeepGold,
       militaryUpkeepFood: this.militaryUpkeepFood,
       mercenaryCompanyIds: Array.from(this.mercenaryCompanyIds),
-      commanderIds: Array.from(this.commanderIds)
+      commanderIds: Array.from(this.commanderIds),
+      doctrine: this.doctrine
     };
   }
 
@@ -521,6 +528,7 @@ export class Kingdom {
     kingdom.militaryUpkeepFood = data.militaryUpkeepFood ?? 0;
     kingdom.mercenaryCompanyIds = new Set(data.mercenaryCompanyIds ?? []);
     kingdom.commanderIds = new Set(data.commanderIds ?? []);
+    kingdom.doctrine = data.doctrine ?? createDefaultDoctrine(kingdom.name);
     return kingdom;
   }
 }

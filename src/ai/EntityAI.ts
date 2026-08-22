@@ -38,7 +38,7 @@ import {
   remember, standGroundChance
 } from '../entities/Psyche';
 import { GOVERNMENTS } from '../civ/Government';
-import { WarfareSystem, SIEGE_RADIUS } from '../civ/Warfare';
+import { WarfareSystem, SIEGE_RADIUS, terrainCombatModifier, determineUnitRole } from '../civ/Warfare';
 import { WarFrontSystem, SECTOR_RADIUS } from '../civ/WarFronts';
 import { SIEGE_GATE_PUSH } from '../civ/WarFronts';
 import { MilitaryLogistics } from '../civ/MilitaryLogistics';
@@ -1640,6 +1640,14 @@ if (e.kingdomId) {
           const hasCommanderNearby = nearby.some(o => o.kingdomId === e.kingdomId && o.profession === 'king');
           const moraleMult = hasCommanderNearby ? 1.25 : 1.0;
 
+          // Fatigue modifier (WAR-V4)
+          const fatigueMult = e.energy < 20 ? 0.75 : 1.0;
+
+          // Terrain combat modifier (WAR-V4)
+          const tile = tileMap.getTile(Math.round(e.x), Math.round(e.y));
+          const role = determineUnitRole(e);
+          const terrainMult = tile ? terrainCombatModifier(tile.type, role) : 1.0;
+
           // Reach based on weapon item properties / category
           const weapon = e.equipment.weapon;
           const category = weapon?.category;
@@ -1649,8 +1657,8 @@ if (e.kingdomId) {
           if (weaponName.includes('spear') || weaponName.includes('halberd')) maxReach = 2.4;
 
           if (targetDist <= maxReach && e.attackCooldown <= 0) {
-            let dmg = Math.max(1, Math.floor((e.damage - target.defense) * moraleMult));
-            if (category === 'heavy') dmg = Math.max(dmg, Math.floor(e.damage * 0.75 * moraleMult));
+            let dmg = Math.max(1, Math.floor((e.damage - target.defense) * moraleMult * fatigueMult * terrainMult));
+            if (category === 'heavy') dmg = Math.max(dmg, Math.floor(e.damage * 0.75 * moraleMult * fatigueMult * terrainMult));
 
             const isRanged = category === 'ranged' || category === 'siege' || weaponName.includes('bow') || weaponName.includes('musket') || weaponName.includes('rifle') || weaponName.includes('blunderbuss') || weaponName.includes('sling');
 

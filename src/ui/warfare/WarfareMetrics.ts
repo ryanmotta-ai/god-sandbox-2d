@@ -8,8 +8,8 @@
  */
 import type { GameContext } from '../core/GameContext';
 import type { WarRecord, PeaceSettlement } from '../../civ/Diplomacy';
-import type { Kingdom } from '../../civ/Kingdom';
-import type { City } from '../../civ/City';
+import type { Kingdom, MilitaryDoctrine } from '../../civ/Kingdom';
+import type { City, SiegePhase } from '../../civ/City';
 import type { Army, Commander, MercenaryCompany } from '../../civ/Warfare';
 import type { Entity } from '../../entities/Entity';
 import type { AIState } from '../../entities/Needs';
@@ -102,6 +102,12 @@ export interface SiegeView {
   isCapital: boolean;
   x: number;
   y: number;
+  phase?: SiegePhase;
+  wallBreaches?: number;
+  gatesForced?: number;
+  towersCaptured?: number;
+  surrenderWillingness?: number;
+  siegeEngines?: number;
 }
 
 export interface WarCityView {
@@ -217,6 +223,7 @@ export interface RealmMilitaryView {
   warWeariness: number;
   wars: number;
   highestEquipment: EquipmentView | null;
+  doctrine?: MilitaryDoctrine;
 }
 
 export interface WarfareUISnapshot {
@@ -449,7 +456,13 @@ function buildSieges(ctx: GameContext): SiegeView[] {
       ownerId: city.kingdomId, besiegerId: city.besiegerId,
       progress: city.siegeProgress, years: city.siegeYears,
       isCapital: owner?.capitalCityId === city.id,
-      x: city.x, y: city.y
+      x: city.x, y: city.y,
+      phase: city.siegeState?.phase,
+      wallBreaches: city.siegeState?.wallBreaches ?? 0,
+      gatesForced: city.siegeState?.gatesForced ?? 0,
+      towersCaptured: city.siegeState?.towersCaptured ?? 0,
+      surrenderWillingness: city.siegeState?.surrenderWillingness ?? 0,
+      siegeEngines: city.siegeState?.siegeEnginesDeployed ?? 0
     });
   }
   return out.sort((a, b) => Number(b.isCapital) - Number(a.isCapital) || b.progress - a.progress);
@@ -774,14 +787,15 @@ export function computeWarfareUISnapshot(
       militaryPower: kingdom.computePower(),
       warWeariness: kingdom.warWeariness,
       wars: ctx.sim.diplomacy.getWarsFor(kingdom.id).length,
-      highestEquipment: force?.equipment.find(item => item.tier !== null) ?? null
+      highestEquipment: force?.equipment.find(item => item.tier !== null) ?? null,
+      doctrine: kingdom.doctrine
     };
   }).sort((a, b) => b.strength - a.strength || b.militaryPower - a.militaryPower);
   const buildTimeMs = performance.now() - started;
   warfareUIPerformance.snapshotMs = buildTimeMs;
-  const armies = Array.from(ctx.sim.warfare.armies.values());
-  const commanders = Array.from(ctx.sim.warfare.commanders.values());
-  const mercenaries = Array.from(ctx.sim.warfare.mercenaryCompanies.values());
+  const armies = ctx.sim.warfare?.armies ? Array.from(ctx.sim.warfare.armies.values()) : [];
+  const commanders = ctx.sim.warfare?.commanders ? Array.from(ctx.sim.warfare.commanders.values()) : [];
+  const mercenaries = ctx.sim.warfare?.mercenaryCompanies ? Array.from(ctx.sim.warfare.mercenaryCompanies.values()) : [];
   return {
     year: ctx.sim.currentYear,
     activeWars,

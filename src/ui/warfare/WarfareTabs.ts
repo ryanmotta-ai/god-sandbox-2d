@@ -53,6 +53,39 @@ export const ARMY_STATE_LABEL: Record<string, string> = {
   garrisoned: 'Em guarnição de paz'
 };
 
+export const SIEGE_PHASE_LABEL: Record<string, string> = {
+  encirclement: 'Isolamento e Bloqueio',
+  bombardment: 'Bombardeio de Muralhas',
+  assault: 'Assalto Direto às Brechas',
+  starvation: 'Cerco por Fome',
+  negotiation: 'Negociação de Rendição'
+};
+
+export const DOCTRINE_TYPE_LABELS: Record<string, string> = {
+  infantry_focus: 'Foco em Infantaria Pesada',
+  cavalry_focus: 'Foco em Cavalaria & Manobra',
+  archery_focus: 'Foco em Arqueiros & Linha de Tiro',
+  artillery_focus: 'Foco em Artilharia & Engenharia',
+  balanced: 'Doutrina de Armas Combinadas',
+  defensive: 'Doutrina Fortificada / Defensiva',
+  guerrilla: 'Doutrina de Guerrilha / Emboscada'
+};
+
+export const TRADITION_LABELS: Record<string, string> = {
+  shield_wall: 'Parede de Escudos (+20% Defesa Infantaria)',
+  phalanx: 'Falange de Piques (+15% vs Cavalaria)',
+  heavy_cavalry: 'Cavalaria de Choque (+30% Carga)',
+  horse_archers: 'Arqueiros Montados (Ataque Móvel)',
+  longbow_mastery: 'Mestres do Arco Longo (+25% Dano à Distância)',
+  crossbow_discipline: 'Besta de Precisão (Perfuração)',
+  siege_engineering: 'Engenharia de Cerco (+25% Dano Muralhas)',
+  scorched_earth: 'Terra Arrasada (Atrito Invasor)',
+  guerrilla_tactics: 'Táticas de Guerrilha (+25% Bosques/Pântanos)',
+  fortification_mastery: 'Mestres da Fortificação (+25% Defesa)',
+  conscription: 'Conscrição em Massa (+20% Milícia)',
+  professional_army: 'Exército Profissional (+15% Moral, -20% Fadiga)'
+};
+
 function realmLink(realm: RealmRefView, host: WarfareScreenHost, qualifier?: string): HTMLElement {
   return objectLink({
     kind: 'kingdom', id: realm.id, name: realm.name, accent: realm.color,
@@ -198,10 +231,21 @@ export function buildArmies(snapshot: WarfareUISnapshot, host: WarfareScreenHost
               el('div', { style: 'font-size:10px;color:#94a3b8', text: trait })
             ]);
           } },
+          { key: 'composition', header: 'Composição Tática', cell: a => {
+            const c = a.composition ?? { infantry: a.soldierIds.size, cavalry: 0, archers: 0, artillery: 0, militia: 0 };
+            const parts: string[] = [];
+            if (c.infantry) parts.push(`${c.infantry} Inf`);
+            if (c.cavalry) parts.push(`${c.cavalry} Cav`);
+            if (c.archers) parts.push(`${c.archers} Arq`);
+            if (c.artillery) parts.push(`${c.artillery} Art`);
+            if (c.militia) parts.push(`${c.militia} Mil`);
+            return el('div', { style: 'font-size:11px;font-family:monospace', text: parts.join(' · ') || 'Sem tropas' });
+          } },
           { key: 'state', header: 'Estado de Campanha', cell: a => badge(ARMY_STATE_LABEL[a.state] ?? a.state, { status: a.state === 'besieging' || a.state === 'marching' ? 'critical' : a.state === 'defending' ? 'warning' : 'neutral', size: 'sm' }) },
           { key: 'soldiers', header: 'Efetivo', align: 'right', cell: a => a.isMercenary ? `${a.mercenaryCompanyId ? snapshot.mercenaries.find(m => m.id === a.mercenaryCompanyId)?.size ?? 10 : 10} merc.` : `${a.soldierIds.size} soldados`, sortValue: a => a.soldierIds.size },
-          { key: 'readiness', header: 'Prontidão', align: 'right', cell: a => formatPercent(a.readiness), sortValue: a => a.readiness },
-          { key: 'morale', header: 'Moral', align: 'right', cell: a => formatPercent(a.morale), sortValue: a => a.morale }
+          { key: 'fatigue', header: 'Fadiga', align: 'right', cell: a => formatPercent(a.fatigue ?? 0), sortValue: a => a.fatigue ?? 0 },
+          { key: 'morale', header: 'Moral', align: 'right', cell: a => formatPercent(a.morale), sortValue: a => a.morale },
+          { key: 'experience', header: 'Experiência', align: 'right', cell: a => formatPercent(a.experience ?? 0.1), sortValue: a => a.experience ?? 0.1 }
         ],
         empty: emptyState({ icon: 'army', title: 'Nenhum regimento formado', hint: 'Os reinos formam regimentos a partir de quartéis quando convocam soldados para a guerra.' })
       })
@@ -305,6 +349,16 @@ export function buildMilitaryPower(snapshot: WarfareUISnapshot, host: WarfareScr
         { key: 'soldiers', header: 'Soldados', align: 'right', cell: item => `${item.soldiers}`, sortValue: item => item.soldiers },
         { key: 'strength', header: 'Força de campo', align: 'right', cell: item => formatCompact(item.strength), sortValue: item => item.strength },
         { key: 'power', header: 'Poder do reino', align: 'right', cell: item => formatCompact(item.militaryPower), sortValue: item => item.militaryPower },
+        { key: 'doctrine', header: 'Doutrina Militar (WAR-V6)', cell: item => {
+          const doc = item.doctrine;
+          if (!doc) return el('span', { style: 'color:#94a3b8;font-size:11px', text: 'Doutrina Tradicional' });
+          const typeName = DOCTRINE_TYPE_LABELS[doc.type] ?? doc.type;
+          const tradCount = doc.traditions?.length ?? 0;
+          return el('div', {}, [
+            el('strong', { style: 'font-size:11px', text: doc.name || typeName }),
+            el('div', { style: 'font-size:10px;color:#94a3b8', text: `${tradCount} tradição(ões) · XP ${Math.round(doc.experienceLevel * 100)}%` })
+          ]);
+        }, width: 'minmax(200px, 1.4fr)' },
         { key: 'weariness', header: 'Desgaste', align: 'right', cell: item => pct(item.warWeariness), sortValue: item => item.warWeariness },
         { key: 'equipment', header: 'Maior equipamento', cell: item => item.highestEquipment?.name ?? 'Nenhum registrado' }
       ],
@@ -435,11 +489,20 @@ export function buildWarDossier(war: WarView, host: WarfareScreenHost): Child[] 
       war.engagements.length ? el('div', { class: 'ae-war-engagements' }, war.engagements.map(item => engagementPanel(item, war, host))) : emptyState({
         icon: 'battle', title: 'Nenhum grupo de contato ativo', hint: 'A simulação armazena totais de eventos letais, não dossiês de Batalha concluídos.', compact: true
       }),
-      war.sieges.length ? section('Cercos', war.sieges.map(siege => el('div', { class: 'ae-war-siege' }, [
-        objectLink({ kind: 'city', id: siege.cityId, name: siege.cityName, status: 'critical', qualifier: siege.isCapital ? 'capital' : undefined }, { onOpen: () => host.openCity(siege.cityId) }),
-        progressBar({ value: siege.progress, label: `Progresso do cerco · ${siege.years} ano(s)`, status: 'critical' }),
-        button('Ver no mapa', () => host.viewPointOnMap(siege.x, siege.y), { icon: 'map', size: 'sm' })
-      ]))) : null
+      war.sieges.length ? section('Cercos Ativos (WAR-V5)', war.sieges.map(siege => {
+        const phaseLabel = siege.phase ? (SIEGE_PHASE_LABEL[siege.phase] ?? siege.phase) : 'Cerco Ativo';
+        const breachesText = `${siege.wallBreaches ?? 0} brecha(s) · ${siege.gatesForced ?? 0} portão(ões) rompidos · ${siege.towersCaptured ?? 0} torre(s) tomadas · ${siege.siegeEngines ?? 0} artilh./máquinas`;
+        const willingness = Math.round((siege.surrenderWillingness ?? 0) * 100);
+        return el('div', { class: 'ae-war-siege' }, [
+          el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px' }, [
+            objectLink({ kind: 'city', id: siege.cityId, name: siege.cityName, status: 'critical', qualifier: siege.isCapital ? 'capital' : undefined }, { onOpen: () => host.openCity(siege.cityId) }),
+            badge(phaseLabel, { status: siege.phase === 'assault' ? 'critical' : siege.phase === 'starvation' ? 'warning' : 'neutral', size: 'sm' })
+          ]),
+          progressBar({ value: siege.progress, label: `Progresso do cerco · ${siege.years} ano(s) · Vontade de rendição: ${willingness}%`, status: 'critical' }),
+          el('div', { style: 'font-size:11px;color:#94a3b8;margin-top:3px', text: breachesText }),
+          button('Ver no mapa', () => host.viewPointOnMap(siege.x, siege.y), { icon: 'map', size: 'sm' })
+        ]);
+      })) : null
     ]),
     panel({ title: 'Impacto econômico', subtitle: 'Fluxos de participantes atuais e rotas exatas fechadas pela guerra', icon: 'trade-route' }, [
       chains.length ? section('Cadeias causais', chains.map(chain => el('div', { class: `ae-war-chain ae-war-chain-${chain.status}` }, [

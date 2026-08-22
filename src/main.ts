@@ -544,6 +544,14 @@ class AethoriaGame implements GameContext {
       this.selection.select({ kind: 'citizen', id: ref.id });
       this.focusOn(entity.x, entity.y);
     });
+
+    objectNav.registerOpener('war', ref => {
+      this.screens.open('warfare', { warId: ref.id });
+    });
+
+    objectNav.registerOpener('technology', ref => {
+      this.screens.open('techtree', { techId: ref.id });
+    });
   }
 
   public applySettings(): void {
