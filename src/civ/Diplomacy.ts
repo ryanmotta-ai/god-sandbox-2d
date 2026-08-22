@@ -1,5 +1,6 @@
 import { events } from '../core/EventBus';
 import { rng, nextId } from '../core/Random';
+import type { GoodId } from './Goods';
 
 export type DiplomaticStatus = 'neutral' | 'friendly' | 'hostile' | 'war' | 'alliance';
 
@@ -10,6 +11,17 @@ export interface Alliance {
   formedYear: number;
 }
 
+export type WarGoalKind = 'conquest' | 'defense' | 'subjugation' | 'colony' | 'resources' | 'independence';
+
+export interface WarGoal {
+  kind: WarGoalKind;
+  targetCityId?: string;
+  targetGoodId?: GoodId;
+  targetKingdomId?: string;
+  description: string;
+  progress?: number; // 0..1
+}
+
 export interface WarRecord {
   id: string;
   attacker: string;
@@ -17,6 +29,10 @@ export interface WarRecord {
   startYear: number;
   endYear: number | null;
   reason: string;
+  goal: WarGoal;
+  attackerAllies: string[];
+  defenderAllies: string[];
+  mercenaryCompanyIds?: string[];
   battles: number;
   attackerKills: number;
   defenderKills: number;
@@ -57,8 +73,7 @@ export class DiplomacyManager {
 
   public getStatus(k1: string, k2: string): DiplomaticStatus {
     if (k1 === k2) return 'friendly';
-    const key = this.getPairKey(k1, k2);
-    if (this.activeWars.has(key)) return 'war';
+    if (this.isAtWar(k1, k2)) return 'war';
     
     // Check alliances
     for (const alliance of this.alliances.values()) {
@@ -85,7 +100,16 @@ export class DiplomacyManager {
 
   public isAtWar(k1: string, k2: string): boolean {
     if (k1 === k2) return false;
-    return this.activeWars.has(this.getPairKey(k1, k2));
+    if (this.activeWars.has(this.getPairKey(k1, k2))) return true;
+    for (const war of this.activeWars.values()) {
+      const isSideA = war.attacker === k1 || war.attackerAllies.includes(k1);
+      const isSideB = war.defender === k2 || war.defenderAllies.includes(k2);
+      if (isSideA && isSideB) return true;
+      const isRevA = war.attacker === k2 || war.attackerAllies.includes(k2);
+      const isRevB = war.defender === k1 || war.defenderAllies.includes(k1);
+      if (isRevA && isRevB) return true;
+    }
+    return false;
   }
 
   public getTruce(k1: string, k2: string, year: number): Truce | null {
@@ -112,12 +136,13 @@ export class DiplomacyManager {
     });
   }
 
-  public declareWar(k1: string, k2: string, year: number, reason: string = 'Territorial Dispute'): boolean {
+  public declareWar(k1: string, k2: string, year: number, reason: string = 'Territorial Dispute', goal?: WarGoal): boolean {
     if (k1 === k2) return false;
-    const rebellion = /rebellion|secession|independence/i.test(reason);
+    const rebellion = /rebellion|secession|independence|revolta/i.test(reason);
     if (!rebellion && this.hasTruce(k1, k2, year)) return false;
     const key = this.getPairKey(k1, k2);
     if (!this.activeWars.has(key)) {
+      const defaultGoal: WarGoal = goal ?? this.deriveDefaultWarGoal(k1, k2, reason);
       const warRecord: WarRecord = {
         id: nextId('war'),
         attacker: k1,
@@ -125,16 +150,24 @@ export class DiplomacyManager {
         startYear: year,
         endYear: null,
         reason,
+        goal: defaultGoal,
+        attackerAllies: [],
+        defenderAllies: [],
+        mercenaryCompanyIds: [],
         battles: 0,
         attackerKills: 0,
         defenderKills: 0,
         victor: null,
         settlement: null
       };
+
+      // Automatic alliance entrance (Mutual Defense Pact & Offensive Coalition)
+      this.callAlliesToWar(warRecord, k1, k2, year);
+
       this.activeWars.set(key, warRecord);
       this.setRelation(k1, k2, -100);
       
-      // Break alliances between warring kingdoms
+      // Break direct alliances between warring leaders
       for (const [allyId, alliance] of this.alliances) {
         if (alliance.members.has(k1) && alliance.members.has(k2)) {
           alliance.members.delete(k2);
@@ -142,10 +175,62 @@ export class DiplomacyManager {
         }
       }
       
-      events.emit('warStarted', { k1, k2, year, reason });
+      events.emit('warStarted', { k1, k2, year, reason, war: warRecord });
       return true;
     }
     return false;
+  }
+
+  private deriveDefaultWarGoal(attacker: string, defender: string, reason: string): WarGoal {
+    const text = reason.toLowerCase();
+    if (text.includes('independência') || text.includes('independence') || text.includes('secessão')) {
+      return { kind: 'independence', description: 'Conquistar soberania e libertação do domínio imperial' };
+    }
+    if (text.includes('colônia') || text.includes('colonial')) {
+      return { kind: 'colony', description: 'Restaurar controle e tributação sobre terras coloniais' };
+    }
+    if (text.includes('imperial') || text.includes('subjugação') || text.includes('vassalagem')) {
+      return { kind: 'subjugation', description: 'Subjugar o reino inimigo e torná-lo vassalo tributário' };
+    }
+    if (text.includes('recurso') || text.includes('mina') || text.includes('ouro')) {
+      return { kind: 'resources', description: 'Conquistar nós estratégicos de minério e polos de produção' };
+    }
+    if (text.includes('defesa') || text.includes('retaliação') || text.includes('vingança')) {
+      return { kind: 'defense', description: 'Repelir a agressão e forçar indenização por danos de guerra' };
+    }
+    return { kind: 'conquest', description: 'Conquistar assentamentos de fronteira e expandir território' };
+  }
+
+  /** Calls allies of defender (automatic mutual defense) and willing allies of attacker. */
+  private callAlliesToWar(war: WarRecord, attackerId: string, defenderId: string, year: number): void {
+    const defenderAlliance = this.allianceOf(defenderId);
+    if (defenderAlliance) {
+      for (const memberId of defenderAlliance.members) {
+        if (memberId === defenderId || memberId === attackerId) continue;
+        if (!war.defenderAllies.includes(memberId)) {
+          war.defenderAllies.push(memberId);
+          this.setRelation(memberId, attackerId, -80);
+          events.emit('allyJoinedWar', { allyId: memberId, war, side: 'defender', year });
+        }
+      }
+    }
+
+    const attackerAlliance = this.allianceOf(attackerId);
+    if (attackerAlliance) {
+      for (const memberId of attackerAlliance.members) {
+        if (memberId === attackerId || memberId === defenderId) continue;
+        // Offensively, allies join if they have good standing with attacker and no truce with defender
+        const relWithAttacker = this.getRelation(memberId, attackerId);
+        const relWithDefender = this.getRelation(memberId, defenderId);
+        if (relWithAttacker >= 30 && relWithDefender < 50 && !this.hasTruce(memberId, defenderId, year)) {
+          if (!war.attackerAllies.includes(memberId)) {
+            war.attackerAllies.push(memberId);
+            this.setRelation(memberId, defenderId, -80);
+            events.emit('allyJoinedWar', { allyId: memberId, war, side: 'attacker', year });
+          }
+        }
+      }
+    }
   }
 
   public recordBattle(k1: string, k2: string, k1Kills: number, k2Kills: number): void {
@@ -153,15 +238,14 @@ export class DiplomacyManager {
     const war = this.activeWars.get(key);
     if (war) {
       war.battles++;
-      if (war.attacker === k1) {
+      if (war.attacker === k1 || war.attackerAllies.includes(k1)) {
         war.attackerKills += k1Kills;
         war.defenderKills += k2Kills;
       } else {
         war.defenderKills += k1Kills;
         war.attackerKills += k2Kills;
       }
-      // Each engagement hardens mutual hostility so an unresolved war keeps
-      // dragging relations down even without city captures.
+      // Each engagement hardens mutual hostility
       if (k1Kills > 0) this.changeRelation(k1, k2, -k1Kills * 0.4);
       if (k2Kills > 0) this.changeRelation(k2, k1, -k2Kills * 0.4);
     }
@@ -207,9 +291,6 @@ export class DiplomacyManager {
   public createAlliance(k1: string, k2: string, name: string, year: number): Alliance | null {
     if (this.isAtWar(k1, k2)) return null;
 
-    // Consolidate instead of fragmenting: if either realm is already in an
-    // alliance, the newcomer joins that pact (and two pacts merge when both
-    // are already allied). One Alliance per bloc, not one per pair.
     const a1 = this.allianceOf(k1);
     const a2 = this.allianceOf(k2);
     if (a1 && a2 && a1.id === a2.id) return null; // already in the same bloc
@@ -235,8 +316,6 @@ export class DiplomacyManager {
       this.alliances.set(alliance.id, alliance);
     }
 
-    // Pull the newcomer into friendship with every existing member, not just
-    // the treaty partner. One pact, many friends.
     for (const m of alliance.members) {
       if (m === k1 || m === k2) continue;
       this.setRelation(k1, m, 75);
@@ -263,14 +342,10 @@ export class DiplomacyManager {
         const k2 = ids[j];
         const rel = this.getRelation(k1, k2);
 
-        // Natural drift toward 0 (neutral). This also applies to allies — a
-        // pact does not freeze relations; without active cooperation they
-        // slowly cool and can dissolve when an alliance drops below two.
         if (rel > 5) this.changeRelation(k1, k2, -0.75);
         else if (rel < -5) this.changeRelation(k1, k2, 0.5);
 
         if (this.isAtWar(k1, k2)) {
-          // Ongoing war: chance for peace rises with duration and casualties.
           const war = this.activeWars.get(this.getPairKey(k1, k2));
           if (war && (year - war.startYear) > 3) {
             const duration = year - war.startYear;
@@ -284,9 +359,6 @@ export class DiplomacyManager {
         }
 
         if (this.hasTruce(k1, k2, year)) continue;
-
-        // War and alliance checks are handled primarily by the strategic
-        // geopolitical layer; this tick only drifts relations here.
       }
     }
   }
@@ -332,11 +404,16 @@ export class DiplomacyManager {
     }
   }
 
-  /** Get all wars involving a specific kingdom */
+  /** Get all wars involving a specific kingdom (as primary or allied participant) */
   public getWarsFor(kingdomId: string): WarRecord[] {
     const wars: WarRecord[] = [];
-    for (const [key, war] of this.activeWars) {
-      if (war.attacker === kingdomId || war.defender === kingdomId) {
+    for (const [, war] of this.activeWars) {
+      if (
+        war.attacker === kingdomId ||
+        war.defender === kingdomId ||
+        war.attackerAllies.includes(kingdomId) ||
+        war.defenderAllies.includes(kingdomId)
+      ) {
         wars.push(war);
       }
     }
@@ -345,12 +422,19 @@ export class DiplomacyManager {
 
   /** Get the enemy kingdom IDs for a given kingdom */
   public getEnemies(kingdomId: string): string[] {
-    const enemies: string[] = [];
-    for (const [key, war] of this.activeWars) {
-      if (war.attacker === kingdomId) enemies.push(war.defender);
-      else if (war.defender === kingdomId) enemies.push(war.attacker);
+    const enemies = new Set<string>();
+    for (const [, war] of this.activeWars) {
+      const isAttackerSide = war.attacker === kingdomId || war.attackerAllies.includes(kingdomId);
+      const isDefenderSide = war.defender === kingdomId || war.defenderAllies.includes(kingdomId);
+      if (isAttackerSide) {
+        enemies.add(war.defender);
+        for (const ally of war.defenderAllies) enemies.add(ally);
+      } else if (isDefenderSide) {
+        enemies.add(war.attacker);
+        for (const ally of war.attackerAllies) enemies.add(ally);
+      }
     }
-    return enemies;
+    return Array.from(enemies);
   }
 
   /** Snapshot for save files. Sets and Maps don't survive JSON on their own. */
@@ -363,7 +447,13 @@ export class DiplomacyManager {
         members: Array.from(a.members),
         formedYear: a.formedYear
       })),
-      activeWars: Array.from(this.activeWars.entries()),
+      activeWars: Array.from(this.activeWars.entries()).map(([k, war]) => [k, {
+        ...war,
+        goal: war.goal,
+        attackerAllies: war.attackerAllies ?? [],
+        defenderAllies: war.defenderAllies ?? [],
+        mercenaryCompanyIds: war.mercenaryCompanyIds ?? []
+      }]),
       warHistory: this.warHistory,
       truces: Array.from(this.truces.entries())
     };
@@ -382,8 +472,28 @@ export class DiplomacyManager {
       });
     }
 
-    this.activeWars = new Map(data.activeWars ?? []);
-    this.warHistory = data.warHistory ?? [];
+    this.activeWars = new Map();
+    for (const [key, warData] of data.activeWars ?? []) {
+      const defaultGoal: WarGoal = warData.goal ?? {
+        kind: 'conquest',
+        description: warData.reason ?? 'Disputa de Fronteira'
+      };
+      this.activeWars.set(key, {
+        ...warData,
+        goal: defaultGoal,
+        attackerAllies: warData.attackerAllies ?? [],
+        defenderAllies: warData.defenderAllies ?? [],
+        mercenaryCompanyIds: warData.mercenaryCompanyIds ?? []
+      });
+    }
+
+    this.warHistory = (data.warHistory ?? []).map((w: any) => ({
+      ...w,
+      goal: w.goal ?? { kind: 'conquest', description: w.reason ?? 'Disputa Territorial' },
+      attackerAllies: w.attackerAllies ?? [],
+      defenderAllies: w.defenderAllies ?? []
+    }));
+
     this.truces = new Map(data.truces ?? []);
     this.scheduledPairs = [];
     this.scheduledFingerprint = '';

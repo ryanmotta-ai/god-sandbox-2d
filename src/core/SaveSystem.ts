@@ -234,6 +234,7 @@ export class SaveSystem {
       cultures: sim.cultures.serialize(),
       cities: Array.from(sim.cities.values()).map(c => c.serialize()),
       kingdoms: Array.from(sim.kingdoms.values()).map(k => k.serialize()),
+      warfare: sim.warfare.serialize(),
       market: sim.market.serialize(),
       trade: sim.trade.serialize()
     };
@@ -366,6 +367,7 @@ export class SaveSystem {
 
     // Restore world systems
     if (data.diplomacy) sim.diplomacy.deserialize(data.diplomacy);
+    if (data.warfare) sim.warfare.deserialize(data.warfare);
     if (data.market) sim.market.deserialize(data.market);
     if (data.trade) sim.trade.deserialize(data.trade);
   }

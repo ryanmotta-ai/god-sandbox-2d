@@ -10,6 +10,7 @@ import type { GameContext } from '../core/GameContext';
 import type { WarRecord, PeaceSettlement } from '../../civ/Diplomacy';
 import type { Kingdom } from '../../civ/Kingdom';
 import type { City } from '../../civ/City';
+import type { Army, Commander, MercenaryCompany } from '../../civ/Warfare';
 import type { Entity } from '../../entities/Entity';
 import type { AIState } from '../../entities/Needs';
 import {
@@ -224,6 +225,9 @@ export interface WarfareUISnapshot {
   history: WarView[];
   allWars: WarView[];
   forces: ArmyForceView[];
+  armies: Army[];
+  commanders: Commander[];
+  mercenaries: MercenaryCompany[];
   engagements: EngagementView[];
   sieges: SiegeView[];
   realms: RealmMilitaryView[];
@@ -775,12 +779,18 @@ export function computeWarfareUISnapshot(
   }).sort((a, b) => b.strength - a.strength || b.militaryPower - a.militaryPower);
   const buildTimeMs = performance.now() - started;
   warfareUIPerformance.snapshotMs = buildTimeMs;
+  const armies = Array.from(ctx.sim.warfare.armies.values());
+  const commanders = Array.from(ctx.sim.warfare.commanders.values());
+  const mercenaries = Array.from(ctx.sim.warfare.mercenaryCompanies.values());
   return {
     year: ctx.sim.currentYear,
     activeWars,
     history,
     allWars: [...activeWars, ...history],
     forces,
+    armies,
+    commanders,
+    mercenaries,
     engagements,
     sieges,
     realms,

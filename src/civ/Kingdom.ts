@@ -47,15 +47,67 @@ const KINGDOM_COLORS = [
 
 let colorIndex = 0;
 export function getNextKingdomColor(): string {
-  const color = KINGDOM_COLORS[colorIndex % KINGDOM_COLORS.length];
-  colorIndex++;
-  return color;
-}
+
 
 export interface WarReparations {
   creditorId: string;
   annualAmount: number;
   endYear: number;
+}
+
+export type DoctrineType = 
+  | 'infantry_focus'
+  | 'cavalry_focus'
+  | 'archery_focus'
+  | 'artillery_focus'
+  | 'balanced'
+  | 'defensive'
+  | 'guerrilla';
+
+export type MilitaryTradition =
+  | 'shield_wall'
+  | 'phalanx'
+  | 'heavy_cavalry'
+  | 'horse_archers'
+  | 'longbow_mastery'
+  | 'crossbow_discipline'
+  | 'siege_engineering'
+  | 'scorched_earth'
+  | 'guerrilla_tactics'
+  | 'fortification_mastery'
+  | 'conscription'
+  | 'professional_army';
+
+export interface MilitaryDoctrine {
+  type: DoctrineType;
+  name: string;
+  preferredComposition: {
+    infantry: number;
+    cavalry: number;
+    archers: number;
+    artillery: number;
+  };
+  trainingBonus: number;
+  experienceLevel: number;
+  traditions: MilitaryTradition[];
+  evolvedFromTech: string | null;
+}
+
+export function createDefaultDoctrine(namePrefix = ''): MilitaryDoctrine {
+  return {
+    type: 'balanced',
+    name: namePrefix ? `Doutrina de ${namePrefix}` : 'Doutrina de Armas Combinadas',
+    preferredComposition: {
+      infantry: 0.45,
+      cavalry: 0.20,
+      archers: 0.25,
+      artillery: 0.10
+    },
+    trainingBonus: 0.05,
+    experienceLevel: 0.1,
+    traditions: ['shield_wall'],
+    evolvedFromTech: null
+  };
 }
 
 /**
@@ -108,6 +160,13 @@ export class Kingdom {
   public society: SocietyProfile;
   /** Current legal code: taxes, rights, land, trade, army, labour and reforms. */
   public laws: LawProfile;
+
+  // ============ WARFARE & MILITARY STRATEGY (WAR-V1) ============
+  public armyIds: Set<string> = new Set();
+  public militaryUpkeepGold: number = 0;
+  public militaryUpkeepFood: number = 0;
+  public mercenaryCompanyIds: Set<string> = new Set();
+  public commanderIds: Set<string> = new Set();
 
   // ============ TRADE BALANCE & MERCANTILISM STATS ============
   public exportVolume: number = 0;
@@ -401,7 +460,12 @@ export class Kingdom {
       exportVolume: this.exportVolume,
       importVolume: this.importVolume,
       tariffRevenue: this.tariffRevenue,
-      pirateRaidsDefeated: this.pirateRaidsDefeated
+      pirateRaidsDefeated: this.pirateRaidsDefeated,
+      armyIds: Array.from(this.armyIds),
+      militaryUpkeepGold: this.militaryUpkeepGold,
+      militaryUpkeepFood: this.militaryUpkeepFood,
+      mercenaryCompanyIds: Array.from(this.mercenaryCompanyIds),
+      commanderIds: Array.from(this.commanderIds)
     };
   }
 
@@ -452,6 +516,11 @@ export class Kingdom {
     kingdom.importVolume = data.importVolume ?? 0;
     kingdom.tariffRevenue = data.tariffRevenue ?? 0;
     kingdom.pirateRaidsDefeated = data.pirateRaidsDefeated ?? 0;
+    kingdom.armyIds = new Set(data.armyIds ?? []);
+    kingdom.militaryUpkeepGold = data.militaryUpkeepGold ?? 0;
+    kingdom.militaryUpkeepFood = data.militaryUpkeepFood ?? 0;
+    kingdom.mercenaryCompanyIds = new Set(data.mercenaryCompanyIds ?? []);
+    kingdom.commanderIds = new Set(data.commanderIds ?? []);
     return kingdom;
   }
 }

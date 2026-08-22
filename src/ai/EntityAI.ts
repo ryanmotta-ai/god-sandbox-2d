@@ -2542,7 +2542,7 @@ if (e.kingdomId) {
           b.assignedWorkerIds.add(e.id);
           e.aiState = 'idle';
           e.aiCooldown = 5;
-          chronicle.log(this.currentYear, 'society', `🪖 ${e.fullName} foi convocado em ${city.name} para a guerra.`);
+          chronicle.log(this.currentYear, 'society', `${e.fullName} foi convocado em ${city.name} para o serviço militar.`);
         }
       }
     }
@@ -3049,6 +3049,19 @@ if (e.kingdomId) {
     const enemies = this.diplomacy.getEnemies(soldier.kingdomId);
     if (enemies.length === 0) return null;
 
+    // Follow Army regiment campaign orders if assigned
+    const army = this.warfare.getArmyForSoldier(soldier.id);
+    if (army) {
+      if (army.state === 'retreating' || army.state === 'mustering' || army.state === 'garrisoned') {
+        const home = this.cities.get(army.homeCityId);
+        if (home) return home;
+      }
+      if (army.targetCityId) {
+        const target = this.cities.get(army.targetCityId);
+        if (target) return target;
+      }
+    }
+
     // A realm being invaded defends itself before it goes raiding.
     const homeUnderSiege = [...this.cities.values()].find(
       c => c.kingdomId === soldier.kingdomId && c.besiegerId
@@ -3072,7 +3085,7 @@ if (e.kingdomId) {
     }
 
     // Don't send armies on a march they cannot finish before the war is over.
-    return best && Math.hypot(best.x - soldier.x, best.y - soldier.y) < 55 ? best : null;
+    return best && Math.hypot(best.x - soldier.x, best.y - soldier.y) < 70 ? best : null;
   }
 
   /** Nearest tile carrying any harvestable deposit. Used by miners. */

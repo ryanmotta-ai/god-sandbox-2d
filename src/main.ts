@@ -692,10 +692,10 @@ class AethoriaGame implements GameContext {
     const key = e.key.toLowerCase();
 
     // Shift + number selects a power category.
-    if (e.shiftKey && /^[1-7]$/.test(e.key)) {
+    if (e.shiftKey && /^[1-5]$/.test(e.key)) {
       e.preventDefault();
       this.hud.toolbar.selectCategoryByIndex(parseInt(e.key, 10) - 1);
-      this.toast(`Category: ${CATEGORIES[parseInt(e.key, 10) - 1].label}`, 'info');
+      this.toast(`Categoria: ${CATEGORIES[parseInt(e.key, 10) - 1].label}`, 'info');
       return;
     }
 
@@ -703,10 +703,7 @@ class AethoriaGame implements GameContext {
       case ' ':
         e.preventDefault();
         this.togglePause();
-        // No toast: the top bar's speed control already shows the state, and a
-        // notification for something the player just did themselves is noise.
         return;
-      // The number keys mirror the five buttons in the top bar, in order.
       case '1': this.setSpeed(1); return;
       case '2': this.setSpeed(2); return;
       case '3': this.setSpeed(5); return;

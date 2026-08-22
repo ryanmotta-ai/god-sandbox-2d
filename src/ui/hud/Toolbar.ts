@@ -15,13 +15,11 @@ interface CategoryInfo {
 }
 
 export const CATEGORIES: CategoryInfo[] = [
-  { id: 'terrain', label: 'Terreno', icon: 'pickaxe', hotkey: '1', accent: '#8a7860' },
-  { id: 'nature', label: 'Natureza', icon: 'ecosystem', hotkey: '2', accent: '#7ba05b' },
-  { id: 'biomes', label: 'Biomas', icon: 'climate', hotkey: '3', accent: '#7fa8b8' },
-  { id: 'life', label: 'Vida & Espécies', icon: 'population', hotkey: '4', accent: '#c9a153' },
-  { id: 'divine', label: 'Milagres', icon: 'power', hotkey: '5', accent: '#9b7fa8' },
-  { id: 'destruction', label: 'Desastres', icon: 'disaster', hotkey: '6', accent: '#b8453c' },
-  { id: 'inspect', label: 'Inspecionar', icon: 'search', hotkey: '7', accent: '#6f8fa8' }
+  { id: 'terrain', label: 'Terreno', icon: 'mountain', hotkey: '1', accent: '#8a7860' },
+  { id: 'nature', label: 'Natureza & Biomas', icon: 'leaf', hotkey: '2', accent: '#7ba05b' },
+  { id: 'life', label: 'Vida & Feras', icon: 'person', hotkey: '3', accent: '#c9a153' },
+  { id: 'divine', label: 'Milagres', icon: 'crown', hotkey: '4', accent: '#9b7fa8' },
+  { id: 'destruction', label: 'Desastres', icon: 'fire', hotkey: '5', accent: '#b8453c' }
 ];
 
 const BRUSH_SIZES = [1, 2, 3, 5, 9, 14];

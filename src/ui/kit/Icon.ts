@@ -34,9 +34,11 @@ const DRAWN_ICONS = new Set([
   // Emblems and combat
   'swords', 'shield', 'crown', 'axe', 'pickaxe', 'bow',
   // Creatures and nature
-  'lion', 'eagle', 'dragon', 'leaf', 'farm', 'feather',
+  'lion', 'eagle', 'dragon', 'leaf', 'farm', 'feather', 'wolf', 'bear', 'deer',
   // Forces and sky
-  'fire', 'lightning', 'moon', 'sun',
+  'fire', 'lightning', 'moon', 'sun', 'water', 'drop', 'snow', 'mountain', 'sand',
+  // Life and divine
+  'heart', 'skull',
   // Places and works
   'castle', 'temple', 'statue', 'city', 'building', 'gem',
   // Trade
@@ -46,7 +48,7 @@ const DRAWN_ICONS = new Set([
   // Records and knowledge
   'book', 'scroll', 'calendar', 'chart', 'flask',
   // Time controls
-  'pause', 'play', 'forward', 'step', 'snow',
+  'pause', 'play', 'forward', 'step',
   // Search
   'search',
   // Interface
@@ -103,11 +105,17 @@ const ALIASES: Record<string, string> = {
   ecosystem: 'leaf', nature: 'leaf', biome: 'leaf', forest: 'leaf', wildlife: 'lion',
   agriculture: 'farm', food: 'farm', grain: 'farm', harvest: 'farm',
   map: 'world', terrain: 'world', climate: 'sun',
+  ocean: 'world', water: 'water', shallow_water: 'water', rain: 'water',
+  mountain: 'mountain', mountains: 'mountain', elevation: 'mountain', relief: 'mountain',
+  sand: 'sand', beach: 'sand', desert: 'sun', savanna: 'sun',
+  skull: 'skull', corrupted: 'skull', death: 'skull', curse: 'skull',
+  heart: 'heart', heal: 'heart', health: 'heart', cure: 'heart',
+  wolf: 'wolf', bear: 'bear', deer: 'deer', boar: 'lion', mammoth: 'lion',
   disaster: 'fire', plague: 'warning', famine: 'warning', unrest: 'warning', alert: 'warning',
 
   // Data and interface
   statistics: 'chart', stats: 'chart', trend: 'chart', report: 'chart',
-  settings: 'gear', options: 'gear', power: 'lightning', divine: 'lightning',
+  settings: 'gear', options: 'gear', power: 'lightning', divine: 'crown',
   find: 'search', inspect: 'search', filter: 'menu', list: 'menu', dismiss: 'close'
 };
 

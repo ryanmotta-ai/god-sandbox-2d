@@ -601,6 +601,109 @@ export class PixelIcons {
         break;
       }
 
+      // ===================== POWERS & NATURE ICONS =====================
+      case 'heart':
+      case '💖': {
+        // Red pixel heart with lit highlight
+        this.rect(ctx, 3, 3, 4, 3, '#ef4444');
+        this.rect(ctx, 9, 3, 4, 3, '#ef4444');
+        this.rect(ctx, 2, 5, 12, 4, '#dc2626');
+        this.rect(ctx, 3, 9, 10, 2, '#dc2626');
+        this.rect(ctx, 5, 11, 6, 2, '#b91c1c');
+        this.rect(ctx, 7, 13, 2, 2, '#991b1b');
+        this.rect(ctx, 4, 4, 2, 2, '#fca5a5'); // Highlight
+        break;
+      }
+      case 'water':
+      case 'drop':
+      case '💧': {
+        // Water droplet
+        this.rect(ctx, 7, 1, 2, 2, '#7dd3fc');
+        this.rect(ctx, 6, 3, 4, 2, '#38bdf8');
+        this.rect(ctx, 5, 5, 6, 3, '#0284c7');
+        this.rect(ctx, 4, 8, 8, 4, '#0284c7');
+        this.rect(ctx, 5, 12, 6, 2, '#0369a1');
+        this.rect(ctx, 7, 14, 2, 1, '#075985');
+        this.rect(ctx, 6, 7, 2, 3, '#e0f2fe'); // Drop glint
+        break;
+      }
+      case 'mountain':
+      case 'mountains':
+      case '⛰':
+      case '⛰️':
+      case '🏔':
+      case '🏔️': {
+        // Twin mountain peaks with snow
+        this.rect(ctx, 7, 2, 2, 2, '#f8fafc'); // Peak snow
+        this.rect(ctx, 6, 4, 4, 2, '#e2e8f0');
+        this.rect(ctx, 5, 6, 6, 3, '#94a3b8');
+        this.rect(ctx, 3, 9, 10, 3, '#64748b');
+        this.rect(ctx, 1, 12, 14, 3, '#475569');
+        this.rect(ctx, 1, 15, 14, 1, '#334155');
+        this.rect(ctx, 2, 7, 2, 2, '#f8fafc'); // Secondary peak
+        this.rect(ctx, 2, 9, 3, 3, '#94a3b8');
+        break;
+      }
+      case 'skull':
+      case '💀': {
+        // Pixel skull for corrupted/dark powers
+        this.rect(ctx, 4, 2, 8, 6, '#e2e8f0');
+        this.rect(ctx, 3, 5, 10, 4, '#cbd5e1');
+        this.rect(ctx, 5, 9, 6, 4, '#94a3b8');
+        this.rect(ctx, 5, 5, 2, 2, '#0f172a'); // Eye sockets
+        this.rect(ctx, 9, 5, 2, 2, '#0f172a');
+        this.px(ctx, 7, 8, '#0f172a');           // Nose cavity
+        this.px(ctx, 6, 11, '#0f172a'); this.px(ctx, 9, 11, '#0f172a'); // Teeth
+        break;
+      }
+      case 'sand':
+      case '🏖':
+      case '🏖️': {
+        // Golden sand dune
+        this.rect(ctx, 6, 4, 4, 2, '#fde047');
+        this.rect(ctx, 4, 6, 8, 3, '#facc15');
+        this.rect(ctx, 2, 9, 12, 4, '#eab308');
+        this.rect(ctx, 1, 13, 14, 2, '#ca8a04');
+        this.px(ctx, 7, 5, '#fef08a');
+        break;
+      }
+      case 'wolf':
+      case '🐺': {
+        // Grey wolf head profile
+        this.rect(ctx, 4, 2, 2, 3, '#475569'); // Left ear
+        this.rect(ctx, 9, 2, 2, 3, '#475569'); // Right ear
+        this.rect(ctx, 4, 5, 7, 5, '#64748b'); // Head
+        this.rect(ctx, 3, 8, 9, 4, '#94a3b8'); // Muzzle & jaw
+        this.rect(ctx, 11, 9, 3, 2, '#334155'); // Nose
+        this.px(ctx, 6, 6, '#fef08a');          // Yellow eye
+        this.px(ctx, 8, 6, '#fef08a');
+        break;
+      }
+      case 'bear':
+      case '🐻': {
+        // Brown bear silhouette
+        this.rect(ctx, 3, 2, 3, 3, '#78350f'); // Ears
+        this.rect(ctx, 10, 2, 3, 3, '#78350f');
+        this.rect(ctx, 4, 4, 8, 6, '#92400e'); // Head
+        this.rect(ctx, 5, 8, 6, 5, '#b45309'); // Snout
+        this.rect(ctx, 7, 9, 2, 2, '#451a03'); // Nose
+        this.px(ctx, 5, 6, '#1e293b'); this.px(ctx, 10, 6, '#1e293b'); // Eyes
+        break;
+      }
+      case 'deer':
+      case '🦌': {
+        // Stag with golden antlers
+        this.rect(ctx, 3, 1, 1, 4, '#ca8a04'); // Antlers
+        this.rect(ctx, 2, 2, 3, 1, '#ca8a04');
+        this.rect(ctx, 12, 1, 1, 4, '#ca8a04');
+        this.rect(ctx, 11, 2, 3, 1, '#ca8a04');
+        this.rect(ctx, 5, 4, 6, 6, '#d97706'); // Head
+        this.rect(ctx, 6, 8, 4, 5, '#b45309'); // Muzzle
+        this.px(ctx, 7, 12, '#451a03');        // Nose
+        this.px(ctx, 6, 6, '#0f172a'); this.px(ctx, 9, 6, '#0f172a'); // Eyes
+        break;
+      }
+
       // ===================== INTERFACE =====================
       case 'menu':
       case '☰': {

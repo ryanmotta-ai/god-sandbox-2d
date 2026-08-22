@@ -1,4 +1,5 @@
 import { el, clear, button, badge, meter, hexAlpha, titleCase } from '../core/Dom';
+import { icon } from '../kit';
 import { SPECIES_DEFINITIONS, SpeciesType } from '../../entities/Species';
 import { TRAIT_DEFINITIONS, TraitId } from '../../entities/Traits';
 import { TERRAINS, TerrainType } from '../../world/Biomes';
@@ -11,10 +12,10 @@ import type { GameContext } from '../core/GameContext';
 type Tab = 'species' | 'traits' | 'terrain' | 'powers';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'species', label: 'Espécies', icon: '🧬' },
-  { id: 'traits', label: 'Características', icon: '✨' },
-  { id: 'terrain', label: 'Terreno', icon: '🗺️' },
-  { id: 'powers', label: 'Poderes Divinos', icon: '⚡' }
+  { id: 'species', label: 'Espécies', icon: 'people' },
+  { id: 'traits', label: 'Características', icon: 'crown' },
+  { id: 'terrain', label: 'Terreno', icon: 'world' },
+  { id: 'powers', label: 'Poderes Divinos', icon: 'lightning' }
 ];
 
 const SPECIES_LORE: Record<SpeciesType, string> = {
@@ -47,10 +48,10 @@ export class BestiaryScreen implements Screen {
     const layout = el('div', { class: 'screen-panel' }, [
       el('header', { class: 'screen-head' }, [
         el('div', {}, [
-          el('h2', { class: 'screen-title', text: '📖 Códice de Aethoria' }),
+          el('h2', { class: 'screen-title', text: 'Códice de Aethoria' }),
           el('p', { class: 'screen-sub', text: 'Tudo que vive, cresce, queima e pode ser invocado.' })
         ]),
-        button('Fechar', () => ctx.screens.back(), { icon: '✕', hint: 'Esc' })
+        button('Fechar', () => ctx.screens.back(), { icon: 'close', hint: 'Esc' })
       ]),
       this.tabsEl,
       this.bodyEl
@@ -75,7 +76,7 @@ export class BestiaryScreen implements Screen {
             }
           }
         }, [
-          el('span', { text: tab.icon }),
+          icon(tab.icon, { size: 16 }),
           el('span', { text: tab.label })
         ])
       );
@@ -252,7 +253,10 @@ export class BestiaryScreen implements Screen {
       this.bodyEl.appendChild(
         el('section', { class: 'panel' }, [
           el('header', { class: 'panel-head' }, [
-            el('h3', { class: 'panel-title', text: `${category.icon} ${category.label}` }),
+            el('div', { class: 'flex-row items-center gap-2' }, [
+              icon(category.icon, { size: 16 }),
+              el('h3', { class: 'panel-title', text: category.label })
+            ]),
             el('p', { class: 'panel-sub', text: `Shift + ${category.hotkey} · ${powers.length} poderes` })
           ]),
           el('div', { class: 'panel-body' }, [
@@ -270,11 +274,11 @@ export class BestiaryScreen implements Screen {
                     this.ctx.brush.setCategory(category.id);
                     this.ctx.brush.setPower(power.id);
                     this.ctx.screens.closeAll();
-                    this.ctx.toast(`${power.icon} ${power.name} equipado`, 'divine');
+                    this.ctx.toast(`${power.name} equipado`, 'divine');
                   }
                 }
               }, [
-                el('span', { class: 'power-codex-icon', text: power.icon }),
+                icon(power.icon, { size: 16, class: 'power-codex-icon' }),
                 el('div', {}, [
                   el('span', { class: 'power-codex-name', text: power.name }),
                   el('span', { class: 'power-codex-desc', text: power.description })

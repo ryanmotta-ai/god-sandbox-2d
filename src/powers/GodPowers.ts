@@ -1,4 +1,4 @@
-import { PowerDefinition, BrushCategory } from './BrushManager';
+import { PowerDefinition } from './BrushManager';
 import { TileMap } from '../world/TileMap';
 import { TerrainType } from '../world/Biomes';
 import { Entity } from '../entities/Entity';
@@ -10,66 +10,58 @@ import { ParticleManager } from '../renderer/Particles';
 import { sound } from '../core/SoundSynth';
 import { rng } from '../core/Random';
 import { SimplePathfinder } from '../ai/Pathfinding';
+import { Camera } from '../renderer/Camera';
 
 export const ALL_POWERS: PowerDefinition[] = [
-  // TERRENO
-  { id: 'add_land', name: 'Criar Terra', category: 'terrain', icon: '🌱', description: 'Cria solo fértil habitável' },
-  { id: 'remove_land', name: 'Remover Terra', category: 'terrain', icon: '🌊', description: 'Transforma terra em oceano profundo' },
-  { id: 'raise_land', name: 'Elevar Terreno', category: 'terrain', icon: '⛰️', description: 'Aumenta a altitude do solo' },
-  { id: 'lower_land', name: 'Rebaixar Terreno', category: 'terrain', icon: '🕳️', description: 'Reduz a altitude do solo' },
-  { id: 'mountains', name: 'Montanhas', category: 'terrain', icon: '🏔️', description: 'Ergue cordilheiras montanhosas' },
-  { id: 'shallow_water', name: 'Águas Rasas', category: 'terrain', icon: '💧', description: 'Cria lagoas e rios navegáveis' },
-  { id: 'lava', name: 'Rio de Lava', category: 'terrain', icon: '🌋', description: 'Derrama lava escaldante' },
-  { id: 'build_road', name: 'Pavimentar Estrada', category: 'terrain', icon: '🛣️', description: 'Constrói e melhora estradas e pontes' },
-  { id: 'remove_road', name: 'Apagar Estrada', category: 'terrain', icon: '🧹', description: 'Remove a pavimentação da estrada' },
+  // TERRENO & ALTIMETRIA
+  { id: 'raise_land', name: 'Elevar Terreno', category: 'terrain', icon: 'mountain', description: 'Aumenta a altitude do solo' },
+  { id: 'lower_land', name: 'Rebaixar Terreno', category: 'terrain', icon: 'pickaxe', description: 'Reduz a altitude do solo' },
+  { id: 'add_land', name: 'Criar Solo Fértil', category: 'terrain', icon: 'leaf', description: 'Cria solo arável e habitável' },
+  { id: 'remove_land', name: 'Oceano Profundo', category: 'terrain', icon: 'world', description: 'Transforma terreno em oceano profundo' },
+  { id: 'shallow_water', name: 'Águas Rasas', category: 'terrain', icon: 'water', description: 'Cria lagoas, rios e litorais' },
+  { id: 'biome_sand', name: 'Areia & Praias', category: 'terrain', icon: 'sand', description: 'Pinta dunas e faixas costeiras de areia' },
+  { id: 'mountains', name: 'Montanhas', category: 'terrain', icon: 'mountain', description: 'Ergue cordilheiras rochosas intransponíveis' },
+  { id: 'lava', name: 'Rio de Lava', category: 'terrain', icon: 'fire', description: 'Derrama fluxo vulcânico incandescente' },
+  { id: 'build_road', name: 'Pavimentar Estrada', category: 'terrain', icon: 'route', description: 'Constrói e melhora estradas' },
+  { id: 'remove_road', name: 'Demolir Estrada', category: 'terrain', icon: 'close', description: 'Remove a pavimentação de estradas' },
 
-  // NATUREZA
-  { id: 'trees', name: 'Floresta Densa', category: 'nature', icon: '🌲', description: 'Planta árvores e fontes de madeira' },
-  { id: 'fertile_soil', name: 'Grama Fértil', category: 'nature', icon: '☘️', description: 'Aumenta a fertilidade do solo' },
-  { id: 'spawn_ore', name: 'Minério de Ouro/Ferro', category: 'nature', icon: '💎', description: 'Deposita jazidas minerais' },
-  { id: 'rain', name: 'Chuva Abençoada', category: 'nature', icon: '🌧️', description: 'Apaga incêndios e rega plantações' },
-  { id: 'snow', name: 'Nevada', category: 'nature', icon: '❄️', description: 'Congela o terreno e a vegetação' },
+  // NATUREZA & BIOMAS
+  { id: 'fertile_soil', name: 'Pastagem Fértil', category: 'nature', icon: 'farm', description: 'Pinta campos de grama de alta fertilidade' },
+  { id: 'trees', name: 'Floresta Densa', category: 'nature', icon: 'leaf', description: 'Planta árvores e fontes de madeira' },
+  { id: 'biome_desert', name: 'Savana / Deserto', category: 'nature', icon: 'sun', description: 'Pinta savanas áridas e vegetação seca' },
+  { id: 'biome_swamp', name: 'Pântano', category: 'nature', icon: 'leaf', description: 'Pinta pântanos e mangues úmidos' },
+  { id: 'biome_tundra', name: 'Tundra Gelada', category: 'nature', icon: 'snow', description: 'Pinta tundras polares congeladas' },
+  { id: 'biome_arcane', name: 'Bosque Arcano', category: 'nature', icon: 'gem', description: 'Pinta florestas místicas mágicas' },
+  { id: 'biome_corrupted', name: 'Terras Corrompidas', category: 'nature', icon: 'skull', description: 'Pinta solos sombrios e amaldiçoados' },
+  { id: 'spawn_ore', name: 'Jazida Mineral', category: 'nature', icon: 'gem', description: 'Deposita jazidas de Ouro e Ferro' },
+  { id: 'rain', name: 'Chuva Abençoada', category: 'nature', icon: 'water', description: 'Apaga incêndios e rega plantações' },
 
-  // BIOMAS
-  { id: 'biome_forest', name: 'Bioma de Floresta', category: 'biomes', icon: '🌳', description: 'Pinta florestas temperadas' },
-  { id: 'biome_desert', name: 'Bioma de Deserto', category: 'biomes', icon: '🏜️', description: 'Pinta savanas áridas e areias' },
-  { id: 'biome_swamp', name: 'Bioma de Pântano', category: 'biomes', icon: '🐊', description: 'Pinta pântanos e mofos' },
-  { id: 'biome_tundra', name: 'Bioma de Tundra', category: 'biomes', icon: '🧊', description: 'Pinta tundras geladas' },
-  { id: 'biome_arcane', name: 'Bosque Arcano', category: 'biomes', icon: '🔮', description: 'Pinta florestas místicas mágicas' },
-  { id: 'biome_corrupted', name: 'Terras Corrompidas', category: 'biomes', icon: '💀', description: 'Pinta solos sombrios e malditos' },
+  // VIDA & FERAS
+  { id: 'spawn_human', name: 'Colono Humano', category: 'life', icon: 'person', description: 'Gera cidadãos capazes de fundar reinos e cidades' },
+  { id: 'spawn_deer', name: 'Veado Selvagem', category: 'life', icon: 'deer', description: 'Herbívoro pacífico e ágil' },
+  { id: 'spawn_wolf', name: 'Lobo Selvagem', category: 'life', icon: 'wolf', description: 'Predador caçador em matilhas' },
+  { id: 'spawn_bear', name: 'Urso Selvagem', category: 'life', icon: 'bear', description: 'Fera territorial solitária e robusta' },
+  { id: 'spawn_boar', name: 'Javali Selvagem', category: 'life', icon: 'lion', description: 'Animal agressivo das matas' },
+  { id: 'spawn_eagle', name: 'Águia Imperial', category: 'life', icon: 'eagle', description: 'Predador voador veloz dos cumes' },
+  { id: 'spawn_mammoth', name: 'Mamute Ancião', category: 'life', icon: 'lion', description: 'Gigante ancião da tundra gelada' },
+  { id: 'spawn_dragon', name: 'Dragão Ancião', category: 'life', icon: 'dragon', description: 'Monstro Chefe lendário cuspidor de fogo' },
 
-  // VIDA
-  { id: 'spawn_lumini', name: 'Gerar Lumini', category: 'life', icon: '🟡', description: 'Humanoides versáteis e diplomáticos' },
-  { id: 'spawn_sylvanii', name: 'Gerar Sylvanii', category: 'life', icon: '🟢', description: 'Elfos protetores das florestas' },
-  { id: 'spawn_stonekin', name: 'Gerar Stonekin', category: 'life', icon: '⚪', description: 'Anões mineradores das montanhas' },
-  { id: 'spawn_emberkin', name: 'Gerar Emberkin', category: 'life', icon: '🔴', description: 'Conquistadores nascidos das chamas' },
-  { id: 'spawn_deer', name: 'Gerar Veado', category: 'life', icon: '🦌', description: 'Cervo selvagem pacífico' },
-  { id: 'spawn_wolf', name: 'Gerar Lobo', category: 'life', icon: '🐺', description: 'Predador caçador em matilha' },
-  { id: 'spawn_bear', name: 'Gerar Urso', category: 'life', icon: '🐻', description: 'Urso territorial solitário' },
-  { id: 'spawn_dragon', name: 'Gerar Dragão Ancião', category: 'life', icon: '🐉', description: 'Monstro Chefe lendário cuspidor de fogo' },
-  { id: 'spawn_boar', name: 'Gerar Javali', category: 'life', icon: '🐗', description: 'Javali selvagem florestal agressivo' },
-  { id: 'spawn_eagle', name: 'Gerar Águia', category: 'life', icon: '🦅', description: 'Predador voador dos cumes' },
-  { id: 'spawn_mammoth', name: 'Gerar Mamute', category: 'life', icon: '🦣', description: 'Gigante ancião da tundra gelada' },
+  // MILAGRES DIVINOS
+  { id: 'heal', name: 'Cura Divina', category: 'divine', icon: 'heart', description: 'Restaura a vida total das criaturas' },
+  { id: 'bless', name: 'Bênção Celestial', category: 'divine', icon: 'sun', description: 'Concede a bênção divina (+25% HP máx)' },
+  { id: 'curse', name: 'Maldição Sombria', category: 'divine', icon: 'moon', description: 'Amaldiçoa com fraqueza (-30% HP máx)' },
+  { id: 'inspire_genius', name: 'Inspiração Genial', category: 'divine', icon: 'flask', description: 'Concede intelecto superior e trabalho acelerado' },
+  { id: 'peace_touch', name: 'Toque de Paz', category: 'divine', icon: 'handshake', description: 'Concede índole pacifista que evita combates' },
+  { id: 'make_immortal', name: 'Imortalidade', category: 'divine', icon: 'crown', description: 'Concede vida eterna sem envelhecimento' },
+  { id: 'add_giant', name: 'Força Titânica', category: 'divine', icon: 'shield', description: 'Transforma em gigante com super força física' },
 
-  // MILAGRES
-  { id: 'heal', name: 'Cura Divina', category: 'divine', icon: '💖', description: 'Restaura a vida total das criaturas' },
-  { id: 'bless', name: 'Bênção Celestial', category: 'divine', icon: '✨', description: 'Concede a bênção divina (+25% HP)' },
-  { id: 'curse', name: 'Maldição Sombria', category: 'divine', icon: '👁️', description: 'Amaldiçoa com fraqueza' },
-  { id: 'make_immortal', name: 'Imortalidade', category: 'divine', icon: '👑', description: 'Concede vida eterna sem envelhecimento' },
-  { id: 'add_giant', name: 'Força Titânica', category: 'divine', icon: '💪', description: 'Transforma em gigante com super força' },
-
-  // DESASTRES
-  { id: 'lightning', name: 'Raio Divino', category: 'destruction', icon: '⚡', description: 'Atinge o alvo com relâmpago' },
-  { id: 'wildfire', name: 'Incêndio', category: 'destruction', icon: '🔥', description: 'Inicia fogo alastrante' },
-  { id: 'earthquake', name: 'Terremoto', category: 'destruction', icon: '🌋', description: 'Fratura e destrói o terreno' },
-  { id: 'meteorite', name: 'Meteoro Cataclísmico', category: 'destruction', icon: '☄️', description: 'Impacto devastador de meteoro' },
-  { id: 'plague', name: 'Vírus da Peste', category: 'destruction', icon: '☣️', description: 'Solta praga contagiosa entre o povo' },
-
-  // INSPEÇÃO
-  { id: 'inspect_select', name: 'Modo Inspeção', category: 'inspect', icon: '🔍', description: 'Clique em qualquer alvo para examinar detalhes' }
+  // DESASTRES & CATACLISMOS
+  { id: 'lightning', name: 'Raio Divino', category: 'destruction', icon: 'lightning', description: 'Atinge o alvo com relâmpago de alta voltagem' },
+  { id: 'wildfire', name: 'Incêndio', category: 'destruction', icon: 'fire', description: 'Inicia foco de fogo que se alastra na vegetação' },
+  { id: 'earthquake', name: 'Terremoto', category: 'destruction', icon: 'pickaxe', description: 'Fratura e destrói o relevo e construções' },
+  { id: 'meteorite', name: 'Meteoro Cataclísmico', category: 'destruction', icon: 'fire', description: 'Impacto devastador de meteoro com cratera de magma' },
+  { id: 'plague', name: 'Praga Contagiosa', category: 'destruction', icon: 'warning', description: 'Dispersa peste epidêmica entre a população' }
 ];
-
-import { Camera } from '../renderer/Camera';
 
 export class PowerExecutor {
   public static executePower(
@@ -109,6 +101,9 @@ export class PowerExecutor {
       case 'shallow_water':
         tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SHALLOW_WATER; t.height = 0.3; });
         break;
+      case 'biome_sand':
+        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SAND; t.height = 0.45; });
+        break;
       case 'lava':
         tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.LAVA; t.height = 0.8; t.isOnFire = true; });
         break;
@@ -125,8 +120,9 @@ export class PowerExecutor {
         });
         break;
 
-      // NATURE
+      // NATURE & BIOMES
       case 'trees':
+      case 'biome_forest':
         tileMap.applyBrush(tx, ty, radius, t => {
           if (!t.type.includes('ocean') && t.type !== TerrainType.MOUNTAIN) {
             t.type = TerrainType.FOREST;
@@ -137,6 +133,24 @@ export class PowerExecutor {
         break;
       case 'fertile_soil':
         tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.GRASS; t.fertility = 1.0; });
+        break;
+      case 'biome_desert':
+        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SAVANNA; });
+        break;
+      case 'biome_swamp':
+        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SWAMP; });
+        break;
+      case 'biome_tundra':
+      case 'snow':
+        tileMap.applyBrush(tx, ty, radius, t => {
+          if (!t.type.includes('ocean')) t.type = TerrainType.TUNDRA;
+        });
+        break;
+      case 'biome_arcane':
+        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.ARCANE; });
+        break;
+      case 'biome_corrupted':
+        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.CORRUPTED; });
         break;
       case 'spawn_ore':
         tileMap.applyBrush(tx, ty, radius, t => {
@@ -153,19 +167,6 @@ export class PowerExecutor {
           particles.spawnParticle(t.x, t.y, '#38bdf8', 0, 0.5, 0.4);
         });
         break;
-      case 'snow':
-        tileMap.applyBrush(tx, ty, radius, t => {
-          if (!t.type.includes('ocean')) t.type = TerrainType.SNOW;
-        });
-        break;
-
-      // BIOMES
-      case 'biome_forest': tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.FOREST; }); break;
-      case 'biome_desert': tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SAVANNA; }); break;
-      case 'biome_swamp': tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SWAMP; }); break;
-      case 'biome_tundra': tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.TUNDRA; }); break;
-      case 'biome_arcane': tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.ARCANE; }); break;
-      case 'biome_corrupted': tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.CORRUPTED; }); break;
 
       // LIFE SPAWN
       case 'spawn_human':
@@ -173,8 +174,6 @@ export class PowerExecutor {
       case 'spawn_sylvanii':
       case 'spawn_stonekin':
       case 'spawn_emberkin': {
-        // The four old race brushes all place a person now. The retired ids are
-        // still accepted so a hotbar saved before the change keeps working.
         const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
         if (safe) spawnEntityFn(SpeciesType.HUMAN, safe.x, safe.y);
         break;
@@ -232,6 +231,24 @@ export class PowerExecutor {
       case 'curse': {
         const targets = spatialHash.queryRadius(tx, ty, radius);
         for (const e of targets) e.addTrait(TraitId.CURSED);
+        break;
+      }
+      case 'inspire_genius': {
+        sound.playMagic();
+        const targets = spatialHash.queryRadius(tx, ty, radius);
+        for (const e of targets) {
+          e.addTrait(TraitId.GENIUS);
+          particles.spawnParticle(e.x, e.y, '#8b5cf6', 0, -0.5, 0.5);
+        }
+        break;
+      }
+      case 'peace_touch': {
+        sound.playMagic();
+        const targets = spatialHash.queryRadius(tx, ty, radius);
+        for (const e of targets) {
+          e.addTrait(TraitId.PACIFIST);
+          particles.spawnParticle(e.x, e.y, '#38bdf8', 0, -0.5, 0.5);
+        }
         break;
       }
       case 'make_immortal': {

@@ -1179,6 +1179,7 @@ export class CivilizationEngine {
     if (type === 'harbor') {
       score += population >= 18 ? 150 : 110;
       if (kingdom?.culture.mercantilism && kingdom.culture.mercantilism > 0.58) score += 28;
+      if (city.architecturalProfile?.coastal || world.tileMap.isCoastalLand(Math.floor(city.x), Math.floor(city.y))) score += 40;
     }
     if (type === 'port') {
       if (!city.hasBuilding('harbor')) return 0;
@@ -1670,13 +1671,20 @@ export class CivilizationEngine {
     const hasCoastalCity = [...kingdom.cityIds].some(id => {
       const c = world.cities.get(id);
       if (!c) return false;
+      if (c.architecturalProfile?.coastal) return true;
+      if (world.tileMap.isCoastalLand(Math.floor(c.x), Math.floor(c.y))) return true;
       for (const b of c.buildings.values()) {
         if (b.type === 'port' || b.type === 'harbor') return true;
       }
-      return c.buildingsOfCategory('commerce').some(b => {
-        const nb = world.tileMap.getNeighbors(b.x, b.y, true);
-        return nb.some(n => TERRAINS[n.type].isWater);
-      });
+      const radius = this.citySurveyRadius(c);
+      const minX = Math.max(0, Math.floor(c.x - radius)), maxX = Math.min(world.tileMap.width - 1, Math.ceil(c.x + radius));
+      const minY = Math.max(0, Math.floor(c.y - radius)), maxY = Math.min(world.tileMap.height - 1, Math.ceil(c.y + radius));
+      for (let x = minX; x <= maxX; x += 2) {
+        for (let y = minY; y <= maxY; y += 2) {
+          if (world.tileMap.isCoastalLand(x, y)) return true;
+        }
+      }
+      return false;
     });
 
     // How much of what this realm already knows is sitting idle for want of
@@ -1715,9 +1723,16 @@ export class CivilizationEngine {
         if (tech.id === 'masonry') score += 14;
       }
 
-      // Coastal realms chase the sea.
-      if (hasCoastalCity && tech.unlocks.features?.includes('maritime_trade')) score += 12;
-      if (hasCoastalCity && tech.id === 'sailing') score += 10;
+      // Coastal realms chase the sea and the technologies needed to reach it.
+      if (hasCoastalCity) {
+        if (tech.id === 'sailing') score += 32;
+        if (tech.unlocks.features?.includes('maritime_trade')) score += 24;
+        if (!kingdom.research.knows('sailing')) {
+          if (tech.id === 'mathematics') score += 18;
+          if (tech.id === 'pottery') score += 14;
+          if (tech.id === 'writing') score += 10;
+        }
+      }
 
       // A realm already sitting on technology it cannot operate should consolidate
       // rather than read further ahead. Chasing the next era while your factories
@@ -3647,6 +3662,8 @@ export class CivilizationEngine {
       city.population -= settlers;
       const provisions = city.stock.take('food', 60);
       const timber = city.stock.take('wood', 40);
+      const stoneSurplus = Math.max(0, city.stock.get('stone') - 20);
+      const stone = stoneSurplus > 0 ? city.stock.take('stone', Math.min(30, Math.floor(stoneSurplus * 0.45))) : 0;
 
       const colony = new City(
         nextId('city'),
@@ -3665,6 +3682,10 @@ export class CivilizationEngine {
       city.ledger.recordExported('wood', timber);
       colony.ledger.recordImported('food', colony.stock.add('food', provisions));
       colony.ledger.recordImported('wood', colony.stock.add('wood', timber));
+      if (stone > 0) {
+        city.ledger.recordExported('stone', stone);
+        colony.ledger.recordImported('stone', colony.stock.add('stone', stone));
+      }
       colony.updateTier();
 
       world.cities.set(colony.id, colony);
@@ -4312,7 +4333,11 @@ export class CivilizationEngine {
     if (landPathComputed.length > 1 && seaDist === Infinity) return 'overland';
     if (landPathComputed.length <= 1 && seaDist < Infinity) return 'maritime';
     if (landPathComputed.length <= 1 && seaDist === Infinity) return null;
-    return seaDist < landDist * 0.72 ? 'maritime' : 'overland';
+
+    // Both land and sea connections exist. If both cities have built ports,
+    // maritime trade provides higher cargo volume and lower transport cost per tile.
+    // Prefer maritime unless the sea route is significantly longer (> 35% longer than land).
+    return seaDist <= landDist * 1.35 ? 'maritime' : 'overland';
   }
 
   private findCityPortWaterTile(city: City, tileMap: TileMap): { x: number; y: number } | null {
@@ -4322,7 +4347,11 @@ export class CivilizationEngine {
     for (const facility of facilities) {
       const water = tileMap.getNeighbors(facility.x, facility.y, true)
         .filter(tile => TERRAINS[tile.type].isWater)
-        .sort((a, b) => (a.type === TerrainType.DEEP_OCEAN ? -1 : 0) - (b.type === TerrainType.DEEP_OCEAN ? -1 : 0));
+        .sort((a, b) => {
+          const aDeep = a.type === TerrainType.DEEP_OCEAN ? 1 : 0;
+          const bDeep = b.type === TerrainType.DEEP_OCEAN ? 1 : 0;
+          return bDeep - aDeep;
+        });
       if (water.length) return { x: water[0].x + 0.5, y: water[0].y + 0.5 };
     }
     return null;

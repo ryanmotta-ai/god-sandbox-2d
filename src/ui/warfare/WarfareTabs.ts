@@ -28,6 +28,31 @@ export interface WarfareScreenHost {
 const pct = (value: number): string => `${Math.round(value)}%`;
 const statusForCity = (status: string) => status === 'besieged' ? 'critical' : status === 'threatened' ? 'warning' : status === 'captured' ? 'neutral' : 'positive';
 
+export const TRAIT_LABELS: Record<string, string> = {
+  tactician: 'Estrategista (+25% Dano, +Cerco)',
+  valiant: 'Valente (+30% Moral/HP)',
+  fortifier: 'Fortificador (+40% Defesa)',
+  ruthless: 'Implacável (+35% Dano, Desgaste)'
+};
+
+export const GOAL_LABEL: Record<string, string> = {
+  conquest: 'Conquista Territorial',
+  defense: 'Defesa da Soberania',
+  subjugation: 'Subjugação / Vassalagem',
+  colony: 'Anexação Colonial',
+  resources: 'Guerra por Recursos',
+  independence: 'Guerra de Independência'
+};
+
+export const ARMY_STATE_LABEL: Record<string, string> = {
+  mustering: 'Convocando e armando',
+  marching: 'Em marcha de campanha',
+  besieging: 'Em cerco ativo',
+  defending: 'Em defesa da pátria',
+  retreating: 'Em retirada estratégica',
+  garrisoned: 'Em guarnição de paz'
+};
+
 function realmLink(realm: RealmRefView, host: WarfareScreenHost, qualifier?: string): HTMLElement {
   return objectLink({
     kind: 'kingdom', id: realm.id, name: realm.name, accent: realm.color,
@@ -143,11 +168,69 @@ export function buildActiveWars(snapshot: WarfareUISnapshot, host: WarfareScreen
 
 export function buildArmies(snapshot: WarfareUISnapshot, host: WarfareScreenHost, realmId: string | null, query: string): Child[] {
   const q = query.trim().toLocaleLowerCase('en');
+  const armies = (snapshot.armies ?? []).filter(army =>
+    (!realmId || army.kingdomId === realmId) && (!q || army.name.toLocaleLowerCase('en').includes(q))
+  );
+  const mercenaries = (snapshot.mercenaries ?? []).filter(merc =>
+    !realmId || merc.employerKingdomId === realmId || merc.employerKingdomId === null
+  );
   const forces = snapshot.forces.filter(force =>
     (!realmId || force.kingdom.id === realmId) && (!q || `${force.kingdom.name} ${force.location} ${force.status}`.toLocaleLowerCase('en').includes(q))
   );
+
   return [
-    panel({ title: 'Forças de campo derivadas', subtitle: 'Combatentes vivos reais agrupados por reino; não existe objeto de Exército', icon: 'army', padded: false }, [
+    panel({ title: 'Regimentos e Exércitos Formados', subtitle: 'Unidades militares organizadas sob comando de generais e objetivos estratégicos', icon: 'army', padded: false }, [
+      table({
+        rows: armies, rowKey: a => a.id, sortBy: 'soldiers',
+        columns: [
+          { key: 'name', header: 'Regimento', cell: a => {
+            const kingdom = snapshot.realms.find(r => r.kingdom.id === a.kingdomId)?.kingdom;
+            return el('div', {}, [
+              el('strong', { text: a.name }),
+              kingdom ? el('span', { style: `color:${kingdom.color};font-size:11px;margin-left:6px`, text: `(${kingdom.name})` }) : el('span', {})
+            ]);
+          }, width: 'minmax(200px, 1.4fr)' },
+          { key: 'commander', header: 'Comandante / General', cell: a => {
+            const cmd = snapshot.commanders?.find(c => c.id === a.commanderId);
+            const trait = a.commanderTrait ? TRAIT_LABELS[a.commanderTrait] : 'Sem general';
+            return el('div', {}, [
+              el('span', { text: cmd?.name ?? (a.isMercenary ? 'Capitão Mercenário' : 'Oficial de Campo') }),
+              el('div', { style: 'font-size:10px;color:#94a3b8', text: trait })
+            ]);
+          } },
+          { key: 'state', header: 'Estado de Campanha', cell: a => badge(ARMY_STATE_LABEL[a.state] ?? a.state, { status: a.state === 'besieging' || a.state === 'marching' ? 'critical' : a.state === 'defending' ? 'warning' : 'neutral', size: 'sm' }) },
+          { key: 'soldiers', header: 'Efetivo', align: 'right', cell: a => a.isMercenary ? `${a.mercenaryCompanyId ? snapshot.mercenaries.find(m => m.id === a.mercenaryCompanyId)?.size ?? 10 : 10} merc.` : `${a.soldierIds.size} soldados`, sortValue: a => a.soldierIds.size },
+          { key: 'readiness', header: 'Prontidão', align: 'right', cell: a => formatPercent(a.readiness), sortValue: a => a.readiness },
+          { key: 'morale', header: 'Moral', align: 'right', cell: a => formatPercent(a.morale), sortValue: a => a.morale }
+        ],
+        empty: emptyState({ icon: 'army', title: 'Nenhum regimento formado', hint: 'Os reinos formam regimentos a partir de quartéis quando convocam soldados para a guerra.' })
+      })
+    ]),
+
+    mercenaries.length ? panel({ title: 'Companhias Mercenárias', subtitle: 'Bandos veteranos contratáveis com ouro do tesouro nacional', icon: 'swords', padded: false }, [
+      table({
+        rows: mercenaries, rowKey: m => m.id,
+        columns: [
+          { key: 'name', header: 'Companhia', cell: m => el('div', {}, [
+            el('strong', { text: m.name }),
+            el('div', { style: 'font-size:11px;color:#94a3b8', text: `${m.captainName} · ${TRAIT_LABELS[m.captainTrait]}` })
+          ]), width: 'minmax(220px, 1.4fr)' },
+          { key: 'size', header: 'Veteranos', align: 'right', cell: m => `${m.size} combatentes` },
+          { key: 'cost', header: 'Custo de Contratação', align: 'right', cell: m => `${m.hiringCost} ouro` },
+          { key: 'fee', header: 'Taxa Anual', align: 'right', cell: m => `${m.annualFee} ouro/ano` },
+          { key: 'status', header: 'Situação', cell: m => {
+            if (m.employerKingdomId) {
+              const employer = snapshot.realms.find(r => r.kingdom.id === m.employerKingdomId)?.kingdom;
+              return badge(`A serviço de ${employer?.name ?? 'Reino'}`, { color: employer?.color ?? '#f59e0b', size: 'sm' });
+            }
+            return badge('Disponível para contratação', { status: 'positive', size: 'sm' });
+          } }
+        ],
+        empty: emptyState({ icon: 'swords', title: 'Nenhuma companhia mercenária no momento', hint: 'Companhias mercenárias viajam pelas terras e aparecem periodicamente.' })
+      })
+    ]) : null,
+
+    panel({ title: 'Forças de Campo em Operação', subtitle: 'Soldados e combatentes vivos no terreno', icon: 'army', padded: false }, [
       table({
         rows: forces, rowKey: force => force.id, sortBy: 'strength', onRowClick: force => host.followForce(force),
         columns: [
@@ -286,6 +369,10 @@ export function buildWarDossier(war: WarView, host: WarfareScreenHost): Child[] 
       rowList([
         statRow({ label: 'Atacante', value: realmLink(war.attacker, host) }),
         statRow({ label: 'Defensor', value: realmLink(war.defender, host) }),
+        statRow({
+          label: 'Objetivo de Guerra',
+          value: war.record.goal ? `${GOAL_LABEL[war.record.goal.kind] ?? war.record.goal.kind} (${Math.round((war.record.goal.progress ?? 0) * 100)}% concluído)` : 'Conquista Territorial'
+        }),
         statRow({ label: 'Motivo da guerra', value: war.record.reason }),
         statRow({ label: 'Início', value: `Ano ${war.record.startYear}` }),
         statRow({ label: 'Eventos letais de combate', value: `${war.record.battles}`, tooltip: { title: 'Contador de batalhas armazenadas', description: 'O sistema de combate incrementa isto para um evento letal individual; não é uma Batalha nomeada persistida.' } }),
@@ -308,9 +395,19 @@ export function buildWarDossier(war: WarView, host: WarfareScreenHost): Child[] 
           { key: 'weariness', header: 'Desgaste de guerra', align: 'right', cell: row => pct(row.weariness) }
         ]
       })]),
+      (war.record.attackerAllies?.length || war.record.defenderAllies?.length) ? section('Coalizão e Alianças Automáticas', [
+        war.record.attackerAllies?.length ? badgeRow([
+          badge(`Aliados do Atacante:`, { size: 'sm', variant: 'outline' }),
+          ...war.record.attackerAllies.map(id => objectLink({ kind: 'kingdom', id, name: id }, { onOpen: () => host.openRealm(id) }))
+        ]) : null,
+        war.record.defenderAllies?.length ? badgeRow([
+          badge(`Aliados Defensores:`, { size: 'sm', variant: 'outline' }),
+          ...war.record.defenderAllies.map(id => objectLink({ kind: 'kingdom', id, name: id }, { onOpen: () => host.openRealm(id) }))
+        ]) : null
+      ]) : null,
       war.allies.length ? section('Intervenções aliadas confirmadas', [badgeRow(war.allies.map(ally =>
         objectLink({ kind: 'war', id: ally.linkedWarId, name: ally.kingdom.name, accent: ally.kingdom.color, qualifier: `apoia ${ally.supporting}` }, { variant: 'chip', onOpen: () => host.openWar(ally.linkedWarId) })
-      ))], { hint: 'Cada aliado tem seu próprio Registro de Guerra bilateral; alianças não entram automaticamente.' }) : null
+      ))], { hint: 'Alianças defensivas e ofensivas ingressam na guerra em suporte estratégico.' }) : null
     ]),
     panel({ title: 'Território e cidades', subtitle: 'Delta de território é derivado de cidades capturadas ainda mantidas', icon: 'city' }, [
       statGrid([
