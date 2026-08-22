@@ -1,0 +1,524 @@
+<title>Worked-Out Ground</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+
+<style>
+  :root {
+    --ground: #e8ecf1;
+    --sheet: #f4f7fa;
+    --ink: #111821;
+    --ink-soft: #4a5866;
+    --ink-faint: #7b8896;
+    --rule: #c3ccd6;
+    --rule-soft: #d9e0e8;
+
+    --stone: #58697b;
+    --stone-deep: #667889;
+    --tower: #16212c;
+    --gate: #b3702c;
+    --water: #3d6a87;
+    --grass: #86a06d;
+    --forest: #4f6b48;
+    --built: #9aa7b4;
+    --ruin: #a2624f;
+
+    --good: #3f7a53;
+    --warn: #a9762a;
+    --bad: #9c4331;
+
+    --measure: 66ch;
+    --sheet-shadow: 0 1px 2px rgba(17, 24, 33, .06), 0 8px 28px rgba(17, 24, 33, .07);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e131a;
+      --sheet: #161d26;
+      --ink: #dfe7f0;
+      --ink-soft: #9dabba;
+      --ink-faint: #6d7c8b;
+      --rule: #2c3742;
+      --rule-soft: #222b35;
+
+      --stone: #8598ac;
+      --stone-deep: #6f8296;
+      --tower: #eaf1f8;
+      --gate: #d8933f;
+      --water: #4b7d9c;
+      --grass: #6a8455;
+      --forest: #3d5638;
+      --built: #596775;
+      --ruin: #c07a63;
+
+      --good: #6aa77f;
+      --warn: #d0a24f;
+      --bad: #cf7259;
+      --sheet-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 32px rgba(0, 0, 0, .35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0e131a;
+    --sheet: #161d26;
+    --ink: #dfe7f0;
+    --ink-soft: #9dabba;
+    --ink-faint: #6d7c8b;
+    --rule: #2c3742;
+    --rule-soft: #222b35;
+
+    --stone: #8598ac;
+    --stone-deep: #6f8296;
+    --tower: #eaf1f8;
+    --gate: #d8933f;
+    --water: #4b7d9c;
+    --grass: #6a8455;
+    --forest: #3d5638;
+    --built: #596775;
+    --ruin: #c07a63;
+
+    --good: #6aa77f;
+    --warn: #d0a24f;
+    --bad: #cf7259;
+    --sheet-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 32px rgba(0, 0, 0, .35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .label {
+    font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: .13em;
+    font-weight: 600;
+    font-size: .78rem;
+    color: var(--ink-faint);
+  }
+
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: clamp(1.6rem, 4vw, 3.5rem) clamp(1.1rem, 3vw, 2rem) 5rem; }
+
+  header.sheet-head { border-top: 3px solid var(--ink); padding-top: 1.1rem; display: grid; gap: 1.3rem; }
+  .head-meta { display: flex; flex-wrap: wrap; gap: .5rem 1.6rem; align-items: baseline; }
+
+  h1 {
+    font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    font-weight: 600;
+    font-size: clamp(2.5rem, 7vw, 4.4rem);
+    line-height: .95;
+    margin: 0;
+    text-wrap: balance;
+    text-transform: uppercase;
+  }
+
+  .standfirst { max-width: var(--measure); font-size: 1.09rem; color: var(--ink-soft); margin: 0; }
+  .standfirst strong { color: var(--ink); font-weight: 600; }
+
+  section { margin-top: 3.5rem; }
+
+  h2 {
+    font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font-weight: 600;
+    font-size: 1.5rem;
+    margin: 0 0 .3rem;
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+  }
+
+  h2 .label { flex: none; }
+  .lede { max-width: var(--measure); color: var(--ink-soft); margin: 1rem 0 0; }
+
+  /* ---------- the plan ---------- */
+
+  .plan {
+    margin-top: 1.8rem;
+    background: var(--sheet);
+    border: 1px solid var(--rule);
+    box-shadow: var(--sheet-shadow);
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(240px, 1fr);
+  }
+
+  @media (max-width: 780px) { .plan { grid-template-columns: 1fr; } }
+
+  .canvas-hold { padding: 1rem; display: grid; place-items: center; min-width: 0; }
+  canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+
+  .plan-side { border-left: 1px solid var(--rule-soft); padding: 1.1rem 1.15rem 1.2rem; display: grid; gap: .9rem; align-content: start; }
+  @media (max-width: 780px) { .plan-side { border-left: 0; border-top: 1px solid var(--rule-soft); } }
+
+  .plan-name {
+    font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    font-size: 1.6rem;
+    font-weight: 600;
+    line-height: 1.05;
+    display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap;
+  }
+
+  .pill {
+    font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    text-transform: uppercase; letter-spacing: .1em; font-size: .66rem; font-weight: 600;
+    padding: .18rem .45rem; border: 1px solid currentColor; color: var(--gate); line-height: 1;
+    position: relative; top: -.12rem;
+  }
+
+  .plan-sub { font-size: .9rem; color: var(--ink-soft); margin-top: -.55rem; }
+
+  dl.stats { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: .55rem .8rem; }
+  dl.stats > div { display: grid; gap: .05rem; }
+  dl.stats dt { font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif; text-transform: uppercase; letter-spacing: .1em; font-size: .64rem; color: var(--ink-faint); }
+  dl.stats dd { margin: 0; font-size: 1.16rem; font-weight: 600; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  .legend { display: grid; gap: .35rem; padding-top: .3rem; border-top: 1px solid var(--rule-soft); }
+  .lg { display: flex; align-items: center; gap: .5rem; font-size: .84rem; color: var(--ink-soft); }
+  .sw { width: 13px; height: 13px; flex: none; border: 1px solid rgba(0,0,0,.18); }
+
+  .tools { display: flex; gap: .45rem; flex-wrap: wrap; }
+  button {
+    font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    text-transform: uppercase; letter-spacing: .1em; font-size: .72rem; font-weight: 600;
+    padding: .38rem .72rem; background: transparent; color: var(--ink-soft);
+    border: 1px solid var(--rule); cursor: pointer;
+    transition: background .14s, color .14s, border-color .14s;
+  }
+  button:hover { color: var(--ink); border-color: var(--stone); }
+  button[aria-pressed="true"] { background: var(--stone); border-color: var(--stone); color: var(--sheet); }
+  button:focus-visible { outline: 2px solid var(--gate); outline-offset: 2px; }
+
+  /* ---------- faults ---------- */
+
+  .faults { margin-top: 1.8rem; display: grid; gap: 1.1rem; }
+
+  .fault {
+    background: var(--sheet);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--bad);
+    padding: 1rem 1.15rem 1.1rem;
+  }
+
+  .fault.fixed { border-left-color: var(--good); }
+  .fault.held { border-left-color: var(--warn); }
+
+  .fault h3 {
+    margin: 0 0 .35rem;
+    font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    font-size: 1.3rem; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+  }
+
+  .verdict-tag {
+    font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+    text-transform: uppercase; letter-spacing: .11em; font-size: .68rem; font-weight: 600;
+  }
+  .fixed .verdict-tag { color: var(--good); }
+  .held .verdict-tag { color: var(--warn); }
+
+  .fault p { margin: 0 0 .6rem; max-width: var(--measure); color: var(--ink-soft); }
+  .fault p:last-child { margin-bottom: 0; }
+  .fault .mono { color: var(--ink); }
+
+  .tablewrap { overflow-x: auto; margin-top: 1.5rem; border: 1px solid var(--rule); background: var(--sheet); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; }
+  th, td { text-align: left; padding: .6rem .9rem; border-bottom: 1px solid var(--rule-soft); font-size: .92rem; }
+  thead th { font-family: "Barlow Condensed", "Arial Narrow", Arial, sans-serif; text-transform: uppercase; letter-spacing: .11em; font-size: .72rem; color: var(--ink-faint); border-bottom: 1px solid var(--rule); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { text-align: right; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  footer { margin-top: 3.4rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: .84rem; color: var(--ink-faint); display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="sheet-head">
+    <div class="head-meta">
+      <span class="label">Aethoria &middot; Materials</span>
+      <span class="label mono">What a realm can and cannot supply itself</span>
+    </div>
+    <h1>Worked-Out Ground</h1>
+    <p class="standfirst">
+      I went looking for why city walls never appeared and found that they do — the fortification
+      planner works. What does not work is the ground underneath it: a realm loses the ability to
+      quarry its own stone and has <strong>no way to move a single block between its own
+      settlements</strong>. Both measured from the live simulation.
+    </p>
+  </header>
+
+  <section>
+    <h2>What the planner actually builds <span class="label">live simulation &middot; seed 3000</span></h2>
+    <p class="lede">
+      A real fortification line, taken from a running world at year 80. Segments, corners, towers
+      and gates are distinct roles, and the town keeps growing past its own wall.
+    </p>
+
+    <div class="plan" id="plan"></div>
+  </section>
+
+  <section>
+    <h2>Why it kept failing on materials</h2>
+    <p class="lede">
+      A line costs stone and timber together, so a realm short of either stops building. Neither
+      fault below is a shortage of rock: one map still held
+      <span class="mono">30,809</span> units of stone across 337 deposits while its capital had none.
+    </p>
+
+    <div class="faults">
+      <div class="fault fixed">
+        <h3>Workings never came down <span class="verdict-tag">Fixed</span></h3>
+        <p>
+          A quarry standing on ground it had already emptied kept its plot for the rest of the game.
+          Production pins such a building's staffing to <span class="mono">0.15</span> rather than
+          zeroing it, and the lifecycle reasons about employment collapse rather than about the map —
+          so nothing ever reached the abandonment threshold.
+        </p>
+        <p>
+          One capital had 106 citizens, every plot spent, and a single quarry that had gone dry
+          decades earlier, with <span class="mono">1,858</span> units of stone within walking
+          distance. It could not open another anywhere, because it had nowhere to put one.
+        </p>
+        <p>
+          Production now records that the seam is what ran out, and the lifecycle weighs that heavily
+          enough to retire the site on its own. Everything after is machinery the game already had:
+          abandon, ruin, demolish, plot freed.
+        </p>
+      </div>
+
+      <div class="fault fixed">
+        <h3>A realm could not supply itself <span class="verdict-tag">Fixed</span></h3>
+        <p>
+          Trade routes exist only between kingdoms, and a route needs a price gap to clear the haul —
+          which two cities of one realm can never have, because they share a market. So a capital
+          with no stone had no way to buy from its own hamlet twenty tiles away, which produced 25
+          units a year and shipped none of them.
+        </p>
+        <p>
+          Realms now haul construction staples to their own short settlements. Because nearly every
+          building in the game is part stone, this only ever moves a surplus &mdash; the numbers below
+          are the whole mechanism.
+        </p>
+      </div>
+
+      <div class="fault held">
+        <h3>Workings nobody can staff <span class="verdict-tag">Held back</span></h3>
+        <p>
+          Extraction carries the weakest repeat penalty of anything, the same as housing, so camps of
+          four open five quarries each. Across one realm, nineteen quarries stood on live deposits
+          with exactly one staffed and producing. Labour, not rock, is what turns a seam into stone.
+        </p>
+        <p>
+          It is a real fault and I have a fix for it, but the only measurement I have is two seeds —
+          where it also showed fewer cities and a third of the timber output. At that sample size
+          that is indistinguishable from seed divergence, and this is the economy's most delicate
+          coupling. It needs a proper multi-seed study before it ships.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The haul, in full <span class="label">every number in the mechanism</span></h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Rule</th><th>Why</th><th class="num">Value</th></tr></thead>
+        <tbody>
+          <tr><td>Staples hauled</td><td>Construction materials only. Food is left out on purpose: famine is meant to be local, and levelling it realm-wide would erase it</td><td class="num">stone, wood, tools</td></tr>
+          <tr><td>Donor keeps</td><td>A granary's worth, before it parts with anything. Set against what settlements actually hold — a quarry town building with its own output sits near 40, so a floor of 80 meant nobody ever qualified</td><td class="num">25</td></tr>
+          <tr><td>Receiver topped to</td><td>Enough to build with, not enough to hoard</td><td class="num">50</td></tr>
+          <tr><td>Moved per good, per year</td><td>A realm redirects its surplus; it does not run a supply chain</td><td class="num">30</td></tr>
+          <tr><td>Lost on the road</td><td>Hauling costs something. Nothing arrives whole</td><td class="num">15%</td></tr>
+          <tr><td>Range</td><td>Beyond this a settlement is on its own</td><td class="num">45 tiles</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede">
+      Checked by <span class="mono">tests/eco-staples.test.ts</span>: a worked-out site retires while
+      a staffed one with deposit left in a prosperous town does not, and a realm supplies a short
+      settlement while respecting the floor, the cap, the loss and the range.
+    </p>
+  </section>
+
+  <footer>
+    <span>Measured from the live simulation. Fortification plan at year 80; economy figures across seeded runs of 70&ndash;121 years.</span>
+    <span class="mono">seed 3000</span>
+  </footer>
+</div>
+
+<script>
+  const DATA = {"seed":3000,"years":80,"cities":[{"name":"Vicenteton","tier":"town","population":75,"kingdom":"Kingdom of Dawnspire","isCapital":true,"year":81,"defense":5.0792,"pieces":39,"gates":2,"towers":11,"lines":[{"generation":0,"builtYear":32,"status":"active","family":"civic_monumental:tile","material":"tile","perimeter":39,"gates":2,"towers":11,"segments":39}],"w":28,"h":29,"cx":10,"cy":15,"tiles":[{"x":0,"y":0,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":0,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":0,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":0,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":0,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":0,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":6,"y":0,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":7,"y":0,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":8,"y":0,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":9,"y":0,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":10,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":0,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":21,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":0,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":24,"y":0,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":25,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":0,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":1,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":1,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":1,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":1,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":1,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":1,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":6,"y":1,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":7,"y":1,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":8,"y":1,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":9,"y":1,"t":"grass","r":0,"b":"farm","f":null,"s":null},{"x":10,"y":1,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":11,"y":1,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":12,"y":1,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":13,"y":1,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":14,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":1,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":21,"y":1,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":22,"y":1,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":23,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":1,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":25,"y":1,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":26,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":1,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":2,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":2,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":2,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":2,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":2,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":5,"y":2,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":6,"y":2,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":7,"y":2,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":8,"y":2,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":9,"y":2,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":10,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":2,"t":"grass","r":1,"b":"farm","f":null,"s":null},{"x":15,"y":2,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":16,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":2,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":18,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":2,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":21,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":2,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":26,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":2,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":3,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":3,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":3,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":3,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":3,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":5,"y":3,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":6,"y":3,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":7,"y":3,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":8,"y":3,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":9,"y":3,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":10,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":3,"t":"grass","r":0,"b":"workshop","f":null,"s":null},{"x":12,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":3,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":16,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":3,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":19,"y":3,"t":"grass","r":3,"b":"pasture","f":null,"s":null},{"x":20,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":3,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":22,"y":3,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":23,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":3,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":27,"y":3,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":4,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":4,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":4,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":4,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":4,"y":4,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":5,"y":4,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":6,"y":4,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":7,"y":4,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":8,"y":4,"t":"soil","r":0,"b":"lumber_camp","f":null,"s":"reconstruction"},{"x":9,"y":4,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":4,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":4,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":4,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":4,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":4,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":15,"y":4,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":4,"t":"savanna","r":0,"b":"workshop","f":null,"s":null},{"x":17,"y":4,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":18,"y":4,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":19,"y":4,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":20,"y":4,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":21,"y":4,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":22,"y":4,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":23,"y":4,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":24,"y":4,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":25,"y":4,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":4,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":4,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":0,"y":5,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":5,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":5,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":3,"y":5,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":4,"y":5,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":5,"y":5,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":6,"y":5,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":7,"y":5,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":8,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":17,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":18,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":19,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":20,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":21,"y":5,"t":"savanna","r":0,"b":"pasture","f":null,"s":null},{"x":22,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":23,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":24,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":25,"y":5,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":26,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":5,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":6,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":6,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":2,"y":6,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":3,"y":6,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":4,"y":6,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":5,"y":6,"t":"soil","r":0,"b":"farm","f":null,"s":null},{"x":6,"y":6,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":7,"y":6,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":8,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":6,"t":"grass","r":0,"b":"farm","f":null,"s":null},{"x":12,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":18,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":19,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":20,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":21,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":22,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":23,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":24,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":25,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":26,"y":6,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":27,"y":6,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":7,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":7,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":2,"y":7,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":3,"y":7,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":4,"y":7,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":5,"y":7,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":6,"y":7,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":7,"y":7,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":8,"y":7,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":7,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":7,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":7,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":7,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":7,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":14,"y":7,"t":"grass","r":1,"b":"barracks","f":null,"s":null},{"x":15,"y":7,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":16,"y":7,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":7,"t":"forest","r":0,"b":"lumber_camp","f":null,"s":null},{"x":18,"y":7,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":20,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":21,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":22,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":23,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":24,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":25,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":26,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":27,"y":7,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":0,"y":8,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":8,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":2,"y":8,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":3,"y":8,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":4,"y":8,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":5,"y":8,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":6,"y":8,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":7,"y":8,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":8,"y":8,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":8,"t":"grass","r":0,"b":"workshop","f":null,"s":null},{"x":10,"y":8,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":11,"y":8,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":12,"y":8,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":13,"y":8,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":8,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":15,"y":8,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":8,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":17,"y":8,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":8,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":8,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":8,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":21,"y":8,"t":"savanna","r":0,"b":"farm","f":null,"s":null},{"x":22,"y":8,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":23,"y":8,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":24,"y":8,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":25,"y":8,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":26,"y":8,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":27,"y":8,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":0,"y":9,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":9,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":2,"y":9,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":3,"y":9,"t":"soil","r":0,"b":"farm","f":null,"s":null},{"x":4,"y":9,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":5,"y":9,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":6,"y":9,"t":"grass","r":0,"b":"lumber_camp","f":null,"s":null},{"x":7,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":8,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":9,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":10,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":9,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":13,"y":9,"t":"grass","r":0,"b":"wall","f":"tower","s":null},{"x":14,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":9,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":16,"y":9,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":17,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":9,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":9,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":23,"y":9,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":24,"y":9,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":25,"y":9,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":26,"y":9,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":27,"y":9,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":0,"y":10,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":10,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":2,"y":10,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":3,"y":10,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":4,"y":10,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":5,"y":10,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":6,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":7,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":8,"y":10,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":9,"y":10,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":10,"y":10,"t":"grass","r":1,"b":"wall","f":"tower","s":null},{"x":11,"y":10,"t":"grass","r":1,"b":"wall","f":"corner","s":null},{"x":12,"y":10,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":13,"y":10,"t":"grass","r":1,"b":"granary","f":null,"s":null},{"x":14,"y":10,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":15,"y":10,"t":"grass","r":1,"b":"wall","f":"gate","s":null},{"x":16,"y":10,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":17,"y":10,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":18,"y":10,"t":"grass","r":0,"b":"pasture","f":null,"s":null},{"x":19,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":10,"t":"grass","r":0,"b":"farm","f":null,"s":null},{"x":24,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":10,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":10,"t":"savanna","r":0,"b":null,"f":null,"s":null},{"x":0,"y":11,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":11,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":2,"y":11,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":3,"y":11,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":4,"y":11,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":5,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":6,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":7,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":8,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":11,"t":"grass","r":0,"b":"wall","f":"segment","s":null},{"x":10,"y":11,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":11,"y":11,"t":"grass","r":1,"b":"house","f":null,"s":null},{"x":12,"y":11,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":13,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":11,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":17,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":11,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":11,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":0,"y":12,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":12,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":2,"y":12,"t":"soil","r":0,"b":"quarry","f":null,"s":null},{"x":3,"y":12,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":4,"y":12,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":5,"y":12,"t":"grass","r":0,"b":"lumber_camp","f":null,"s":"reconstruction"},{"x":6,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":7,"y":12,"t":"grass","r":0,"b":"wall","f":"tower","s":null},{"x":8,"y":12,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":9,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":12,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":15,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":12,"t":"grass","r":0,"b":"lumber_camp","f":null,"s":null},{"x":17,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":12,"t":"grass","r":0,"b":"quarry","f":null,"s":null},{"x":21,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":12,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":25,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":12,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":13,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":13,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":2,"y":13,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":3,"y":13,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":4,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":5,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":6,"y":13,"t":"grass","r":0,"b":"wall","f":"segment","s":null},{"x":7,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":8,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":13,"t":"grass","r":0,"b":"wall","f":"tower","s":null},{"x":17,"y":13,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":18,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":13,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":13,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":23,"y":13,"t":"grass","r":0,"b":"lumber_camp","f":null,"s":"abandoned"},{"x":24,"y":13,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":25,"y":13,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":26,"y":13,"t":"grass","r":3,"b":"quarry","f":null,"s":null},{"x":27,"y":13,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":0,"y":14,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":14,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":2,"y":14,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":3,"y":14,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":4,"y":14,"t":"grass","r":0,"b":"wall","f":"tower","s":null},{"x":5,"y":14,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":6,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":7,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":8,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":14,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":15,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":14,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":19,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":14,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":23,"y":14,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":24,"y":14,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":25,"y":14,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":26,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":14,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":15,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":1,"y":15,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":2,"y":15,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":3,"y":15,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":4,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":5,"y":15,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":6,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":7,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":8,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":15,"t":"grass","r":3,"b":"town_center","f":null,"s":null},{"x":11,"y":15,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":12,"y":15,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":13,"y":15,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":14,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":15,"t":"grass","r":0,"b":"wall","f":"tower","s":null},{"x":19,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":15,"t":"grass","r":0,"b":"quarry","f":null,"s":"reconstruction"},{"x":22,"y":15,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":23,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":15,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":25,"y":15,"t":"forest","r":2,"b":null,"f":null,"s":null},{"x":26,"y":15,"t":"forest","r":2,"b":null,"f":null,"s":null},{"x":27,"y":15,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":16,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":16,"t":"soil","r":0,"b":"lumber_camp","f":null,"s":"reconstruction"},{"x":2,"y":16,"t":"soil","r":0,"b":"wall","f":"corner","s":null},{"x":3,"y":16,"t":"soil","r":0,"b":"wall","f":"gate","s":null},{"x":4,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":5,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":6,"y":16,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":7,"y":16,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":8,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":16,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":10,"y":16,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":11,"y":16,"t":"grass","r":0,"b":"colosseum","f":null,"s":null},{"x":12,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":16,"t":"grass","r":3,"b":"house","f":null,"s":null},{"x":15,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":16,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":17,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":16,"t":"grass","r":0,"b":"lumber_camp","f":null,"s":null},{"x":19,"y":16,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":20,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":16,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":23,"y":16,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":24,"y":16,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":25,"y":16,"t":"forest","r":0,"b":"lumber_camp","f":null,"s":null},{"x":26,"y":16,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":27,"y":16,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":17,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":1,"y":17,"t":"soil","r":0,"b":"wall","f":"tower","s":null},{"x":2,"y":17,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":3,"y":17,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":4,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":5,"y":17,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":6,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":7,"y":17,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":8,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":17,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":16,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":17,"t":"grass","r":0,"b":"wall","f":"corner","s":null},{"x":19,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":17,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":23,"y":17,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":24,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":17,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":17,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":27,"y":17,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":0,"y":18,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":1,"y":18,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":2,"y":18,"t":"soil","r":0,"b":"wall","f":"corner","s":null},{"x":3,"y":18,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":4,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":5,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":6,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":7,"y":18,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":8,"y":18,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":9,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":18,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":16,"y":18,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":17,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":18,"t":"grass","r":0,"b":"wall","f":"tower","s":null},{"x":19,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":18,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":19,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":19,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":2,"y":19,"t":"soil","r":0,"b":"wall","f":"tower","s":null},{"x":3,"y":19,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":4,"y":19,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":5,"y":19,"t":"soil","r":0,"b":"lumber_camp","f":null,"s":null},{"x":6,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":7,"y":19,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":8,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":19,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":10,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":19,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":12,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":19,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":15,"y":19,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":16,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":19,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":18,"y":19,"t":"grass","r":3,"b":"lumber_camp","f":null,"s":"reconstruction"},{"x":19,"y":19,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":20,"y":19,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":21,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":19,"t":"grass","r":0,"b":"quarry","f":null,"s":"reconstruction"},{"x":23,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":19,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":25,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":19,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":20,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":1,"y":20,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":2,"y":20,"t":"soil","r":0,"b":"farm","f":null,"s":null},{"x":3,"y":20,"t":"soil","r":0,"b":"wall","f":"segment","s":null},{"x":4,"y":20,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":5,"y":20,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":6,"y":20,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":7,"y":20,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":8,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":9,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":20,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":14,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":20,"t":"grass","r":0,"b":"pasture","f":null,"s":null},{"x":16,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":20,"t":"grass","r":0,"b":"wall","f":"segment","s":null},{"x":18,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":20,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":22,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":20,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":25,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":20,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":21,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":21,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":21,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":21,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":4,"y":21,"t":"soil","r":0,"b":"wall","f":"segment","s":null},{"x":5,"y":21,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":6,"y":21,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":7,"y":21,"t":"soil","r":0,"b":"house","f":null,"s":null},{"x":8,"y":21,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":9,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":10,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":21,"t":"grass","r":0,"b":"house","f":null,"s":null},{"x":12,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":21,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":15,"y":21,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":16,"y":21,"t":"grass","r":0,"b":"wall","f":"segment","s":null},{"x":17,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":21,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":23,"y":21,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":24,"y":21,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":25,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":21,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":21,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":0,"y":22,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":22,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":22,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":22,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":22,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":22,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":6,"y":22,"t":"soil","r":0,"b":"wall","f":"segment","s":null},{"x":7,"y":22,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":8,"y":22,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":9,"y":22,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":10,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":11,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":22,"t":"grass","r":0,"b":"wall","f":"segment","s":null},{"x":16,"y":22,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":17,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":22,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":19,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":22,"t":"grass","r":0,"b":"pasture","f":null,"s":null},{"x":22,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":22,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":24,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":22,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":23,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":23,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":23,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":23,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":23,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":23,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":6,"y":23,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":7,"y":23,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":8,"y":23,"t":"soil","r":0,"b":"wall","f":"tower","s":null},{"x":9,"y":23,"t":"soil","r":0,"b":"wall","f":"segment","s":null},{"x":10,"y":23,"t":"soil","r":0,"b":"wall","f":"corner","s":null},{"x":11,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":12,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":13,"y":23,"t":"grass","r":0,"b":"lumber_camp","f":null,"s":null},{"x":14,"y":23,"t":"grass","r":0,"b":"wall","f":"segment","s":null},{"x":15,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":23,"t":"grass","r":0,"b":"lumber_camp","f":null,"s":null},{"x":17,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":23,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":19,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":20,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":23,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":23,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":23,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":25,"y":23,"t":"grass","r":0,"b":"quarry","f":null,"s":"abandoned"},{"x":26,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":23,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":24,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":24,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":24,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":24,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":24,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":24,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":6,"y":24,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":7,"y":24,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":8,"y":24,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":9,"y":24,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":10,"y":24,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":11,"y":24,"t":"soil","r":0,"b":"wall","f":"corner","s":null},{"x":12,"y":24,"t":"grass","r":0,"b":"wall","f":"tower","s":null},{"x":13,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":14,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":15,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":18,"y":24,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":19,"y":24,"t":"grass","r":0,"b":"pasture","f":null,"s":null},{"x":20,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":21,"y":24,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":22,"y":24,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":23,"y":24,"t":"grass","r":2,"b":null,"f":null,"s":null},{"x":24,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":24,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":26,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":27,"y":24,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":6,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":7,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":8,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":9,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":10,"y":25,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":11,"y":25,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":12,"y":25,"t":"soil","r":0,"b":null,"f":null,"s":null},{"x":13,"y":25,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":14,"y":25,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":15,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":16,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":17,"y":25,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":18,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":19,"y":25,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":20,"y":25,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":21,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":25,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":27,"y":25,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":6,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":7,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":8,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":9,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":10,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":11,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":12,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":13,"y":26,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":14,"y":26,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":15,"y":26,"t":"forest","r":0,"b":"farm","f":null,"s":null},{"x":16,"y":26,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":17,"y":26,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":18,"y":26,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":19,"y":26,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":20,"y":26,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":21,"y":26,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":22,"y":26,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":23,"y":26,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":26,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":26,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":26,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":27,"y":26,"t":"grass","r":3,"b":null,"f":null,"s":null},{"x":0,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":6,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":7,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":8,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":9,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":10,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":11,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":12,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":13,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":14,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":15,"y":27,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":16,"y":27,"t":"swamp","r":0,"b":null,"f":null,"s":null},{"x":17,"y":27,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":18,"y":27,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":19,"y":27,"t":"forest","r":0,"b":"lumber_camp","f":null,"s":null},{"x":20,"y":27,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":21,"y":27,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":22,"y":27,"t":"grass","r":0,"b":"lumber_camp","f":null,"s":null},{"x":23,"y":27,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":27,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":27,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":27,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":27,"y":27,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":0,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":1,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":2,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":3,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":4,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":5,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":6,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":7,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":8,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":9,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":10,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":11,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":12,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":13,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":14,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":15,"y":28,"t":"deep_ocean","r":0,"b":null,"f":null,"s":null},{"x":16,"y":28,"t":"shallow_water","r":0,"b":null,"f":null,"s":null},{"x":17,"y":28,"t":"swamp","r":0,"b":null,"f":null,"s":null},{"x":18,"y":28,"t":"swamp","r":0,"b":null,"f":null,"s":null},{"x":19,"y":28,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":20,"y":28,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":21,"y":28,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":22,"y":28,"t":"forest","r":0,"b":null,"f":null,"s":null},{"x":23,"y":28,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":24,"y":28,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":25,"y":28,"t":"grass","r":0,"b":null,"f":null,"s":null},{"x":26,"y":28,"t":"grass","r":1,"b":null,"f":null,"s":null},{"x":27,"y":28,"t":"forest","r":0,"b":null,"f":null,"s":null}]}]};
+  const CITY = DATA.cities[0];
+
+  const TERRAIN = {
+    grass: 'grass', soil: 'grass', savanna: 'grass', tundra: 'grass', snow: 'grass',
+    forest: 'forest', swamp: 'forest',
+    shallow_water: 'water', deep_ocean: 'water',
+    mountain: 'cliff', lava: 'cliff'
+  };
+
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const P = () => ({
+    grass: css('--grass'), forest: css('--forest'), water: css('--water'), cliff: css('--ink-faint'),
+    road: css('--gate'), built: css('--built'), seg: css('--stone-deep'), tower: css('--tower'),
+    gate: css('--gate'), sheet: css('--sheet'), centre: css('--gate'), ruin: css('--ruin')
+  });
+
+  const line = CITY.lines[0] ?? {};
+  const planEl = document.getElementById('plan');
+  planEl.innerHTML = `
+    <div class="canvas-hold"><canvas></canvas></div>
+    <div class="plan-side">
+      <div class="plan-name">${CITY.name}${CITY.isCapital ? ' <span class="pill">Realm seat</span>' : ''}</div>
+      <div class="plan-sub">${CITY.tier} of ${CITY.population} &middot; ${CITY.kingdom ?? 'no realm'} &middot; year ${CITY.year}</div>
+      <dl class="stats">
+        <div><dt>Line pieces</dt><dd>${CITY.pieces}</dd></div>
+        <div><dt>Perimeter</dt><dd>${line.perimeter ?? '—'}</dd></div>
+        <div><dt>Towers</dt><dd>${CITY.towers}</dd></div>
+        <div><dt>Gates</dt><dd>${CITY.gates}</dd></div>
+        <div><dt>Raised</dt><dd>yr ${line.builtYear ?? '—'}</dd></div>
+        <div><dt>Defence</dt><dd>&times;${CITY.defense.toFixed(2)}</dd></div>
+      </dl>
+      <div class="tools">
+        <button type="button" aria-pressed="true" data-role="curtain">Curtain</button>
+        <button type="button" aria-pressed="true" data-role="ground">Terrain</button>
+        <button type="button" aria-pressed="false" data-role="decay">Decay</button>
+      </div>
+      <div class="legend">
+        <span class="lg"><span class="sw" style="background:var(--stone-deep)"></span> Wall &amp; corner</span>
+        <span class="lg"><span class="sw" style="background:var(--tower)"></span> Tower</span>
+        <span class="lg"><span class="sw" style="border:2px solid var(--gate);background:transparent"></span> Gate</span>
+        <span class="lg"><span class="sw" style="background:var(--built)"></span> Building</span>
+        <span class="lg"><span class="sw" style="background:var(--ruin)"></span> Abandoned or rebuilding</span>
+        <span class="lg"><span class="sw" style="background:var(--water)"></span> Water</span>
+      </div>
+    </div>`;
+
+  const canvas = planEl.querySelector('canvas');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const state = { curtain: true, ground: true, decay: false, progress: reduce ? 1 : 0 };
+
+  planEl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    state[b.dataset.role] = !state[b.dataset.role];
+    b.setAttribute('aria-pressed', String(state[b.dataset.role]));
+    draw();
+  }));
+
+  const FORT = new Set(['segment', 'corner', 'tower', 'gate']);
+
+  function draw() {
+    const pal = P();
+    const CELL = 14;
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    canvas.width = CITY.w * CELL * dpr;
+    canvas.height = CITY.h * CELL * dpr;
+    canvas.style.aspectRatio = `${CITY.w} / ${CITY.h}`;
+
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = pal.sheet;
+    ctx.fillRect(0, 0, CITY.w * CELL, CITY.h * CELL);
+
+    // Curtain pieces revealed in order around the line, so the ring reads as a
+    // circuit being closed rather than blocks appearing at random.
+    const fort = CITY.tiles.filter(t => t.f && FORT.has(t.f));
+    fort.forEach(t => { t._a = Math.atan2(t.y - CITY.cy, t.x - CITY.cx); });
+    fort.sort((a, b) => a._a - b._a);
+    const visible = new Set(fort.slice(0, Math.round(fort.length * state.progress)).map(t => t.x + ',' + t.y));
+
+    for (const t of CITY.tiles) {
+      const px = t.x * CELL, py = t.y * CELL;
+      const kind = TERRAIN[t.t] ?? 'grass';
+
+      if (state.ground) {
+        ctx.fillStyle = pal[kind] ?? pal.grass;
+        ctx.globalAlpha = kind === 'water' || kind === 'cliff' ? .9 : .42;
+        ctx.fillRect(px, py, CELL, CELL);
+        ctx.globalAlpha = 1;
+      }
+
+      if (t.r > 0) {
+        ctx.fillStyle = pal.road;
+        ctx.globalAlpha = .2;
+        ctx.fillRect(px + CELL * .28, py + CELL * .28, CELL * .44, CELL * .44);
+        ctx.globalAlpha = 1;
+      }
+
+      if (!t.b) continue;
+
+      const isFort = t.f && FORT.has(t.f);
+      if (isFort) {
+        if (!state.curtain || !visible.has(t.x + ',' + t.y)) continue;
+        if (t.f === 'gate') {
+          ctx.strokeStyle = pal.gate;
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.moveTo(px + 1.4, py + 1.4); ctx.lineTo(px + 1.4, py + CELL - 1.4);
+          ctx.moveTo(px + CELL - 1.4, py + 1.4); ctx.lineTo(px + CELL - 1.4, py + CELL - 1.4);
+          ctx.stroke();
+        } else if (t.f === 'tower') {
+          ctx.fillStyle = pal.tower;
+          ctx.fillRect(px + .5, py + .5, CELL - 1, CELL - 1);
+          ctx.fillStyle = pal.sheet;
+          ctx.globalAlpha = .55;
+          ctx.fillRect(px + CELL * .33, py + CELL * .33, CELL * .34, CELL * .34);
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.fillStyle = pal.seg;
+          ctx.fillRect(px + 1, py + 1, CELL - 2, CELL - 2);
+          ctx.fillStyle = pal.sheet;
+          ctx.globalAlpha = .45;
+          ctx.fillRect(px + 2.5, py + 2.5, CELL * .2, CELL * .2);
+          ctx.fillRect(px + CELL - 2.5 - CELL * .2, py + 2.5, CELL * .2, CELL * .2);
+          ctx.globalAlpha = 1;
+        }
+        continue;
+      }
+
+      // A settlement in motion: sites the lifecycle has retired or is rebuilding.
+      if (state.decay && t.s) {
+        ctx.fillStyle = pal.ruin;
+        ctx.fillRect(px + 2.5, py + 2.5, CELL - 5, CELL - 5);
+        continue;
+      }
+
+      if (t.b === 'town_center') {
+        ctx.fillStyle = pal.centre;
+        ctx.fillRect(px + 1.5, py + 1.5, CELL - 3, CELL - 3);
+      } else {
+        ctx.fillStyle = pal.built;
+        ctx.globalAlpha = .82;
+        ctx.fillRect(px + 3, py + 3, CELL - 6, CELL - 6);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  if (!reduce) {
+    const start = performance.now() + 180;
+    const step = now => {
+      state.progress = Math.max(0, Math.min(1, (now - start) / 1700));
+      draw();
+      if (state.progress < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  } else {
+    draw();
+  }
+
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+</script>
