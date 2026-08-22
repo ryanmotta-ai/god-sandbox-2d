@@ -632,7 +632,10 @@ export interface UrbanMetrics {
 const HEAVY_INDUSTRY: BuildingType[] = ['factory', 'refinery', 'smithy', 'oil_well', 'quarry', 'mine'];
 
 export function measureCity(city: City, tileMap: TileMap): UrbanMetrics {
-  const all = [...city.buildings.values()];
+  // Wall segments are excluded throughout: they are a perimeter rather than
+  // premises, and a ring of fifty sitting at the maximum radius would swamp
+  // every sprawl and clustering figure here with the boundary itself.
+  const all = [...city.buildings.values()].filter(b => b.type !== 'wall');
   if (all.length === 0) {
     return { buildings: 0, roadConnectivity: 1, industrialSeparation: 0, centrality: 0, openSpace: 1, sprawl: 0, clustering: 0 };
   }
@@ -708,6 +711,98 @@ export function measureCity(city: City, tileMap: TileMap): UrbanMetrics {
     sprawl: sprawlSum / all.length,
     clustering: clusterCount > 0 ? clusterSum / clusterCount : 0
   };
+}
+
+// ============================================================
+// CURTAIN WALLS
+// ============================================================
+
+/** Smallest settlement worth walling. Below this there is no town to enclose. */
+export const WALL_MIN_URBAN_BUILDINGS = 6;
+/**
+ * Fewest people worth walling. Camps of one were raising thirty-six segments,
+ * which is neither buildable by that many hands nor defensible by them.
+ */
+export const WALL_MIN_POPULATION = 12;
+/** Nothing sensible encloses a radius past this; beyond it a realm builds forts, not one curtain. */
+const WALL_MAX_RADIUS = 14;
+
+/**
+ * The line a wall would follow around a settlement, in order around the circle.
+ *
+ * Walls are the one structure that is not premises on a plot, and treating them
+ * as one is why they never worked: the planner sited each segment independently
+ * on whichever outskirt tile scored best, so a town ended up with a handful of
+ * disconnected stubs instead of a curtain. A wall is a single closed line or it
+ * is nothing, so the whole line is planned at once and then built along.
+ *
+ * Gaps are left where the line meets a road, and those are the gates. Water and
+ * cliffs are left out too: a wall that runs into a river stops at the river,
+ * the way a real one does.
+ */
+/**
+ * The radius a settlement would choose for a wall, or 0 if there is no town yet.
+ *
+ * Measured over the town proper — fields, mines and lumber camps are excluded on
+ * purpose. A wall drawn around the outermost farm would be a stockade around
+ * empty countryside: absurd to look at, and too long to ever finish.
+ */
+export function wallRadiusFor(city: City): number {
+  const urban = [...city.buildings.values()].filter(b => {
+    if (b.type === 'wall') return false;
+    const a = urbanProfile(b.type).affinity;
+    return a !== 'extraction' && a !== 'agricultural';
+  });
+  if (urban.length < WALL_MIN_URBAN_BUILDINGS) return 0;
+
+  let reach = 0;
+  for (const b of urban) reach = Math.max(reach, Math.hypot(b.x - city.x, b.y - city.y));
+
+  // A wall encloses people, not empty plots. Sprawl alone gave hamlets of nine
+  // a radius-ten circuit — fifty-odd segments for a settlement that could not
+  // have manned ten of them — so headcount caps what geometry proposes.
+  const byPeople = Math.round(3 + Math.sqrt(Math.max(0, city.population)));
+  return Math.min(WALL_MAX_RADIUS, byPeople, Math.max(3, Math.ceil(reach) + 1));
+}
+
+export function wallRing(city: City, tileMap: TileMap, radius?: number): { x: number; y: number }[] {
+  // A wall line is decided once and then finished. Re-deriving it from the
+  // town's current extent every year meant the circle crept outward as the town
+  // sprawled, so each year's segments landed on a slightly larger circle than
+  // the last and the curtain could never close — it came out as a scatter of
+  // concentric arcs. Cities outgrow their walls in reality too; the wall stays
+  // where it was built and the suburbs spill past it.
+  const r = radius && radius > 0 ? radius : wallRadiusFor(city);
+  if (r <= 0) return [];
+
+  // Sampled finely enough that consecutive samples land on touching tiles, then
+  // deduped — a circle walked at this step never skips a tile of its own ring.
+  const steps = Math.max(24, Math.ceil(r * 8));
+  const seen = new Set<number>();
+  const ring: { x: number; y: number }[] = [];
+
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * Math.PI * 2;
+    const x = Math.round(city.x + Math.cos(angle) * r);
+    const y = Math.round(city.y + Math.sin(angle) * r);
+    if (x < 0 || y < 0 || x >= tileMap.width || y >= tileMap.height) continue;
+
+    const key = x * tileMap.height + y;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const tile = tileMap.getTile(x, y);
+    if (!tile) continue;
+    const terrain = TERRAINS[tile.type];
+    // Ground a wall cannot stand on is a permanent gap, not a segment pending.
+    if (terrain.isWater || !terrain.isWalkable || tile.type === TerrainType.MOUNTAIN) continue;
+    // The gates.
+    if (tile.roadLevel > 0) continue;
+
+    ring.push({ x, y });
+  }
+
+  return ring;
 }
 
 /**

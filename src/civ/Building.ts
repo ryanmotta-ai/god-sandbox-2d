@@ -386,7 +386,12 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     icon: '🧱',
     category: 'infrastructure',
     maxHp: 400,
-    cost: { stone: 40 },
+    // Priced per segment, not per wall. A curtain is thirty-odd of these, so the
+    // old 40-stone figure — set when a "wall" was one standalone building — made
+    // a complete ring cost over 1200 stone and put it permanently out of reach.
+    cost: { stone: 12 },
+    // The value of the *finished* circuit. A partial ring is credited pro rata;
+    // see City.defenseMultiplier.
     defense: 1.25,
     description: 'Dressed stone between your people and everyone else’s ambitions.'
   },

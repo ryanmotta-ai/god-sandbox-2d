@@ -12,6 +12,14 @@ import { nextId } from '../core/Random';
 
 export type SettlementTier = 'camp' | 'hamlet' | 'village' | 'town' | 'city' | 'metropolis';
 
+/**
+ * Rough circuit length per tier, used only when no line has been surveyed yet.
+ * Real geometry always wins; this exists so an unsurveyed wall still counts.
+ */
+const WALL_RING_ESTIMATE: Record<SettlementTier, number> = {
+  camp: 18, hamlet: 20, village: 24, town: 30, city: 38, metropolis: 48
+};
+
 export interface TierInfo {
   id: SettlementTier;
   name: string;
@@ -84,6 +92,22 @@ export class City {
   private peakBuildingSlots: number = SETTLEMENT_TIERS[0].buildingSlots;
   /** Settlement this one was founded from, if any. */
   public parentCityId: string | null = null;
+  /**
+   * Segments in the wall line this settlement is currently working toward.
+   *
+   * Set by the fortification step, which owns the geometry; the city only needs
+   * the count so it can say how much of its circuit stands. 0 means nobody has
+   * surveyed a line yet.
+   */
+  public wallRingLength: number = 0;
+  /**
+   * Radius of the wall line, frozen the first time one is surveyed.
+   *
+   * A settlement commits to a circuit and finishes it. Recomputing the radius
+   * from the town's current extent each year made the circle creep outward with
+   * the sprawl, so no curtain ever closed. 0 means none surveyed yet.
+   */
+  public wallRadius: number = 0;
   /** 0..1 — how well fed and housed the population is. */
   public prosperity: number = 0.5;
   /** Years the settlement has gone hungry in a row. */
@@ -183,6 +207,10 @@ export class City {
   public hasFreeBuildingSlot(): boolean {
     let repeatable = 0;
     for (const b of this.buildings.values()) {
+      // A curtain wall is a perimeter, not premises. Counting its segments here
+      // meant a walled town spent most of its plots on its own boundary — a
+      // ring is thirty-odd segments, against fifty slots for an entire city.
+      if (b.type === 'wall') continue;
       if (!b.definition.unique) repeatable++;
     }
     return repeatable < this.buildingSlots;
@@ -254,12 +282,45 @@ export class City {
     return jobs;
   }
 
+  /**
+   * How complete the curtain is, 0..1.
+   *
+   * A wall defends by enclosing, so what matters is the share of the line that
+   * stands, not how many segments exist. `wallRingLength` is the planned line,
+   * refreshed by the fortification step; before it has ever run (an old save, or
+   * a load mid-siege) a tier estimate stands in, so walls never read as worthless
+   * just because nobody has surveyed them this year.
+   */
+  public wallCoverage(): number {
+    const segments = this.countOfType('wall');
+    if (segments === 0) return 0;
+    const target = this.wallRingLength > 0
+      ? this.wallRingLength
+      : (WALL_RING_ESTIMATE[this.tier] ?? 24);
+    return Math.min(1, segments / Math.max(1, target));
+  }
+
   /** Combined defensive multiplier from walls, barracks and keeps. */
   public defenseMultiplier(): number {
     let multiplier = 1;
+    let wallLevel = 0;
     for (const b of this.buildings.values()) {
       const def = b.definition.defense;
-      if (def) multiplier *= 1 + (def - 1) * (1 + (b.level - 1) * 0.4);
+      if (!def) continue;
+      // Segments of one curtain are one defence, applied once and scaled by how
+      // much of the circuit is closed. Multiplying per segment turned a finished
+      // ring into 1.25^30 — a town no army could ever take.
+      if (b.type === 'wall') {
+        wallLevel = Math.max(wallLevel, b.level);
+        continue;
+      }
+      multiplier *= 1 + (def - 1) * (1 + (b.level - 1) * 0.4);
+    }
+
+    const coverage = this.wallCoverage();
+    if (coverage > 0) {
+      const wallDef = BUILDINGS.wall.defense ?? 1;
+      multiplier *= 1 + (wallDef - 1) * coverage * (1 + (wallLevel - 1) * 0.4);
     }
     return multiplier;
   }
@@ -394,6 +455,8 @@ export class City {
       mayorId: this.mayorId,
       tier: this.tier,
       peakBuildingSlots: this.peakBuildingSlots,
+      wallRingLength: this.wallRingLength,
+      wallRadius: this.wallRadius,
       parentCityId: this.parentCityId,
       prosperity: this.prosperity,
       famineYears: this.famineYears,
@@ -429,6 +492,8 @@ export class City {
     // with (see `peakBuildingSlots` field comment for why this must never drop).
     city.peakBuildingSlots = Math.max(data.peakBuildingSlots ?? 0, city.tierInfo.buildingSlots);
     city.parentCityId = data.parentCityId ?? null;
+    city.wallRingLength = data.wallRingLength ?? 0;
+    city.wallRadius = data.wallRadius ?? 0;
     city.prosperity = data.prosperity ?? 0.5;
     city.famineYears = data.famineYears ?? 0;
     city.besiegerId = data.besiegerId ?? null;

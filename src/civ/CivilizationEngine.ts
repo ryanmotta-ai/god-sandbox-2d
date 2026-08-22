@@ -28,7 +28,7 @@ import {
   avgEffectiveRoadLevel, repairInfrastructure
 } from './Infrastructure';
 import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadEngineering';
-import { UrbanPlanner } from './UrbanPlanner';
+import { UrbanPlanner, wallRing, wallRadiusFor, WALL_MIN_POPULATION } from './UrbanPlanner';
 
 /**
  * The yearly heartbeat of civilization.
@@ -97,6 +97,20 @@ export class CivilizationEngine {
    * placement rule — see `findBuildingSiteLegacy`.
    */
   public static useUrbanPlanner: boolean = true;
+
+  /**
+   * How much reason a settlement needs before it starts walling itself, summed
+   * from war (1.0), external threat (0..1), militarism (x0.6) and being the seat
+   * of the realm (0.45).
+   *
+   * At 0.55 a capital fortifies on its own, a militarist realm fortifies its
+   * towns, and anyone at war fortifies everything — while a peaceful inland
+   * village stays open, which is what makes a walled town read as significant.
+   */
+  private static readonly WALL_RESOLVE_THRESHOLD = 0.55;
+  /** Segments laid per year: a ring should take a decade, not a season. */
+  private static readonly WALL_SEGMENTS_PER_YEAR = 3;
+  private static readonly WALL_SEGMENTS_PER_YEAR_AT_WAR = 6;
 
   /** Set once a realm first mints money, so the chronicle only says it once. */
   private announcedCurrencies: Set<string> = new Set();
@@ -728,6 +742,13 @@ export class CivilizationEngine {
    * Projects that cannot be sited no longer block the whole city for that year.
    */
   private runConstruction(city: City, world: CivWorld, kingdom: Kingdom | null): void {
+    // Before the year's other projects, not after. A settlement's builders spend
+    // every last block of stone the moment they have it, so a curtain queued
+    // behind them found an empty store every single year — the second reason no
+    // city ever finished one. A council that has decided to fortify puts the
+    // wall first and builds the granary with what is left.
+    this.fortifyCity(city, world, kingdom);
+
     const projects = Math.max(1, Math.min(4, Math.floor(city.population / 15) + 1));
     for (let i = 0; i < projects; i++) {
       if (!city.hasFreeBuildingSlot()) break;
@@ -736,6 +757,84 @@ export class CivilizationEngine {
         this.tryUpgradeBuilding(city);
         break;
       }
+    }
+  }
+
+  /**
+   * Extends a settlement's curtain wall along its surveyed line.
+   *
+   * Walls used to be an ordinary building project, and that is why no city ever
+   * had one. A segment scored `(defense - 1) x (peacetime weights)` — about 9
+   * points against 90 to 150 for a lumber camp or a quarry — so it lost every
+   * yearly slot it ever contested, and by the time a war raised its score the
+   * town had already filled every plot it had. Over 120 simulated years across
+   * eleven settlements, with masonry long since researched, not one wall was
+   * ever raised.
+   *
+   * So fortification is decided separately from what a town builds for profit,
+   * the way it is decided in reality: by whether anyone is coming. It draws on
+   * the stone stockpile directly and lays a few segments a year, so a ring rises
+   * over a decade rather than appearing whole.
+   */
+  private fortifyCity(city: City, world: CivWorld, kingdom: Kingdom | null): void {
+    if (!kingdom?.research.unlockedBuildings().has('wall')) return;
+    if (city.population < WALL_MIN_POPULATION) return;
+
+    // Survey once, then build the same line for as long as it takes.
+    if (city.wallRadius <= 0) {
+      const radius = wallRadiusFor(city);
+      if (radius <= 0) return;
+      city.wallRadius = radius;
+    }
+
+    const ring = wallRing(city, world.tileMap, city.wallRadius);
+    // Remember the line even when nothing is laid this year: it is what tells
+    // the city how much of its circuit stands.
+    city.wallRingLength = ring.length;
+    if (ring.length === 0) return;
+    if (city.wallCoverage() >= 1) return;
+
+    // Reasons to fortify, in the order a council would weigh them.
+    let atWar = false;
+    for (const other of world.kingdoms.values()) {
+      if (other.id === kingdom.id) continue;
+      if (world.diplomacy.isAtWar(other.id, kingdom.id)) { atWar = true; break; }
+    }
+    const threat = kingdom.externalThreat ?? 0;
+    const militarism = kingdom.culture.militarism ?? 0.3;
+    const isCapital = kingdom.capitalCityId === city.id;
+
+    // A quiet inland village does not wall itself; a capital, a frontier under
+    // threat, or anyone at war does.
+    const resolve = (atWar ? 1 : 0) + threat + militarism * 0.6 + (isCapital ? 0.45 : 0);
+    if (resolve < CivilizationEngine.WALL_RESOLVE_THRESHOLD) return;
+
+    // Under siege nobody is laying stone on the outer line.
+    if (city.besiegerId) return;
+
+    const def = BUILDINGS.wall;
+    const budget = atWar ? CivilizationEngine.WALL_SEGMENTS_PER_YEAR_AT_WAR : CivilizationEngine.WALL_SEGMENTS_PER_YEAR;
+    let laid = 0;
+
+    for (const spot of ring) {
+      if (laid >= budget) break;
+      const tile = world.tileMap.getTile(spot.x, spot.y);
+      if (!tile || tile.buildingId) continue;
+      if (tile.cityId && tile.cityId !== city.id) continue;
+      if (!city.stock.hasAll(def.cost)) break;
+      if (!city.stock.spend(def.cost)) break;
+
+      for (const [good, amount] of Object.entries(def.cost)) {
+        city.ledger.recordConsumed(good as GoodId, amount as number);
+      }
+
+      const segment = city.addBuilding('wall', spot.x, spot.y);
+      tile.buildingId = segment.id;
+      tile.cityId = city.id;
+      if (city.kingdomId) tile.kingdomId = city.kingdomId;
+      city.territory.add(`${spot.x},${spot.y}`);
+      world.tileMap.markRenderDirty(spot.x, spot.y);
+      laid++;
     }
   }
 
@@ -757,6 +856,8 @@ export class CivilizationEngine {
       if (!def) continue;
       if (def.unique && city.hasBuilding(type)) continue;
       if (type === 'port' && !city.hasBuilding('harbor')) continue;
+      // Walls are laid as a line by `fortifyCity`, not sited as premises here.
+      if (type === 'wall') continue;
 
       // Resource/coastal feasibility is checked before economic desire. A city can
       // no longer choose an impossible oil well and then stop construction entirely.

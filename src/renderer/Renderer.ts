@@ -528,7 +528,39 @@ export class PixelRenderer {
       }
     };
 
-    connectNearest(walls, 4.5, 'rgba(30,41,59,0.8)', 'rgba(100,116,139,0.92)', 0.25, 0.13);
+    // Every touching pair, not just the nearest one. A curtain is a chain, and
+    // linking each segment to a single partner drew barely half of it — one of
+    // the reasons walls never looked like walls.
+    const connectAllWithin = (
+      items: typeof all,
+      maxDistance: number,
+      outer: string,
+      inner: string,
+      outerW: number,
+      innerW: number
+    ) => {
+      for (const a of items) {
+        for (const b of items) {
+          // Each pair once.
+          if (a.id >= b.id) continue;
+          if (Math.hypot(a.x - b.x, a.y - b.y) > maxDistance) continue;
+          const pa = camera.worldToScreen(a.x, a.y, width, height);
+          const pb = camera.worldToScreen(b.x, b.y, width, height);
+          this.ctx.lineCap = 'square';
+          this.ctx.strokeStyle = outer;
+          this.ctx.lineWidth = Math.max(2, tileSize * outerW);
+          this.ctx.beginPath();
+          this.ctx.moveTo(pa.x + tileSize * 0.5, pa.y + tileSize * 0.72);
+          this.ctx.lineTo(pb.x + tileSize * 0.5, pb.y + tileSize * 0.72);
+          this.ctx.stroke();
+          this.ctx.strokeStyle = inner;
+          this.ctx.lineWidth = Math.max(1, tileSize * innerW);
+          this.ctx.stroke();
+        }
+      }
+    };
+
+    connectAllWithin(walls, 1.8, 'rgba(30,41,59,0.8)', 'rgba(100,116,139,0.92)', 0.25, 0.13);
     connectNearest(aqueducts, 7, 'rgba(71,85,105,0.75)', 'rgba(125,211,252,0.72)', 0.18, 0.07);
   }
 
