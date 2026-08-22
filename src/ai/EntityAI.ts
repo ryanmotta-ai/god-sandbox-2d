@@ -719,13 +719,16 @@ export class SimulationEngine {
   private tickDeerAI(e: Entity, tileMap: TileMap, speed: number): void {
     const nearby = this.spatialHash.queryRadius(e.x, e.y, 7);
     
-    // Check for threats — flee from predators, wolves, bears, humanoids
+    // Check for threats — flee from predators, wolves, bears, humanoids.
+    // Asked in this order because most of what a deer can see is other deer,
+    // and three equality tests are cheaper than the square root they skip.
     for (const other of nearby) {
       if (other.id === e.id) continue;
-      const dist = SimplePathfinder.distance(e.x, e.y, other.x, other.y);
       const isThreat = other.species === SpeciesType.WOLF || other.species === SpeciesType.BEAR ||
                        other.species === SpeciesType.DRAGON || SPECIES_DEFINITIONS[other.species].isHumanoid;
-      if (isThreat && dist < 6) {
+      if (!isThreat) continue;
+      const dist = SimplePathfinder.distance(e.x, e.y, other.x, other.y);
+      if (dist < 6) {
         e.aiState = 'flee';
         const pos = SimplePathfinder.fleeFrom(e.x, e.y, other.x, other.y, tileMap, speed * 1.5);
         e.x = pos.x; e.y = pos.y;
@@ -764,13 +767,24 @@ export class SimulationEngine {
    * whole species went extinct in their first two years, before they had built
    * anything at all.
    */
-  private preyRisk(target: Entity, nearby: Entity[], tileMap: TileMap): number {
+  /**
+   * The company a predator has to weigh before picking a target: the grown
+   * people in sight, which is the only part of `nearby` risk depends on.
+   *
+   * Hoisted out because `preyRisk` is asked about every candidate in turn and
+   * used to re-filter the whole neighbourhood each time — the same scan, once
+   * per candidate, for an answer that never varied between them.
+   */
+  private adultsAmong(nearby: Entity[]): Entity[] {
+    return nearby.filter(o => o.hp > 0 && !o.isChild && SPECIES_DEFINITIONS[o.species].isHumanoid);
+  }
+
+  private preyRisk(target: Entity, crowd: Entity[], tileMap: TileMap): number {
     if (!SPECIES_DEFINITIONS[target.species].isHumanoid) return 0;
 
     let risk = 0;
-    for (const other of nearby) {
-      if (other.id === target.id || other.hp <= 0) continue;
-      if (!SPECIES_DEFINITIONS[other.species].isHumanoid || other.isChild) continue;
+    for (const other of crowd) {
+      if (other.id === target.id) continue;
       if (SimplePathfinder.distance(other.x, other.y, target.x, target.y) > 6) continue;
       risk += 7;
       if (other.profession === 'soldier') risk += 12;
@@ -796,7 +810,11 @@ export class SimulationEngine {
       }
     }
 
-    // Find prey — prefer lone targets, avoid large groups
+    // Find prey — prefer lone targets, avoid large groups.
+    // The crowd and the pack are the same for every candidate, so they are
+    // gathered once here rather than re-filtered inside the scoring loop.
+    const crowd = this.adultsAmong(nearby);
+    const packMates = nearby.filter(p => p.species === SpeciesType.WOLF && p.id !== e.id);
     let bestPrey: Entity | null = null;
     let bestScore = -Infinity;
     for (const other of nearby) {
@@ -810,9 +828,12 @@ export class SimulationEngine {
       let score = -dist;
       if (isDeer) score += 5; // Prefer deer
       if (other.hp < other.maxHp * 0.5) score += 3; // Prefer wounded
-      score -= this.preyRisk(other, nearby, tileMap);
+      score -= this.preyRisk(other, crowd, tileMap);
       // Count nearby pack members for pack hunting bonus
-      const packCount = nearby.filter(p => p.species === SpeciesType.WOLF && p.id !== e.id && SimplePathfinder.distance(p.x, p.y, other.x, other.y) < 8).length;
+      let packCount = 0;
+      for (const p of packMates) {
+        if (SimplePathfinder.distance(p.x, p.y, other.x, other.y) < 8) packCount++;
+      }
       score += packCount * 2;
 
       if (score > bestScore) { bestScore = score; bestPrey = other; }
@@ -848,6 +869,7 @@ export class SimulationEngine {
     const nearby = this.spatialHash.queryRadius(e.x, e.y, 8);
 
     // Attack anything that comes too close (territorial)
+    const crowd = this.adultsAmong(nearby);
     let closestIntruder: Entity | null = null;
     let closestDist = DETECTION_RANGE;
     for (const other of nearby) {
@@ -856,7 +878,7 @@ export class SimulationEngine {
       if (SPECIES_DEFINITIONS[other.species]?.isHumanoid && other.age < 3) continue;
       // A bear is territorial, not suicidal: it does not charge a crowd or walk
       // into a settlement to pick a fight.
-      if (this.preyRisk(other, nearby, tileMap) > 12) continue;
+      if (this.preyRisk(other, crowd, tileMap) > 12) continue;
       const dist = SimplePathfinder.distance(e.x, e.y, other.x, other.y);
       if (dist < closestDist && dist < 6) {
         closestDist = dist;
