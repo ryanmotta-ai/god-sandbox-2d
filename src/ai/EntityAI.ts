@@ -17,7 +17,7 @@ import { sound } from '../core/SoundSynth';
 import { rng, nextId, hashString, hashToUnit } from '../core/Random';
 import { WorldMarket } from '../civ/Economy';
 import { TradeNetwork } from '../civ/Trade';
-import { GoodId, MINEABLE_GOODS } from '../civ/Goods';
+import { GoodId, MINEABLE_GOODS, QUARRY_GOODS } from '../civ/Goods';
 import { tileResourceToGood } from '../world/Tile';
 import { events } from '../core/EventBus';
 import { CivilizationEngine } from '../civ/CivilizationEngine';
@@ -101,6 +101,24 @@ const COMBAT_RANGE = 1.8;
 const HUNT_RANGE = 3.5; // thrown spear / bow range for a hunting citizen
 const DETECTION_RANGE = 8;
 const FLEE_THRESHOLD = 0.25; // Flee when HP below 25%
+
+/**
+ * What a person can win from the ground with their hands and a pick.
+ *
+ * Stone was missing from this. Food and wood could always be foraged, but stone
+ * came only from a quarry building — so a settlement that spent its starting
+ * thirty stone before it could afford one, or whose seam ran dry, could never
+ * build anything of stone again. Barracks, walls and keeps all cost stone, so
+ * that one omission quietly closed off the entire military tree.
+ */
+const HAND_GATHERABLE: GoodId[] = [...MINEABLE_GOODS, ...QUARRY_GOODS];
+
+/** How far past its housing a settlement will still bear children at all. */
+const OVERCROWDING_LIMIT = 1.4;
+/** Grievance a distant realm needs before it will consider war. */
+const WAR_GRIEVANCE_BASE = -14;
+/** How much of that grievance a shared border excuses. */
+const WAR_GRIEVANCE_PROXIMITY = 12;
 
 /**
  * SOC-V2 migration limits.
@@ -556,6 +574,21 @@ export class SimulationEngine {
         ...warWorld,
         fronts: this.fronts
       }));
+      /**
+       * Diplomacy is a yearly matter, and now runs on the same clock as
+       * everything else.
+       *
+       * It used to be driven per frame from main.ts, so every pair of realms
+       * was reconsidered 720 times a year. The gentle yearly pull back toward
+       * neutral became about 360 points a year, which pinned every relation —
+       * hostile *and* friendly — inside a narrow band around zero: nobody could
+       * accumulate enough hatred to declare war, and nobody could reach the +62
+       * an alliance needs either. It also meant every headless run in tests/
+       * simulated a diplomacy the player never experienced, because main.ts was
+       * the only caller and the tests never went through main.ts.
+       */
+      this.tickSuccession();
+      this.diplomacy.tickDiplomacy([...this.kingdoms.keys()], this.currentYear);
       this.tickGeopolitics();
       this.musterArmies();
     }
@@ -1384,7 +1417,15 @@ if (e.kingdomId) {
       // the whole settlement visibly stands around doing nothing for decades.
       if (!e.isChild) {
         const needsFood = city.stock.get('food') < city.population * 3;
-        e.aiState = needsFood || rng.chance(0.6) ? 'gather_food' : 'gather_wood';
+        // A band short of stone sends people to break rock by hand, the same way
+        // it sends them to forage. Without this branch nobody ever gathered
+        // stone outside a quarry.
+        const quarryByHand = !needsFood
+          && city.stock.get('stone') < 20
+          && !!this.findNearestResourceTile(e.x, e.y, tileMap, 10);
+        e.aiState = quarryByHand && rng.chance(0.5) ? 'gather_ore'
+          : needsFood || rng.chance(0.6) ? 'gather_food'
+          : 'gather_wood';
         e.aiCooldown = rng.rangeInt(30, 60);
         return;
       }
@@ -1860,7 +1901,15 @@ if (e.kingdomId) {
         const hx = e.homeX ?? e.x;
         const hy = e.homeY ?? e.y;
         if (Math.hypot(hx - e.x, hy - e.y) >= 0.9) {
-          this.moveEntityToward(e, hx, hy, tileMap, speed);
+          const pos = this.moveEntityToward(e, hx, hy, tileMap, speed);
+          // A hungry citizen used to walk into whatever stood between them and
+          // their pantry — a wall, a row of new houses — and keep walking into
+          // it until they starved, because this result was never read. If the
+          // way home is shut, eat in the field rather than die in front of it.
+          if (pos.blocked) {
+            e.aiState = 'gather_food';
+            e.aiCooldown = rng.rangeInt(10, 20);
+          }
           break;
         }
 
@@ -2466,6 +2515,34 @@ if (e.kingdomId) {
     }
   }
 
+  /**
+   * A throne left empty used to stay empty.
+   *
+   * Succession was only ever attempted at the instant a ruler died. If the realm
+   * had no adult to crown right then — a young dynasty, a plague, a lost war —
+   * `rulerId` was set to null and never looked at again, so the children who
+   * came of age five years later inherited nothing and the realm stayed
+   * leaderless for the rest of the world's life.
+   */
+  private tickSuccession(): void {
+    for (const kingdom of this.kingdoms.values()) {
+      const ruler = kingdom.rulerId ? this.getEntity(kingdom.rulerId) : null;
+      if (ruler && ruler.hp > 0) continue;
+
+      const candidates = this.entities.filter(e => e.kingdomId === kingdom.id && e.hp > 0);
+      const heir = chooseSuccessor(null, kingdom.dynasty, candidates, GOVERNMENTS[kingdom.government].succession);
+      if (!heir) { kingdom.rulerId = null; continue; }
+
+      heir.profession = 'king';
+      kingdom.rulerId = heir.id;
+      if (!heir.dynasty) heir.dynasty = generateDynastyName(heir.species);
+      kingdom.dynasty = heir.dynasty;
+
+      chronicle.log(this.currentYear, 'king', `${heir.fullName} pôs fim ao interregno e assumiu o trono de ${kingdom.name}.`);
+      events.emit('rulerCrowned', { kingdom, ruler: heir, previous: null, year: this.currentYear });
+    }
+  }
+
   // ===================== GEOPOLITICS (YEARLY) =====================
 
   /**
@@ -2503,13 +2580,23 @@ if (e.kingdomId) {
         if (this.diplomacy.isAtWar(k1.id, k2.id)) continue;
 
         const relation = this.diplomacy.getRelation(k1.id, k2.id);
-        const cap1 = this.cities.get(k1.capitalCityId);
-        const cap2 = this.cities.get(k2.capitalCityId);
-        const dist = cap1 && cap2 ? Math.hypot(cap1.x - cap2.x, cap1.y - cap2.y) : 70;
+        // How close two realms are is a question about their frontiers, not
+        // their capitals. Border towns can sit twelve tiles apart while the two
+        // capitals are at opposite ends of the map, and measuring capitals made
+        // the clause below unreachable for every realm that actually had a
+        // neighbour. Same helper the economy uses, so both agree on "close".
+        const dist = this.civ.closestRealmDistance(k1, k2, this.cities);
         const proximity = Math.min(1, Math.max(0, 1 - dist / 70));
         // War is a real danger once relations sour; proximity sharpens it.
         if (proximity <= 0) continue;
-        if (relation > -12 && !(proximity > 0.82 && relation <= -4)) continue;
+        // A realm needs no blood feud to covet the fields next door. How much
+        // grievance it takes scales with how close the two sit: neighbours who
+        // share a fence need only to have stopped being friends, a realm across
+        // the map needs a real one. This was a flat -12 plus a clause requiring
+        // capitals within 12.6 tiles — neither reachable — so everything below
+        // it, all the aggression and confidence and border ambition, was dead
+        // code that never ran once in a two-hundred-year world.
+        if (relation > WAR_GRIEVANCE_BASE + proximity * WAR_GRIEVANCE_PROXIMITY) continue;
 
         // Aggression comes from the government and the ruler's temperament.
         const aggressor = gov1.aggression >= gov2.aggression ? k1 : k2;
@@ -2584,8 +2671,11 @@ if (e.kingdomId) {
         const food = city.stock.get('food');
         const civilians = this.entities.filter(e =>
           e.cityId === cityId && e.hp > 0 && !e.isChild &&
-          e.profession !== 'soldier' && e.profession !== 'king' && e.profession !== 'none'
+          e.profession !== 'soldier' && e.profession !== 'king'
         );
+        // Anyone without a job goes first — they were the one group the levy
+        // used to skip, by excluding 'none' along with kings and serving
+        // soldiers.
         // Workers that can be spared without cutting food production.
         const nonFood = civilians.filter(e => e.profession !== 'farmer' && e.profession !== 'woodcutter');
         const pool = nonFood.length > 0 && food >= city.population * 1.2
@@ -2593,7 +2683,7 @@ if (e.kingdomId) {
           : food >= city.population * 3 ? civilians : [];
         if (pool.length === 0) continue;
 
-        const priority: Record<string, number> = { builder: 0, scout: 1, miner: 2, woodcutter: 3, farmer: 4 };
+        const priority: Record<string, number> = { none: -1, builder: 0, scout: 1, miner: 2, woodcutter: 3, farmer: 4 };
         const ordered = pool.sort((a, b) => (priority[a.profession] ?? 9) - (priority[b.profession] ?? 9));
 
         for (let i = 0; i < Math.min(openSlots, need, 4, ordered.length); i++) {
@@ -2632,7 +2722,7 @@ if (e.kingdomId) {
       if (!city) continue;
 
       const housing = Math.max(4, city.housingCapacity());
-      const crowded = residents.length >= housing;
+      const crowding = residents.length / housing;
       const foodPerHead = city.stock.get('food') / Math.max(1, residents.length);
 
       // Courtship: pair off unattached adults.
@@ -2648,8 +2738,17 @@ if (e.kingdomId) {
         }
       }
 
-      // Childbirth: only when there is food and room.
-      if (crowded || foodPerHead < 1.6) continue;
+      /**
+       * Childbirth needs food and room — but "room" used to be a cliff. The
+       * moment residents reached housing capacity the birth rate became exactly
+       * zero, so a settlement filled up, stopped having children entirely, and
+       * then died of old age in a single wave: everyone had been born within a
+       * few years of each other, so everyone grew old within a few years of each
+       * other. Crowding now suppresses births steeply instead of forbidding
+       * them, which keeps the pressure to build housing without the die-off.
+       */
+      if (foodPerHead < 1.6 || crowding >= OVERCROWDING_LIMIT) continue;
+      const roomForChildren = crowding < 1 ? 1 : 0.15;
 
       const couples = new Set<string>();
       for (const parent of residents) {
@@ -2668,7 +2767,7 @@ if (e.kingdomId) {
         // drives building slots and territory, and those drive everything else.
         // At the old rate a couple produced a child roughly every seven years and
         // no settlement ever reached town size within a playable span.
-        let chance = 0.7 * city.prosperity + Math.min(0.32, foodPerHead / 20);
+        let chance = (0.7 * city.prosperity + Math.min(0.32, foodPerHead / 20)) * roomForChildren;
 
         if (!rng.chance(chance)) continue;
 
@@ -3161,7 +3260,7 @@ if (e.kingdomId) {
     for (let dx = -radius; dx <= radius; dx++) {
       for (let dy = -radius; dy <= radius; dy++) {
         const tile = tileMap.getTile(cx + dx, cy + dy);
-        if (!tile || !tile.resourceType || !MINEABLE_GOODS.includes(tile.resourceType)) continue;
+        if (!tile || !tile.resourceType || !HAND_GATHERABLE.includes(tile.resourceType)) continue;
         if (tile.resourceAmount <= 0) continue;
         const dist = dx * dx + dy * dy;
         if (dist < bestDist) { bestDist = dist; best = tile; }

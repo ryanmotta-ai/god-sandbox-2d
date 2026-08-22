@@ -287,7 +287,13 @@ function canAfford(city: City, pathLength: number): { stone: number; wood: numbe
   const timber = material === 'timber' || material === 'thatch';
   const stone = Math.ceil(pathLength * (timber ? .42 : 1.18));
   const wood = Math.ceil(pathLength * (timber ? 1.15 : .28));
-  return city.stock.get('stone') >= stone && city.stock.get('wood') >= wood ? { stone, wood } : null;
+  // A circuit must not spend the settlement's last stone. This used to commission
+  // walls the moment the exact cost was on hand, which emptied the stores and left
+  // nothing for the barracks, smithy or keep that also need stone — a city with
+  // forty-five wall segments would sit on seven stone and never build anything of
+  // stone again. Keep enough back for one ordinary stone building.
+  const reserve = 40;
+  return city.stock.get('stone') >= stone + reserve && city.stock.get('wood') >= wood ? { stone, wood } : null;
 }
 
 export interface FortificationTickResult {
