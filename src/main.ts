@@ -67,6 +67,8 @@ const DEV_RENDER_SEED = (() => {
 })();
 
 /** Probability that the world spawns a disaster on its own, rolled once per simulated year. */
+/** Ambient weather hits softer than a god's own hand. */
+const NATURAL_DISASTER_SEVERITY = 0.45;
 const DISASTER_CHANCE_PER_YEAR: Record<string, number> = {
   none: 0,
   rare: 0.02,
@@ -281,12 +283,18 @@ class AethoriaGame implements GameContext {
       // A real food chain is mostly prey. Seeding half the wildlife as wolves and
       // bears meant the founding bands were hunted to the edge of extinction in
       // their first years, and the predators then starved with nothing left to eat.
+      // The mammoth was simply left out of this list, so it existed as a species
+      // the player could spawn and never as an animal the world produced.
       const fauna = [
         SpeciesType.DEER, SpeciesType.DEER, SpeciesType.DEER, SpeciesType.DEER,
         SpeciesType.DEER, SpeciesType.BOAR, SpeciesType.BOAR, SpeciesType.EAGLE,
-        SpeciesType.WOLF, SpeciesType.BEAR
+        SpeciesType.WOLF, SpeciesType.BEAR, SpeciesType.MAMMOTH
       ];
-      const wildCount = Math.round((config.size * config.size) / 700);
+      // One animal per seven hundred tiles left a 128x128 world with about
+      // twenty-three creatures across eleven kinds — two wolves, two bears. A
+      // species that loses one member cannot breed, so the food chain collapsed
+      // in the first decades and never recovered.
+      const wildCount = Math.round((config.size * config.size) / 300);
       for (let i = 0; i < wildCount; i++) {
         const spot = this.randomWalkableTile();
         if (!spot) continue;
@@ -957,14 +965,14 @@ class AethoriaGame implements GameContext {
 
     const roll = Math.random();
     if (roll < 0.5) {
-      DisasterSystem.triggerLightning(spot.x, spot.y, this.tileMap, this.sim.spatialHash, this.particles, this.camera);
+      DisasterSystem.triggerLightning(spot.x, spot.y, this.tileMap, this.sim.spatialHash, this.particles, this.camera, NATURAL_DISASTER_SEVERITY);
       this.toast('Lightning splits the sky', 'disaster');
     } else if (roll < 0.8) {
       this.tileMap.applyBrush(spot.x, spot.y, 2, t => { t.isOnFire = true; });
       this.toast('A wildfire has broken out', 'disaster');
       chronicle.log(this.sim.currentYear, 'disaster', 'A wildfire swept across the land.');
     } else {
-      DisasterSystem.triggerEarthquake(spot.x, spot.y, this.tileMap, this.particles, this.camera);
+      DisasterSystem.triggerEarthquake(spot.x, spot.y, this.tileMap, this.particles, this.camera, NATURAL_DISASTER_SEVERITY);
       this.toast('The ground shakes violently', 'disaster');
       chronicle.log(this.sim.currentYear, 'disaster', 'An earthquake fractured the earth.');
     }

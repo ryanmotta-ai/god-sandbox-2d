@@ -9,20 +9,29 @@ import { ParticleManager } from '../renderer/Particles';
 import { Camera } from '../renderer/Camera';
 
 export class DisasterSystem {
-  public static triggerLightning(x: number, y: number, tileMap: TileMap, spatialHash: SpatialHash<Entity>, particles: ParticleManager, camera?: Camera): void {
+  /**
+   * `severity` separates an act of god from the weather.
+   *
+   * The player's own lightning should be devastating — that is the whole point
+   * of a god power. But main.ts fires the same function as an ambient natural
+   * disaster, and at full strength one strike ruined a building outright and set
+   * it alight. A ruin takes seven to thirteen years to rebuild, so on the higher
+   * disaster frequencies a settlement lost ground faster than it could recover it.
+   */
+  public static triggerLightning(x: number, y: number, tileMap: TileMap, spatialHash: SpatialHash<Entity>, particles: ParticleManager, camera?: Camera, severity: number = 1): void {
     sound.playThunder();
     particles.spawnExplosion(x, y, '#fef08a', 25);
     if (camera) camera.triggerShake(10, 0.25);
 
     tileMap.applyBrush(x, y, 1.5, tile => {
       tile.isOnFire = true;
-      if (tile.buildingId) tileMap.recordBuildingDamage(tile, .72, 'disaster');
+      if (tile.buildingId) tileMap.recordBuildingDamage(tile, .72 * severity, 'disaster');
     });
 
     const hitEntities = spatialHash.queryRadius(x, y, 3);
     for (const e of hitEntities) {
-      e.hp -= 80;
-      particles.spawnDamageNumber(e.x, e.y, 80);
+      e.hp -= 80 * severity;
+      particles.spawnDamageNumber(e.x, e.y, Math.round(80 * severity));
     }
   }
 
@@ -61,7 +70,7 @@ export class DisasterSystem {
     }
   }
 
-  public static triggerEarthquake(x: number, y: number, tileMap: TileMap, particles: ParticleManager, camera?: Camera): void {
+  public static triggerEarthquake(x: number, y: number, tileMap: TileMap, particles: ParticleManager, camera?: Camera, severity: number = 1): void {
     sound.playHit();
     particles.spawnExplosion(x, y, '#78350f', 30);
     if (camera) camera.triggerShake(14, 0.4);
@@ -70,9 +79,12 @@ export class DisasterSystem {
       if (tile.type === TerrainType.MOUNTAIN) {
         tile.type = TerrainType.SOIL;
       } else if (!tile.type.includes('ocean')) {
-        tile.height = Math.max(0, tile.height - 0.25);
+        // Lowering the ground is permanent. At full strength an ambient quake
+        // sank coastal blocks under shallow water for the rest of the world's
+        // life; a god's earthquake still can, the weather's should not.
+        tile.height = Math.max(0, tile.height - 0.25 * severity);
       }
-      if (tile.buildingId) tileMap.recordBuildingDamage(tile, .48, 'disaster');
+      if (tile.buildingId) tileMap.recordBuildingDamage(tile, .48 * severity, 'disaster');
     });
   }
 

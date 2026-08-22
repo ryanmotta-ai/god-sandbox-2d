@@ -1800,7 +1800,10 @@ if (e.kingdomId) {
           // A hunter commits to a short pursuit rather than walking at the
           // civilian pace; otherwise every healthy deer can outrun a human
           // forever and hunting never resolves into an ecological cost.
-          const pos = this.moveEntityToward(e, prey.x, prey.y, tileMap, speed * 4);
+          // A hunter used to run down prey at four times walking pace, which no
+          // deer can outrun, so the herds were emptied before the first farms
+          // were finished. Fast enough to catch a straggler, not the whole herd.
+          const pos = this.moveEntityToward(e, prey.x, prey.y, tileMap, speed * 1.6);
           if (pos.blocked) { e.targetX = null; e.targetY = null; e.aiCooldown = 0; }
           break;
         }
@@ -2387,6 +2390,11 @@ if (e.kingdomId) {
    * is in their hands, by who is behind them, and by who they are.
    */
   private willStandGround(e: Entity, threats: number): boolean {
+    // A pacifist does not pick up the spear. The "Toque de Paz" god power grants
+    // this trait and promises an "índole pacifista que evita combates", and it is
+    // inherited down the generations — but nothing in the simulation had ever
+    // read it, so the power did precisely nothing.
+    if (e.traits.has(TraitId.PACIFIST)) return false;
     const family = this.spatialHash.queryRadius(e.x, e.y, 5)
       .some(o => o.id !== e.id && o.hp > 0 && (o.id === e.partnerId || e.childrenIds.includes(o.id)));
     return rng.chance(standGroundChance(e.psyche, {
