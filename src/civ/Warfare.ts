@@ -1,29 +1,28 @@
-import { City } from './City';
-import { Kingdom } from './Kingdom';
+import { City, SiegePhase, SiegeState } from './City';
+import { Kingdom, MilitaryDoctrine, MilitaryTradition, DoctrineType } from './Kingdom';
 import { Entity } from '../entities/Entity';
 import { SPECIES_DEFINITIONS } from '../entities/Species';
 import { GOVERNMENTS } from './Government';
 import { DiplomacyManager, WarRecord } from './Diplomacy';
 import { TileMap } from '../world/TileMap';
+import { TerrainType } from '../world/Biomes';
 import { chronicle } from './Chronicle';
 import { events } from '../core/EventBus';
 import { rng, nextId } from '../core/Random';
 import { ALL_GOODS } from './Goods';
 import { TraitId } from '../entities/Traits';
 import { damageRoadsAround, damageRailAround, damagePrimaryRoads, damageStrategicBuildings } from './Infrastructure';
+import { WarFrontSystem, SIEGE_GATE_PUSH } from './WarFronts';
 
 /**
- * WAR-V1 — Estratégia Militar e Resolução Tática de Conflitos
- *
- * A guerra deixa de ser um mero passeio caótico de soldados e passa a ser
- * uma decisão estratégica: formação de exércitos em regimentos, liderança de
- * generais com traços táticos, companhias mercenárias contratáveis, campanhas
- * de invasão coordenadas por objetivos de guerra (War Goals) e batalhas campais.
+ * WAR-V4 — Combate Tático (Infantaria, Cavalaria, Arqueiros, Artilharia, Terreno, Fadiga, Moral, Perseguição e Rota)
+ * WAR-V5 — Cercos Estruturados (Muralhas, Brechas, Portões, Torres, Bombardeio, Fome e Rendição)
+ * WAR-V6 — Doutrina Militar (Tradições, Composição Preferida, Treinamento e Evolução Tecnológica)
  */
 
 export const SIEGE_RADIUS = 7;
 const SIEGE_THRESHOLD = 1.0;
-const STARVATION_YEARS = 8;
+const STARVATION_YEARS = 6;
 export const FIELD_BATTLE_RADIUS = 5;
 
 export type CommanderTrait = 'tactician' | 'valiant' | 'fortifier' | 'ruthless';
@@ -42,6 +41,16 @@ export interface Commander {
 
 export type ArmyCampaignState = 'mustering' | 'marching' | 'besieging' | 'defending' | 'retreating' | 'garrisoned';
 
+export type UnitRole = 'infantry' | 'cavalry' | 'archer' | 'artillery' | 'militia';
+
+export interface ArmyComposition {
+  infantry: number;
+  cavalry: number;
+  archers: number;
+  artillery: number;
+  militia: number;
+}
+
 export interface Army {
   id: string;
   name: string;
@@ -56,6 +65,9 @@ export interface Army {
   stance: 'aggressive' | 'defensive' | 'plunder';
   readiness: number; // 0..1
   morale: number; // 0..1
+  fatigue: number; // 0..1 (WAR-V4)
+  experience: number; // 0..1 (WAR-V4 / WAR-V6)
+  composition?: ArmyComposition; // (WAR-V4)
   isMercenary?: boolean;
   mercenaryCompanyId?: string;
   createdYear: number;
@@ -85,6 +97,7 @@ export interface WarfareWorld {
   entities: Entity[];
   tileMap: TileMap;
   diplomacy: DiplomacyManager;
+  fronts?: WarFrontSystem;
 }
 
 interface SiegeAssessment {
@@ -92,6 +105,102 @@ interface SiegeAssessment {
   attackStrength: number;
   defenceStrength: number;
   besiegingArmies: Army[];
+}
+
+/** Modificador de combate baseado no terreno local (WAR-V4). */
+export function terrainCombatModifier(terrain: TerrainType, role: UnitRole): number {
+  switch (terrain) {
+    case TerrainType.GRASS:
+    case TerrainType.SOIL:
+      return role === 'cavalry' ? 1.2 : 1.0;
+    case TerrainType.FOREST:
+      if (role === 'infantry') return 1.15;
+      if (role === 'cavalry') return 0.70;
+      if (role === 'archer') return 0.85;
+      if (role === 'artillery') return 0.60;
+      return 1.0;
+    case TerrainType.SWAMP:
+      if (role === 'infantry') return 0.85;
+      if (role === 'cavalry') return 0.50;
+      if (role === 'archer') return 0.90;
+      if (role === 'artillery') return 0.40;
+      return 0.8;
+    case TerrainType.SAND:
+      if (role === 'archer') return 1.10;
+      if (role === 'cavalry') return 1.00;
+      if (role === 'artillery') return 0.80;
+      return 0.90;
+    case TerrainType.TUNDRA:
+    case TerrainType.SNOW:
+      if (role === 'cavalry') return 0.75;
+      if (role === 'artillery') return 0.70;
+      return 0.85;
+    case TerrainType.MOUNTAIN:
+      if (role === 'archer') return 1.30;
+      if (role === 'infantry') return 1.20;
+      if (role === 'cavalry') return 0.40;
+      if (role === 'artillery') return 0.50;
+      return 1.0;
+    case TerrainType.ARCANE:
+      return role === 'archer' ? 1.15 : 1.0;
+    default:
+      return 1.0;
+  }
+}
+
+/** Determina o papel de combate (UnitRole) de uma entidade baseado em equipamentos, classe e traços. */
+export function determineUnitRole(entity: Entity, kingdom?: Kingdom): UnitRole {
+  if (entity.profession === 'farmer' || entity.profession === 'builder' || entity.profession === 'miner') {
+    return 'militia';
+  }
+
+  const weapon = entity.equipment.weapon;
+  const isCavalry = entity.traits.has(TraitId.QUICK) ||
+    (kingdom?.doctrine?.type === 'cavalry_focus' && rng.chance(0.45));
+
+  if (weapon) {
+    if (weapon.category === 'siege') return 'artillery';
+    if (weapon.category === 'ranged') return 'archer';
+    if (weapon.category === 'melee' || weapon.category === 'heavy') {
+      return isCavalry ? 'cavalry' : 'infantry';
+    }
+  }
+
+  if (entity.profession === 'archer') return 'archer';
+  return isCavalry ? 'cavalry' : 'infantry';
+}
+
+/** Calcula a composição de unidades de um exército. */
+export function computeArmyComposition(army: Army, world: WarfareWorld): ArmyComposition {
+  const comp: ArmyComposition = { infantry: 0, cavalry: 0, archers: 0, artillery: 0, militia: 0 };
+  const kingdom = world.kingdoms.get(army.kingdomId);
+
+  if (army.isMercenary && army.mercenaryCompanyId) {
+    comp.infantry = 4;
+    comp.cavalry = 3;
+    comp.archers = 2;
+    comp.artillery = 1;
+    return comp;
+  }
+
+  for (const sId of army.soldierIds) {
+    const s = world.entities.find(e => e.id === sId && e.hp > 0);
+    if (!s) continue;
+    const role = determineUnitRole(s, kingdom);
+    if (role === 'infantry') comp.infantry++;
+    else if (role === 'cavalry') comp.cavalry++;
+    else if (role === 'archer') comp.archers++;
+    else if (role === 'artillery') comp.artillery++;
+    else comp.militia++;
+  }
+
+  return comp;
+}
+
+/** Obtém o tipo de terreno dominante na região de uma batalha. */
+export function getBattleTerrain(tileMap: TileMap, x: number, y: number): TerrainType {
+  const tile = tileMap.getTile(Math.round(x), Math.round(y));
+  return tile ? tile.type : TerrainType.GRASS;
 }
 
 export class WarfareSystem {
@@ -111,6 +220,7 @@ export class WarfareSystem {
     this.settleConcludedWars(world);
     this.maintainMercenaries(world);
     this.organizeKingdomArmies(world);
+    this.applyTrainingBonus(world);
     this.planCampaigns(world);
     this.applyMilitaryUpkeep(world);
     this.resolveFieldBattles(world);
@@ -132,6 +242,62 @@ export class WarfareSystem {
     }
 
     this.updateWarGoalsProgress(world);
+
+    for (const kingdom of world.kingdoms.values()) {
+      this.evolveDoctrine(kingdom, world);
+    }
+  }
+
+  /** WAR-V6: Treinamento passivo e descanso de fadiga em guarnições. */
+  private applyTrainingBonus(world: WarfareWorld): void {
+    for (const kingdom of world.kingdoms.values()) {
+      const armies = this.getArmiesForKingdom(kingdom.id);
+      for (const army of armies) {
+        army.composition = computeArmyComposition(army, world);
+
+        if (army.state === 'garrisoned' || army.state === 'mustering') {
+          army.fatigue = Math.max(0, army.fatigue - 0.15);
+          army.morale = Math.min(1.0, army.morale + 0.06);
+          const trainingRate = 0.03 + (kingdom.doctrine?.trainingBonus ?? 0.05);
+          army.experience = Math.min(1.0, army.experience + trainingRate);
+
+          for (const sId of army.soldierIds) {
+            const s = world.entities.find(e => e.id === sId && e.hp > 0);
+            if (s) s.gainXp(12);
+          }
+        } else if (army.state === 'marching' || army.state === 'besieging') {
+          army.fatigue = Math.min(0.8, army.fatigue + 0.05);
+        }
+      }
+    }
+  }
+
+  /** WAR-V6: Evolução da doutrina militar com base em tecnologias e vitórias. */
+  public evolveDoctrine(kingdom: Kingdom, world: WarfareWorld): void {
+    if (!kingdom.doctrine) return;
+
+    const doc = kingdom.doctrine;
+    const researched = kingdom.research.known;
+
+    if (researched.has('gunpowder') && doc.type !== 'artillery_focus' && !doc.traditions.includes('siege_engineering')) {
+      doc.traditions.push('siege_engineering');
+      doc.evolvedFromTech = 'gunpowder';
+      doc.preferredComposition.artillery = Math.min(0.35, doc.preferredComposition.artillery + 0.15);
+      doc.preferredComposition.infantry = Math.max(0.25, doc.preferredComposition.infantry - 0.10);
+    }
+
+    if (researched.has('animal_husbandry') && researched.has('roads') && !doc.traditions.includes('heavy_cavalry') && doc.experienceLevel > 0.25) {
+      doc.traditions.push('heavy_cavalry');
+    }
+
+    if (researched.has('metallurgy') && !doc.traditions.includes('phalanx')) {
+      doc.traditions.push('phalanx');
+    }
+
+    if (kingdom.culture.militarism > 0.65 && !doc.traditions.includes('professional_army')) {
+      doc.traditions.push('professional_army');
+      doc.trainingBonus = Math.min(0.25, doc.trainingBonus + 0.05);
+    }
   }
 
   private maintainMercenaries(world: WarfareWorld): void {
@@ -223,6 +389,9 @@ export class WarfareSystem {
       stance: 'aggressive',
       readiness: 1.0,
       morale: 0.95,
+      fatigue: 0.0,
+      experience: 0.6,
+      composition: { infantry: 4, cavalry: 3, archers: 2, artillery: 1, militia: 0 },
       isMercenary: true,
       mercenaryCompanyId: company.id,
       createdYear: world.year
@@ -326,6 +495,8 @@ export class WarfareSystem {
             stance: 'aggressive',
             readiness: 0.5,
             morale: 0.9,
+            fatigue: 0.0,
+            experience: 0.1,
             createdYear: world.year
           };
           this.armies.set(armyId, army);
@@ -340,6 +511,8 @@ export class WarfareSystem {
       for (const armyId of kingdom.armyIds) {
         const army = this.armies.get(armyId);
         if (!army || army.isMercenary) continue;
+        army.composition = computeArmyComposition(army, world);
+
         if (!army.commanderId) {
           const veterans = [...army.soldierIds]
             .map(id => world.entities.find(e => e.id === id))
@@ -552,50 +725,145 @@ export class WarfareSystem {
     }
   }
 
+  /**
+   * WAR-V4: Resolução Tática de Batalha Campal
+   * Executa as 3 fases táticas: Artilharia -> Arqueiros -> Choque/Cavalaria,
+   * aplicando terreno, moral, fadiga, doutrinas e resolução de rota com perseguição.
+   */
   private clashFieldArmies(a1: Army, a2: Army, k1: Kingdom, k2: Kingdom, world: WarfareWorld): void {
     const s1 = [...a1.soldierIds].map(id => world.entities.find(e => e.id === id)).filter((e): e is Entity => !!e && e.hp > 0);
     const s2 = [...a2.soldierIds].map(id => world.entities.find(e => e.id === id)).filter((e): e is Entity => !!e && e.hp > 0);
 
     const count1 = a1.isMercenary ? (this.mercenaryCompanies.get(a1.mercenaryCompanyId ?? '')?.size ?? 8) : s1.length;
     const count2 = a2.isMercenary ? (this.mercenaryCompanies.get(a2.mercenaryCompanyId ?? '')?.size ?? 8) : s2.length;
+    if (count1 === 0 || count2 === 0) return;
 
-    let pwr1 = (count1 * 8) * a1.morale * k1.research.modifiers().military;
-    let pwr2 = (count2 * 8) * a2.morale * k2.research.modifiers().military;
+    const battlePos = a1.targetPos ?? { x: 64, y: 64 };
+    const terrain = getBattleTerrain(world.tileMap, battlePos.x, battlePos.y);
+
+    const comp1 = a1.composition ?? computeArmyComposition(a1, world);
+    const comp2 = a2.composition ?? computeArmyComposition(a2, world);
+
+    const trad1 = new Set(k1.doctrine?.traditions ?? []);
+    const trad2 = new Set(k2.doctrine?.traditions ?? []);
+
+    // 1. Fase de Artilharia (Bombardeio pré-contato)
+    const artMod1 = terrainCombatModifier(terrain, 'artillery') * (trad1.has('siege_engineering') ? 1.25 : 1.0);
+    const artMod2 = terrainCombatModifier(terrain, 'artillery') * (trad2.has('siege_engineering') ? 1.25 : 1.0);
+    const artPwr1 = comp1.artillery * 14 * artMod1;
+    const artPwr2 = comp2.artillery * 14 * artMod2;
+
+    // 2. Fase de Arqueiros (Barragem à distância)
+    const archMod1 = terrainCombatModifier(terrain, 'archer') * (trad1.has('longbow_mastery') ? 1.25 : 1.0);
+    const archMod2 = terrainCombatModifier(terrain, 'archer') * (trad2.has('longbow_mastery') ? 1.25 : 1.0);
+    let archPwr1 = comp1.archers * 9 * archMod1;
+    let archPwr2 = comp2.archers * 9 * archMod2;
+    if (trad2.has('shield_wall')) archPwr1 *= 0.75;
+    if (trad1.has('shield_wall')) archPwr2 *= 0.75;
+
+    // 3. Fase de Infantaria & Flanqueamento de Cavalaria
+    const infMod1 = terrainCombatModifier(terrain, 'infantry') * (trad1.has('shield_wall') ? 1.2 : 1.0) * (trad1.has('phalanx') ? 1.15 : 1.0);
+    const infMod2 = terrainCombatModifier(terrain, 'infantry') * (trad2.has('shield_wall') ? 1.2 : 1.0) * (trad2.has('phalanx') ? 1.15 : 1.0);
+    const infPwr1 = comp1.infantry * 8 * infMod1 + comp1.militia * 4 * (trad1.has('conscription') ? 1.2 : 0.9);
+    const infPwr2 = comp2.infantry * 8 * infMod2 + comp2.militia * 4 * (trad2.has('conscription') ? 1.2 : 0.9);
+
+    const cavMod1 = terrainCombatModifier(terrain, 'cavalry') * (trad1.has('heavy_cavalry') ? 1.3 : 1.0);
+    const cavMod2 = terrainCombatModifier(terrain, 'cavalry') * (trad2.has('heavy_cavalry') ? 1.3 : 1.0);
+    let cavPwr1 = comp1.cavalry * 11 * cavMod1;
+    let cavPwr2 = comp2.cavalry * 11 * cavMod2;
+
+    if (comp1.cavalry > comp2.infantry * 0.35) cavPwr1 *= 1.30;
+    if (comp2.cavalry > comp1.infantry * 0.35) cavPwr2 *= 1.30;
+
+    let pwr1 = (artPwr1 + archPwr1 + infPwr1 + cavPwr1 + 8) * k1.research.modifiers().military;
+    let pwr2 = (artPwr2 + archPwr2 + infPwr2 + cavPwr2 + 8) * k2.research.modifiers().military;
+
+    const moraleMod1 = Math.max(0.4, Math.min(1.4, a1.morale));
+    const moraleMod2 = Math.max(0.4, Math.min(1.4, a2.morale));
+    const fatigueMod1 = Math.max(0.5, 1.0 - a1.fatigue * 0.4);
+    const fatigueMod2 = Math.max(0.5, 1.0 - a2.fatigue * 0.4);
+    const expMod1 = 1.0 + a1.experience * 0.35;
+    const expMod2 = 1.0 + a2.experience * 0.35;
+
+    pwr1 *= moraleMod1 * fatigueMod1 * expMod1;
+    pwr2 *= moraleMod2 * fatigueMod2 * expMod2;
 
     if (a1.commanderTrait === 'tactician') pwr1 *= 1.25;
     if (a1.commanderTrait === 'ruthless') pwr1 *= 1.35;
+    if (a1.commanderTrait === 'valiant') pwr1 *= 1.30;
     if (a2.commanderTrait === 'tactician') pwr2 *= 1.25;
     if (a2.commanderTrait === 'ruthless') pwr2 *= 1.35;
+    if (a2.commanderTrait === 'valiant') pwr2 *= 1.30;
 
     const total = pwr1 + pwr2;
     if (total <= 0) return;
 
-    const casualties1 = Math.min(count1, Math.round(count1 * (pwr2 / total) * 0.45));
-    const casualties2 = Math.min(count2, Math.round(count2 * (pwr1 / total) * 0.45));
+    let casualties1 = Math.min(count1, Math.round(count1 * (pwr2 / total) * 0.42));
+    let casualties2 = Math.min(count2, Math.round(count2 * (pwr1 / total) * 0.42));
+
+    const winner = pwr1 >= pwr2 ? a1 : a2;
+    const loser = winner === a1 ? a2 : a1;
+    const winnerKingdom = winner === a1 ? k1 : k2;
+    const loserKingdom = winner === a1 ? k2 : k1;
+    const winnerComp = winner === a1 ? comp1 : comp2;
+
+    winner.morale = Math.min(1.0, winner.morale + 0.08);
+    winner.fatigue = Math.min(1.0, winner.fatigue + 0.15);
+    winner.experience = Math.min(1.0, winner.experience + 0.08);
+    if (winnerKingdom.doctrine) {
+      winnerKingdom.doctrine.experienceLevel = Math.min(1.0, winnerKingdom.doctrine.experienceLevel + 0.05);
+    }
+
+    const loserLossRatio = (loser === a1 ? casualties1 : casualties2) / Math.max(1, (loser === a1 ? count1 : count2));
+    loser.morale = Math.max(0.1, loser.morale - 0.25 - loserLossRatio * 0.35);
+    loser.fatigue = Math.min(1.0, loser.fatigue + 0.22);
+
+    const isRouted = loser.morale < 0.28;
+    let pursuitCasualties = 0;
+
+    if (isRouted && winnerComp.cavalry > 0) {
+      const remainingLosers = Math.max(0, (loser === a1 ? count1 - casualties1 : count2 - casualties2));
+      pursuitCasualties = Math.min(remainingLosers, Math.round(remainingLosers * 0.30));
+      if (loser === a1) casualties1 += pursuitCasualties;
+      else casualties2 += pursuitCasualties;
+    }
+
+    loser.state = 'retreating';
 
     for (let i = 0; i < Math.min(casualties1, s1.length); i++) s1[i].hp = 0;
     for (let i = 0; i < Math.min(casualties2, s2.length); i++) s2[i].hp = 0;
 
     world.diplomacy.recordBattle(k1.id, k2.id, casualties1, casualties2);
 
-    const winner = pwr1 >= pwr2 ? a1 : a2;
-    const loser = winner === a1 ? a2 : a1;
-    loser.morale = Math.max(0.2, loser.morale - 0.3);
-    loser.state = 'retreating';
+    const cmd1 = this.commanders.get(a1.commanderId ?? '');
+    const cmd2 = this.commanders.get(a2.commanderId ?? '');
+    if (cmd1) {
+      cmd1.battlesFought++;
+      if (winner === a1) cmd1.battlesWon++;
+    }
+    if (cmd2) {
+      cmd2.battlesFought++;
+      if (winner === a2) cmd2.battlesWon++;
+    }
+
+    const terrainName = terrain.toUpperCase();
+    const outcomeText = isRouted
+      ? `${loser.name} debandou em rota sob carga de perseguição (+${pursuitCasualties} baixas na fuga)!`
+      : `${loser.name} executou uma retirada estratégica ordenada.`;
 
     chronicle.log(
       world.year,
       'war',
-      `Batalha Campal: ${a1.name} (${k1.name}) enfrentou ${a2.name} (${k2.name}). Baixas: ${casualties1} vs ${casualties2}.`,
+      `Batalha de ${terrainName}: ${a1.name} (${k1.name}) enfrentou ${a2.name} (${k2.name}). Baixas: ${casualties1} vs ${casualties2}. ${outcomeText}`,
       {
-        title: `Batalha Campal`,
-        importance: 'major',
+        title: `Batalha Campal em ${terrainName}`,
+        importance: (casualties1 + casualties2) > 10 ? 'major' : 'notable',
         scope: 'international',
         refs: [
           { kind: 'kingdom', id: k1.id, name: k1.name },
           { kind: 'kingdom', id: k2.id, name: k2.name }
         ],
-        tags: ['batalha campal', 'field-battle', 'war']
+        tags: ['batalha campal', 'field-battle', isRouted ? 'rota' : 'retirada', 'war']
       }
     );
   }
@@ -673,11 +941,16 @@ export class WarfareSystem {
 
     if (!best) return null;
 
-    best.defenceStrength = this.defenceStrength(city, owner, armies);
+    best.defenceStrength = this.defenceStrength(city, owner, armies, world);
     return best;
   }
 
-  private defenceStrength(city: City, owner: Kingdom, armies: Map<string, Entity[]>): number {
+  private defenceStrength(
+    city: City,
+    owner: Kingdom,
+    armies: Map<string, Entity[]>,
+    world?: WarfareWorld
+  ): number {
     const garrison = (armies.get(owner.id) ?? []).filter(
       s => Math.hypot(s.x - city.x, s.y - city.y) <= SIEGE_RADIUS
     );
@@ -692,21 +965,48 @@ export class WarfareSystem {
       if (a.commanderTrait === 'valiant') commanderDefMult = Math.max(commanderDefMult, 1.2);
     }
 
-    return (garrisonStrength + militia) * city.defenseMultiplier() * commanderDefMult;
+    let defence = (garrisonStrength + militia) * city.defenseMultiplier() * commanderDefMult;
+
+    if (world?.fronts?.isIsolated(city.id)) defence *= 0.62;
+
+    return defence;
   }
 
+  /**
+   * WAR-V5: Sistema de Cercos Estruturados
+   */
   private pressSiege(city: City, owner: Kingdom, assessment: SiegeAssessment, world: WarfareWorld): void {
     const { besieger, attackStrength, defenceStrength, besiegingArmies } = assessment;
 
-    if (city.besiegerId !== besieger.id) {
+    if (city.besiegerId !== besieger.id || !city.siegeState) {
       city.besiegerId = besieger.id;
       city.siegeProgress = 0;
       city.siegeYears = 0;
+
+      let siegeEngines = 0;
+      for (const a of besiegingArmies) {
+        const comp = a.composition ?? computeArmyComposition(a, world);
+        siegeEngines += comp.artillery;
+      }
+
+      city.siegeState = {
+        phase: 'encirclement',
+        wallBreaches: 0,
+        towersCaptured: 0,
+        gatesForced: 0,
+        siegeEnginesDeployed: siegeEngines,
+        defenderFood: city.stock.get('food'),
+        defenderMorale: 1.0,
+        attackerMorale: 1.0,
+        surrenderWillingness: 0,
+        assaultAttempts: 0
+      };
+
       const war = world.diplomacy.getWarsFor(besieger.id).find(w => w.attacker === owner.id || w.defender === owner.id);
       chronicle.log(
         world.year,
         'siege',
-        `${besieger.name} iniciou o cerco coordenado de ${city.name}.`,
+        `${besieger.name} iniciou o cerco militar de ${city.name}.`,
         {
           title: `Cerco de ${city.name}`,
           importance: city.id === owner.capitalCityId ? 'legendary' : 'major',
@@ -718,7 +1018,7 @@ export class WarfareSystem {
             ...(war ? [{ kind: 'war' as const, id: war.id, name: war.reason }] : [])
           ],
           tags: ['siege', 'war', city.id === owner.capitalCityId ? 'capital' : 'city'],
-          causes: [`${besieger.name} concentrou regimentos militares para cercar o assentamento.`],
+          causes: [`${besieger.name} mobilizou tropas para isolar o assentamento.`],
           consequences: [`${city.name} foi cercada e cortada de rotas de suprimento.`],
           threadId: war ? `war:${war.id}` : `siege:${city.id}:${world.year}`,
           threadTitle: war?.reason ?? `Cerco de ${city.name}`,
@@ -729,33 +1029,95 @@ export class WarfareSystem {
     }
 
     city.siegeYears++;
+    const state = city.siegeState;
+
+    let totalArtillery = 0;
+    for (const a of besiegingArmies) {
+      const comp = a.composition ?? computeArmyComposition(a, world);
+      totalArtillery += comp.artillery;
+    }
+    state.siegeEnginesDeployed = totalArtillery;
 
     damageRoadsAround(world.tileMap, city.x, city.y, 5);
     damagePrimaryRoads(world.tileMap, city.x, city.y, 5);
     damageRailAround(world.tileMap, city.x, city.y, 5);
     damageStrategicBuildings(city, world.tileMap, world.year);
 
-    const starving = city.siegeYears >= STARVATION_YEARS;
-    const ratio = attackStrength / Math.max(1, defenceStrength);
+    const blockaded = world.fronts
+      ? world.fronts.isIsolated(city.id) || world.fronts.siegePressure(city, besieger.id) >= SIEGE_GATE_PUSH
+      : true;
 
-    if (ratio < SIEGE_THRESHOLD && !starving) {
-      city.siegeProgress = Math.max(0, city.siegeProgress - 0.05);
-      besieger.warWeariness = Math.min(100, besieger.warWeariness + 6);
+    if (!blockaded) {
+      city.siegeProgress = Math.min(city.siegeProgress, 0.35);
+      state.phase = 'encirclement';
+      besieger.warWeariness = Math.min(100, besieger.warWeariness + 3);
       return;
     }
 
-    let tacticianBonus = 0;
-    for (const a of besiegingArmies) {
-      if (a.commanderTrait === 'tactician') tacticianBonus = 0.08;
+    // 1. Fase de Bombardeio / Quebra de Muralhas & Portões (WAR-V5)
+    if (state.siegeEnginesDeployed > 0 || attackStrength > defenceStrength * 0.8) {
+      state.phase = 'bombardment';
+
+      const wallPieces = [...city.buildings.values()].filter(b => b.type === 'wall' || b.fortificationRole);
+      const gates = wallPieces.filter(b => b.fortificationRole === 'gate' && b.hp > 0);
+      const towers = wallPieces.filter(b => b.fortificationRole === 'tower' && b.hp > 0);
+      const segments = wallPieces.filter(b => b.fortificationRole === 'segment' || !b.fortificationRole && b.hp > 0);
+
+      const siegeDmg = (state.siegeEnginesDeployed * 45 + attackStrength * 0.15);
+
+      if (gates.length > 0) {
+        const targetGate = gates[0];
+        targetGate.applyDamage(siegeDmg, world.year, 'war');
+        if (targetGate.hp <= 0) {
+          state.gatesForced++;
+          chronicle.log(world.year, 'siege', `Os portões de ${city.name} foram rompidos pelo bombardeio de ${besieger.name}!`, {
+            title: `Portões Rompidos em ${city.name}`,
+            importance: 'major',
+            scope: 'international',
+            refs: [{ kind: 'city', id: city.id, name: city.name }]
+          });
+        }
+      }
+
+      if (towers.length > 0 && rng.chance(0.5)) {
+        const targetTower = towers[0];
+        targetTower.applyDamage(siegeDmg * 0.7, world.year, 'war');
+        if (targetTower.hp <= 0) state.towersCaptured++;
+      } else if (segments.length > 0) {
+        const targetSegment = segments[0];
+        targetSegment.applyDamage(siegeDmg * 0.8, world.year, 'war');
+        if (targetSegment.hp <= 0) {
+          state.wallBreaches++;
+          chronicle.log(world.year, 'siege', `Uma brecha foi aberta nas muralhas de ${city.name} pelas forças de ${besieger.name}!`, {
+            title: `Brecha nas Muralhas de ${city.name}`,
+            importance: 'major',
+            scope: 'international',
+            refs: [{ kind: 'city', id: city.id, name: city.name }]
+          });
+        }
+      }
     }
 
-    const advance = starving
-      ? 0.25
-      : Math.min(0.55, 0.08 + (ratio - SIEGE_THRESHOLD) * 0.16 + tacticianBonus);
-
-    city.siegeProgress += advance;
+    // 2. Fase de Fome e Attrition (WAR-V5)
     city.prosperity = Math.max(0, city.prosperity - 0.08);
-    city.ledger.recordConsumed('food', city.stock.take('food', city.population * 0.3));
+    const foodConsumed = city.stock.take('food', city.population * 0.35);
+    city.ledger.recordConsumed('food', foodConsumed);
+    state.defenderFood = city.stock.get('food');
+
+    const starving = state.defenderFood <= 0 || city.siegeYears >= STARVATION_YEARS;
+    if (starving) {
+      state.phase = 'starvation';
+      state.defenderMorale = Math.max(0.1, state.defenderMorale - 0.20);
+      state.surrenderWillingness = Math.min(1.0, state.surrenderWillingness + 0.30);
+
+      const starvationLosses = Math.max(1, Math.floor(city.population * 0.04));
+      const citizens = world.entities.filter(e => e.cityId === city.id && e.hp > 0);
+      for (let i = 0; i < Math.min(starvationLosses, citizens.length); i++) {
+        citizens[i].hp = 0;
+      }
+    } else {
+      state.surrenderWillingness = Math.min(1.0, state.surrenderWillingness + 0.06 * (state.wallBreaches + state.gatesForced));
+    }
 
     if (city.siegeYears >= 2) {
       const friendlyCity = this.findNearestFriendlyCity(city, owner, world);
@@ -771,8 +1133,38 @@ export class WarfareSystem {
       }
     }
 
-    if (city.siegeProgress >= 1) {
-      this.captureCity(city, owner, besieger, world);
+    // 3. Condição de Rendição Negociada (WAR-V5)
+    if (state.surrenderWillingness >= 0.80 || (state.defenderMorale <= 0.20 && state.defenderFood <= 0)) {
+      state.phase = 'negotiation';
+      this.surrenderCity(city, owner, besieger, world);
+      return;
+    }
+
+    // 4. Tentativa de Assalto às Muralhas (WAR-V5)
+    const canAssault = state.wallBreaches > 0 || state.gatesForced > 0 || attackStrength > defenceStrength * 1.6;
+    if (canAssault) {
+      state.phase = 'assault';
+      state.assaultAttempts++;
+
+      const breachReduction = Math.max(0.35, 1.0 - state.wallBreaches * 0.25 - state.gatesForced * 0.20);
+      const effectiveDefence = defenceStrength * breachReduction * state.defenderMorale;
+
+      let tacticianBonus = 0;
+      for (const a of besiegingArmies) {
+        if (a.commanderTrait === 'tactician') tacticianBonus = 0.15;
+      }
+
+      const advance = starving
+        ? 0.35
+        : Math.min(0.60, 0.12 + (attackStrength / Math.max(1, effectiveDefence) - 1.0) * 0.20 + tacticianBonus);
+
+      city.siegeProgress = Math.min(1.0, city.siegeProgress + advance);
+
+      if (city.siegeProgress >= 1.0) {
+        this.captureCity(city, owner, besieger, world);
+      }
+    } else {
+      city.siegeProgress = Math.min(0.50, city.siegeProgress + 0.05);
     }
   }
 
@@ -787,6 +1179,7 @@ export class WarfareSystem {
     const war = defenderId && besieger
       ? world.diplomacy.getWarsFor(defenderId).find(w => w.attacker === besieger.id || w.defender === besieger.id)
       : undefined;
+
     chronicle.log(
       world.year,
       'siege',
@@ -812,8 +1205,76 @@ export class WarfareSystem {
     city.besiegerId = null;
     city.siegeProgress = 0;
     city.siegeYears = 0;
+    city.siegeState = null;
   }
 
+  /** WAR-V5: Rendição negociada da cidade (evita massacres e preserva infraestrutura). */
+  public surrenderCity(city: City, from: Kingdom, to: Kingdom, world: WarfareWorld): void {
+    const wasCapital = from.capitalCityId === city.id;
+    const heldFor = Math.max(1, city.siegeYears);
+    const war = world.diplomacy.getWarsFor(from.id).find(w => w.attacker === to.id || w.defender === to.id);
+
+    for (const good of ALL_GOODS) {
+      const looted = city.stock.take(good, city.stock.get(good) * 0.15);
+      city.ledger.recordExported(good, looted);
+      to.treasury.add(good, looted);
+    }
+
+    for (const building of city.buildings.values()) {
+      const nextHp = Math.max(1, Math.round(building.hp * rng.range(0.90, 0.98)));
+      building.applyDamage(building.hp - nextHp, world.year, 'war');
+      world.tileMap.markRenderDirty(building.x, building.y);
+    }
+
+    from.removeCity(city.id);
+    to.addCity(city.id);
+    city.formerOwnerId = from.id;
+    city.kingdomId = to.id;
+    city.capturedYear = world.year;
+    city.besiegerId = null;
+    city.siegeProgress = 0;
+    city.siegeYears = 0;
+    city.siegeState = null;
+    city.prosperity = Math.min(city.prosperity, 0.5);
+
+    for (const key of city.territory) {
+      const [tx, ty] = key.split(',').map(Number);
+      const tile = world.tileMap.getTile(tx, ty);
+      if (tile && tile.cityId === city.id) { tile.kingdomId = to.id; world.tileMap.markRenderDirty(tile.x, tile.y); }
+    }
+
+    for (const resident of world.entities) {
+      if (resident.cityId !== city.id || resident.hp <= 0) continue;
+      resident.kingdomId = to.id;
+      if (resident.profession === 'king' && from.rulerId === resident.id) {
+        resident.profession = 'none';
+      }
+    }
+
+    chronicle.log(
+      world.year,
+      'conquest',
+      `A guarnição de ${city.name} abriu seus portões e se rendeu honrosamente para ${to.name} após ${heldFor} anos de cerco.`,
+      {
+        title: `Rendição de ${city.name}`,
+        importance: 'legendary',
+        scope: 'international',
+        refs: [
+          { kind: 'city', id: city.id, name: city.name },
+          { kind: 'kingdom', id: from.id, name: from.name },
+          { kind: 'kingdom', id: to.id, name: to.name },
+          ...(war ? [{ kind: 'war' as const, id: war.id, name: war.reason }] : [])
+        ],
+        tags: ['rendição', 'conquest', 'siege', 'negotiation', 'war'],
+        causes: [`A falta de suprimentos e o bombardeio contínuo levaram à capitulação de ${city.name}.`],
+        consequences: [`A soberania de ${city.name} foi transferida para ${to.name} sem massacre de civis.`]
+      }
+    );
+
+    events.emit('cityCaptured', { city, from, to, year: world.year, wasCapital });
+  }
+
+  /** Captura violenta por assalto e tempestade às muralhas. */
   public captureCity(city: City, from: Kingdom, to: Kingdom, world: WarfareWorld): void {
     const wasCapital = from.capitalCityId === city.id;
     const heldFor = Math.max(1, city.siegeYears);
@@ -863,6 +1324,7 @@ export class WarfareSystem {
     city.besiegerId = null;
     city.siegeProgress = 0;
     city.siegeYears = 0;
+    city.siegeState = null;
     city.prosperity = Math.min(city.prosperity, 0.3);
 
     for (const key of city.territory) {
@@ -1213,6 +1675,8 @@ export class WarfareSystem {
     for (const a of data?.armies ?? []) {
       this.armies.set(a.id, {
         ...a,
+        fatigue: a.fatigue ?? 0,
+        experience: a.experience ?? 0.1,
         soldierIds: new Set(a.soldierIds ?? [])
       });
     }

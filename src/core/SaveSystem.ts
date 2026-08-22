@@ -236,7 +236,10 @@ export class SaveSystem {
       kingdoms: Array.from(sim.kingdoms.values()).map(k => k.serialize()),
       warfare: sim.warfare.serialize(),
       market: sim.market.serialize(),
-      trade: sim.trade.serialize()
+      trade: sim.trade.serialize(),
+      // WAR-V2: a front's position is progress, not a derived value — a war
+      // reloaded mid-campaign must resume where the lines actually were.
+      fronts: sim.fronts.serialize()
     };
   }
 
@@ -370,5 +373,7 @@ export class SaveSystem {
     if (data.warfare) sim.warfare.deserialize(data.warfare);
     if (data.market) sim.market.deserialize(data.market);
     if (data.trade) sim.trade.deserialize(data.trade);
+    // Older saves predate fronts; a war in one simply starts its lines at zero.
+    sim.fronts.deserialize(data.fronts);
   }
 }

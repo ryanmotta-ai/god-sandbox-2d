@@ -39,6 +39,9 @@ import {
 } from '../entities/Psyche';
 import { GOVERNMENTS } from '../civ/Government';
 import { WarfareSystem, SIEGE_RADIUS } from '../civ/Warfare';
+import { WarFrontSystem, SECTOR_RADIUS } from '../civ/WarFronts';
+import { SIEGE_GATE_PUSH } from '../civ/WarFronts';
+import { MilitaryLogistics } from '../civ/MilitaryLogistics';
 import { NavalSystem } from '../civ/NavalSystem';
 import { CaravanSystem } from '../civ/CaravanSystem';
 import { RailwayNetwork } from '../civ/RailwayNetwork';
@@ -175,6 +178,10 @@ export class SimulationEngine {
   public civ: CivilizationEngine = new CivilizationEngine();
   /** Resolves sieges and transfers cities taken by force. */
   public warfare: WarfareSystem = new WarfareSystem();
+  /** WAR-V2: where each war is actually being fought. */
+  public fronts: WarFrontSystem = new WarFrontSystem();
+  /** WAR-V3: what the armies on those fronts are being fed. */
+  public logistics: MilitaryLogistics = new MilitaryLogistics();
   /** Habitat and population accounting; individual animal AI remains regional. */
   public ecology: EcologySystem = new EcologySystem();
 
@@ -520,13 +527,34 @@ export class SimulationEngine {
         spawn: (species, x, y) => this.spawnEntity(species, x, y),
         sim: this
       }));
-      perfProfiler.measure('warfare', () => this.warfare.tickYear({
+      /**
+       * War runs in three passes, in this order for a reason.
+       *
+       * The front first works out where the lines are and who is standing on
+       * them. Logistics then decides what those armies are actually being fed,
+       * because supply has to be known before the fighting is scored. Only then
+       * does the front resolve its battles and move, and only then are sieges
+       * pressed — a siege now needs the ground around the city, which the front
+       * has just finished deciding.
+       */
+      const warWorld = {
         year: this.currentYear,
         cities: this.cities,
         kingdoms: this.kingdoms,
         entities: this.entities,
         tileMap,
         diplomacy: this.diplomacy
+      };
+      perfProfiler.measure('fronts', () => this.fronts.tickYear(warWorld));
+      perfProfiler.measure('logistics', () => this.logistics.tickYear({
+        ...warWorld,
+        railways: this.railways,
+        fronts: this.fronts
+      }));
+      perfProfiler.measure('fronts', () => this.fronts.resolveYear(warWorld));
+      perfProfiler.measure('warfare', () => this.warfare.tickYear({
+        ...warWorld,
+        fronts: this.fronts
       }));
       this.tickGeopolitics();
       this.musterArmies();
@@ -2211,6 +2239,34 @@ if (e.kingdomId) {
    */
   private executeSiegeWarfare(e: Entity, tileMap: TileMap, particles: ParticleManager, speed: number): void {
     if (!e.kingdomId) return;
+
+    /**
+     * WAR-V2: a soldier's war is the stretch of line nearest them, not whichever
+     * enemy town happens to be closest.
+     *
+     * Every soldier used to walk to the nearest hostile settlement, which meant
+     * an entire realm's army converged on one place and the rest of the border
+     * was empty. Holding a sector is now the default; marching on a city is what
+     * a soldier does once the ground around that city is theirs.
+     */
+    const sector = this.fronts.sectorFor(e.kingdomId, e.x, e.y);
+    if (sector) {
+      const ourPush = this.fronts.pushFor(sector, e.kingdomId);
+      const distanceToLine = Math.hypot(sector.x - e.x, sector.y - e.y);
+
+      if (ourPush < SIEGE_GATE_PUSH) {
+        e.showEmote('⚔️', 25);
+        if (distanceToLine > SECTOR_RADIUS * 0.6) {
+          const pos = SimplePathfinder.getStepTowards(e.x, e.y, sector.x, sector.y, tileMap, speed * 2.5);
+          e.x = pos.x; e.y = pos.y;
+          return;
+        }
+        // On the line. Hold it, spread along it — a front is a line of men, not
+        // a ring around a point.
+        this.doEncampAround(e, sector.x, sector.y, tileMap, speed * 0.7, SECTOR_RADIUS * 0.75);
+        return;
+      }
+    }
 
     // Find nearest enemy city
     let enemyCity: City | null = null;
