@@ -8,6 +8,10 @@ export type PerformanceMetric =
   /** SOC-V2's yearly per-citizen pass: memory, work, housing and migration. */
   | 'lives'
   | 'warfare'
+  /** WAR-V2: deciding where the lines are and moving them. */
+  | 'fronts'
+  /** WAR-V3: costing supply routes and feeding the fronts. */
+  | 'logistics'
   | 'trade'
   | 'ui';
 

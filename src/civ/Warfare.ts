@@ -10,6 +10,7 @@ import { events } from '../core/EventBus';
 import { rng } from '../core/Random';
 import { ALL_GOODS } from './Goods';
 import { damageRoadsAround, damageRailAround, damagePrimaryRoads, damageStrategicBuildings } from './Infrastructure';
+import { WarFrontSystem, SIEGE_GATE_PUSH } from './WarFronts';
 
 /**
  * How wars actually change the map.
@@ -35,6 +36,8 @@ export interface WarfareWorld {
   entities: Entity[];
   tileMap: TileMap;
   diplomacy: DiplomacyManager;
+  /** WAR-V2. Absent in isolated tests, where sieges fall back to the old rules. */
+  fronts?: WarFrontSystem;
 }
 
 interface SiegeAssessment {
@@ -148,12 +151,17 @@ export class WarfareSystem {
 
     if (!best) return null;
 
-    best.defenceStrength = this.defenceStrength(city, owner, armies);
+    best.defenceStrength = this.defenceStrength(city, owner, armies, world);
     return best;
   }
 
   /** Walls, garrison and the realm's military technology. */
-  private defenceStrength(city: City, owner: Kingdom, armies: Map<string, Entity[]>): number {
+  private defenceStrength(
+    city: City,
+    owner: Kingdom,
+    armies: Map<string, Entity[]>,
+    world?: WarfareWorld
+  ): number {
     const garrison = (armies.get(owner.id) ?? []).filter(
       s => Math.hypot(s.x - city.x, s.y - city.y) <= SIEGE_RADIUS
     );
@@ -162,7 +170,14 @@ export class WarfareSystem {
     const militia = city.population * 0.6;
     const garrisonStrength = this.armyStrength(garrison, owner);
 
-    return (garrisonStrength + militia) * city.defenseMultiplier();
+    let defence = (garrisonStrength + militia) * city.defenseMultiplier();
+
+    // A pocket fights on what it has. Being cut off from the realm is what turns
+    // a strong city into one that can eventually be starved out, and it is the
+    // reason encirclement is worth doing instead of assaulting head-on.
+    if (world?.fronts?.isIsolated(city.id)) defence *= 0.62;
+
+    return defence;
   }
 
   private pressSiege(city: City, owner: Kingdom, assessment: SiegeAssessment, world: WarfareWorld): void {
@@ -209,9 +224,37 @@ export class WarfareSystem {
     damageRailAround(world.tileMap, city.x, city.y, 5);
     damageStrategicBuildings(city, world.tileMap, world.year);
 
+    const ratio = attackStrength / Math.max(1, defenceStrength);
+
+    /**
+     * WAR-V2: the countryside comes first.
+     *
+     * A settlement cannot be taken by an army that has merely reached it. The
+     * besieger has to be winning the stretch of front around the place, or have
+     * cut it off from its own realm, before the walls are worth attacking.
+     * Without this gate one warband that walked past everything else could
+     * annex a realm a town square at a time, which is what used to happen.
+     *
+     * Note what this does to starvation, which used to be the siege's guaranteed
+     * eventual win: sitting outside a city for eight years is not a blockade if
+     * the roads home are still open and the realm is still sending food down
+     * them. A city only starves once it is genuinely encircled — which is a
+     * thing the front decides, not the calendar.
+     */
+    const blockaded = world.fronts
+      ? world.fronts.isIsolated(city.id) || world.fronts.siegePressure(city, besieger.id) >= SIEGE_GATE_PUSH
+      : true;
+
+    if (!blockaded) {
+      // The army is at the gates but the province behind it is not theirs. The
+      // siege holds where it is; taking the ground is what unlocks the walls.
+      city.siegeProgress = Math.min(city.siegeProgress, 0.35);
+      besieger.warWeariness = Math.min(100, besieger.warWeariness + 3);
+      return;
+    }
+
     // A city cut off from its fields starves regardless of how strong its walls are.
     const starving = city.siegeYears >= STARVATION_YEARS;
-    const ratio = attackStrength / Math.max(1, defenceStrength);
 
     if (ratio < SIEGE_THRESHOLD && !starving) {
       // The walls hold. The besiegers grind themselves down instead.
