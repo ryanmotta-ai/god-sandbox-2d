@@ -92,6 +92,7 @@ const FORAGE_PER_TILE = 3;
  * Kept well below a camp's output so the camp is always worth building.
  */
 const HAND_WOOD_PER_CITIZEN = 0.4;
+
 const HAND_WOOD_PER_TILE = 1.5;
 
 function clamp(value: number, min: number, max: number): number {
@@ -104,6 +105,33 @@ export class CivilizationEngine {
    * placement rule — see `findBuildingSiteLegacy`.
    */
   public static useUrbanPlanner: boolean = true;
+
+  /**
+   * Materials a realm will haul between its own settlements.
+   *
+   * Deliberately only the construction staples. Food is left out because famine
+   * is meant to be local and survivable-or-not on a settlement's own terms, and
+   * levelling it realm-wide would erase that; luxuries and strategic goods are
+   * left to the market, where their price is the whole point.
+   *
+   * Nearly every building in the game is part stone, and a fortification line
+   * costs stone and timber together, so these numbers are set to unstick a
+   * capital without gutting the town that supplies it: a donor keeps 25 — a
+   * granary's worth — before parting with anything, a receiver is only ever
+   * topped up to 50, nothing moves more than 30 of a good in a year, and 15% is
+   * lost on the road.
+   *
+   * The floor is set against what settlements actually hold rather than what
+   * looks generous: a quarry town producing 18 a year and building with it sits
+   * around 40, so a floor of 80 meant nobody ever qualified as a donor and the
+   * mechanism never fired once.
+   */
+  private static readonly REALM_STAPLES: GoodId[] = ['stone', 'wood', 'tools'];
+  private static readonly STAPLE_TARGET = 50;
+  private static readonly STAPLE_DONOR_FLOOR = 25;
+  private static readonly STAPLE_HAUL_CAP = 30;
+  private static readonly STAPLE_HAUL_LOSS = 0.15;
+  private static readonly STAPLE_HAUL_RANGE = 45;
 
   /** Set once a realm first mints money, so the chronicle only says it once. */
   private announcedCurrencies: Set<string> = new Set();
@@ -147,6 +175,7 @@ export class CivilizationEngine {
     this.refreshKingdomTotals(world);
 
     for (const kingdom of world.kingdoms.values()) {
+      this.distributeStaples(kingdom, world);
       this.collectTaxes(kingdom, world);
       this.tickResearch(kingdom, world);
       this.tickEconomy(kingdom, world);
@@ -362,8 +391,13 @@ export class CivilizationEngine {
         if (def.resourceMode === 'required') {
           if (!tile || !matches || tile.resourceAmount <= 0) {
             building.staffing = Math.min(building.staffing, 0.15);
+            // Worked out for good, if the ground itself is what ran out. Told to
+            // the building so the urban lifecycle can retire it; a working that
+            // can never produce again should not hold a plot forever.
+            if (tile && def.category === 'extraction') building.depositExhausted = true;
             continue;
           }
+          building.depositExhausted = false;
           building.extractedGood = naturalGood!;
           const wanted = (def.extractionRate ?? 5) * scale;
           const extracted = Math.min(wanted, tile.resourceAmount);
@@ -2957,6 +2991,70 @@ export class CivilizationEngine {
               consequences: ['O comércio formal entre os dois reinos foi restrito.']
             }
           );
+        }
+      }
+    }
+  }
+
+  /**
+   * A realm hauls its own building materials to the settlements that ran short.
+   *
+   * Trade routes only ever existed between *kingdoms*: `openTradeRoutes` walks
+   * the treaty list, and `findTradePairing` needs a price gap to clear the haul,
+   * which two cities of one realm can never have because they share one market.
+   * So a realm could not supply itself. A capital with citizens to spare and
+   * every stone deposit in its survey worked out had no way to buy from its own
+   * hamlet twenty tiles away, which produced 25 units a year and shipped none.
+   * Nothing stone-built could be raised there again — and a fortification line
+   * costs stone and timber together, so the walls failed on materials forever.
+   *
+   * This is not commerce and does not pretend to be. It is a realm deciding
+   * where its own stone goes, so the flow is capped, floored so no settlement is
+   * stripped, and taxed by wastage on the road.
+   *
+   * ponytail: no pathfinding — distance alone gates a shipment. Realm cities are
+   * already road-linked by `paveTradeRoad`, and routing this properly would want
+   * the road-capacity model the inter-realm routes use. Worth upgrading if
+   * hauling should respect a blocked or ruined road.
+   */
+  private distributeStaples(kingdom: Kingdom, world: CivWorld): void {
+    const cities = [...kingdom.cityIds]
+      .map(id => world.cities.get(id))
+      .filter((c): c is City => !!c);
+    if (cities.length < 2) return;
+
+    for (const good of CivilizationEngine.REALM_STAPLES) {
+      const needy = cities
+        .filter(c => c.stock.get(good) < CivilizationEngine.STAPLE_TARGET)
+        .sort((a, b) => a.stock.get(good) - b.stock.get(good));
+      if (needy.length === 0) continue;
+
+      const donors = cities
+        .filter(c => c.stock.get(good) > CivilizationEngine.STAPLE_DONOR_FLOOR)
+        .sort((a, b) => b.stock.get(good) - a.stock.get(good));
+      if (donors.length === 0) continue;
+
+      for (const receiver of needy) {
+        let wanted = Math.min(
+          CivilizationEngine.STAPLE_HAUL_CAP,
+          CivilizationEngine.STAPLE_TARGET - receiver.stock.get(good)
+        );
+
+        for (const donor of donors) {
+          if (wanted <= 0) break;
+          if (donor.id === receiver.id) continue;
+          if (Math.hypot(donor.x - receiver.x, donor.y - receiver.y) > CivilizationEngine.STAPLE_HAUL_RANGE) continue;
+
+          const spare = donor.stock.get(good) - CivilizationEngine.STAPLE_DONOR_FLOOR;
+          if (spare <= 0) continue;
+
+          const loaded = donor.stock.take(good, Math.min(spare, wanted));
+          if (loaded <= 0) continue;
+
+          const arrived = receiver.stock.add(good, loaded * (1 - CivilizationEngine.STAPLE_HAUL_LOSS));
+          donor.ledger.recordExported(good, loaded);
+          receiver.ledger.recordImported(good, arrived);
+          wanted -= arrived;
         }
       }
     }

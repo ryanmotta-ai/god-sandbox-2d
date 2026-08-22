@@ -580,6 +580,16 @@ export class Building implements BuildingData {
   public stateSinceYear: number = 0;
   public lastLifecycleYear: number = 0;
   public abandonmentYears: number = 0;
+  /**
+   * Set once production finds this working's deposit gone.
+   *
+   * A quarry or mine standing on worked-out ground can never produce again, and
+   * nothing else in the lifecycle notices: staffing is pinned rather than zeroed,
+   * so employment collapse alone never reaches abandonment and the ruin holds its
+   * plot for the rest of the game. Recorded here because `abandonmentPressure`
+   * reasons about the building, not the map.
+   */
+  public depositExhausted: boolean = false;
   public natureReclaim: number = 0;
   public lastDamageYear: number | null = null;
   public lastDamageCause: BuildingDamageCause | null = null;

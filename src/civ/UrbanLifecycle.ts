@@ -140,8 +140,16 @@ function abandonmentPressure(city: City, kingdom: Kingdom | null, building: Buil
   const damage = 1 - building.hp / Math.max(1, building.maxHp);
   const siege = city.besiegerId ? 1 : 0;
   const threat = kingdom?.externalThreat ?? 0;
+  // A working whose seam is gone is finished, and no amount of local prosperity
+  // argues for keeping it. Weighted to clear the abandonment threshold on its
+  // own: without it, staffing is merely pinned low, employment collapse alone
+  // never gets there, and a mined-out quarry holds its plot for the rest of the
+  // game — which is how a city with citizens, stone in reach and every plot
+  // spent ends up unable to open another quarry ever again.
+  const workedOut = building.depositExhausted ? 1 : 0;
   let pressure = populationLoss * .3 + economicCrisis * .24 + isolation * .11 + localDecline * .08
-    + employmentCollapse * .13 + excessHousing * .12 + damage * .22 + siege * .24 + threat * .05;
+    + employmentCollapse * .13 + excessHousing * .12 + damage * .22 + siege * .24 + threat * .05
+    + workedOut * .62;
   if (building.definition.category === 'food') pressure -= .1;
   if (LANDMARKS.has(building.type)) pressure -= .16;
   return Math.max(0, Math.min(1.5, pressure));
