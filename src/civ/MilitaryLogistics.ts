@@ -419,11 +419,32 @@ export class MilitaryLogistics {
         for (const e of world.entities) {
           if (e.kingdomId !== kingdomId || e.hp <= 0) continue;
           if (e.profession !== 'soldier' && e.profession !== 'king') continue;
-          if (Math.hypot(e.x - sector.x, e.y - sector.y) > SECTOR_RADIUS) continue;
+
+          /**
+           * Hunger reaches past the line it starves.
+           *
+           * Attrition only touched soldiers within `SECTOR_RADIUS` of a sector's
+           * centre, which is nine tiles. The men marching *to* that front on the
+           * same severed supply line, the detachment holding a road twenty tiles
+           * back, the column halfway home — none of them lost a man, however
+           * completely cut off the whole theatre was. Being unsupplied was a
+           * property of standing in one particular circle rather than of being on
+           * the wrong end of a broken line.
+           *
+           * It now falls off with distance instead of stopping at a boundary: at
+           * the front it bites in full, and out to three times that it still
+           * bites, more gently the further back the man is from where the food
+           * was supposed to arrive.
+           */
+          const distance = Math.hypot(e.x - sector.x, e.y - sector.y);
+          if (distance > SECTOR_RADIUS * 3) continue;
+          const reach = distance <= SECTOR_RADIUS
+            ? 1
+            : 1 - (distance - SECTOR_RADIUS) / (SECTOR_RADIUS * 2);
 
           // Hunger wears a body down before it kills it.
-          e.hp -= Math.max(4, e.maxHp * 0.18 * severity);
-          e.needs.hunger = Math.min(100, e.needs.hunger + 22 * severity);
+          e.hp -= Math.max(4, e.maxHp * 0.18 * severity) * reach;
+          e.needs.hunger = Math.min(100, e.needs.hunger + 22 * severity * reach);
           if (e.hp <= 0) lost++;
         }
 
