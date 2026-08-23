@@ -73,6 +73,15 @@ export interface CivWorld {
 /** Share of a tax levy the crown keeps as goods; the rest is sold for coin. */
 /** How far from a building the street plan is worth paving. */
 const STREET_SERVICE_REACH = 2;
+/**
+ * Share of known military power at which a realm becomes everyone's problem.
+ *
+ * A third is the point where no single neighbour can answer it alone, which is
+ * exactly when banding together stops being optional.
+ */
+const HEGEMONY_THRESHOLD = 0.35;
+/** Mutual regard two frightened realms need before the fear becomes a treaty. */
+const COALITION_RELATION = 45;
 const TAX_KEPT_IN_KIND = 0.5;
 /**
  * How hard neighbours resent each other over land. This is the strongest term
@@ -204,6 +213,7 @@ export class CivilizationEngine {
     }
 
     this.tickDiplomaticContact(world);
+    this.tickAntiHegemonicCoalitions(world);
     this.tickStrategicDiplomacy(world);
     // Rail freight runs before trade settles so imports land in the current ledger year
     world.sim?.railways.tickRailways(world);
@@ -3079,6 +3089,100 @@ export class CivilizationEngine {
   }
 
   /** Annual realpolitik layer: interests, trade, threats and exhaustion shape diplomacy. */
+/**
+   * Nobody wants to be next.
+   *
+   * The simulation had no answer to a runaway realm. Growth compounded — more
+   * territory, more people, more research, more army — and the neighbours went on
+   * weighing each other pair by pair, on distance and grievance, as though the
+   * thing eating the continent were just another realm. So a war of conquest was
+   * fought one victim at a time, in the order the aggressor chose, and the only
+   * brake on an empire was the administrative reach of its own borders.
+   *
+   * The balance of power is the oldest reflex in diplomacy and it is cheap to
+   * model: once a realm holds enough of the world's military strength, everyone
+   * who can see it stops caring about their quarrels with each other. Small
+   * realms warm to one another, cool toward the hegemon, and past a point they
+   * sign an actual league — so the tyrant meets a coalition instead of a queue.
+   *
+   * The threshold is share of *known* military power, not of the whole map: a
+   * realm cannot fear a giant it has never met.
+   */
+  private tickAntiHegemonicCoalitions(world: CivWorld): void {
+    const kingdoms = [...world.kingdoms.values()].filter(k => !k.isColony);
+    if (kingdoms.length < 3) return;
+
+    let worldPower = 0;
+    for (const kingdom of kingdoms) worldPower += Math.max(0, kingdom.militaryPower);
+    if (worldPower <= 0) return;
+
+    const hegemon = kingdoms.reduce((strongest, k) => k.militaryPower > strongest.militaryPower ? k : strongest);
+    const share = hegemon.militaryPower / worldPower;
+    if (share < HEGEMONY_THRESHOLD) return;
+
+    // How alarming, from just over the line to total dominance.
+    const alarm = clamp((share - HEGEMONY_THRESHOLD) / (1 - HEGEMONY_THRESHOLD), 0, 1);
+
+    const threatened = kingdoms.filter(k =>
+      k.id !== hegemon.id &&
+      k.overlordId !== hegemon.id &&
+      k.knownKingdoms.has(hegemon.id) &&
+      k.militaryPower < hegemon.militaryPower * 0.6
+    );
+    if (threatened.length < 2) return;
+
+    for (const realm of threatened) {
+      // Fear of the giant, weighed against how much this realm trusts anyone.
+      world.diplomacy.changeRelation(realm.id, hegemon.id, -(2 + alarm * 5));
+      realm.externalThreat = clamp(realm.externalThreat + 0.04 + alarm * 0.1, 0, 1);
+    }
+
+    for (let i = 0; i < threatened.length; i++) {
+      for (let j = i + 1; j < threatened.length; j++) {
+        const a = threatened[i];
+        const b = threatened[j];
+        if (world.diplomacy.isAtWar(a.id, b.id)) continue;
+        if (!a.knownKingdoms.has(b.id)) continue;
+
+        // A shared fear is worth more than an old grievance.
+        const warmth = (3 + alarm * 9) * (0.7 + (a.culture.diplomaticTrust + b.culture.diplomaticTrust) * 0.3);
+        world.diplomacy.changeRelation(a.id, b.id, warmth);
+
+        // Past mutual warmth, the fear becomes a signature.
+        if (
+          alarm > 0.25 &&
+          world.diplomacy.getRelation(a.id, b.id) >= COALITION_RELATION &&
+          !world.diplomacy.allianceOf(a.id)
+        ) {
+          const league = world.diplomacy.createAlliance(a.id, b.id, `Liga contra ${hegemon.name}`, world.year);
+          if (league) {
+            chronicle.log(
+              world.year,
+              'diplomacy',
+              `${a.name} e ${b.name} formaram uma liga defensiva diante do poder de ${hegemon.name}.`,
+              {
+                title: `Liga contra ${hegemon.name}`,
+                importance: 'major',
+                scope: 'international',
+                refs: [
+                  { kind: 'kingdom', id: a.id, name: a.name },
+                  { kind: 'kingdom', id: b.id, name: b.name },
+                  { kind: 'kingdom', id: hegemon.id, name: hegemon.name }
+                ],
+                tags: ['diplomacy', 'alliance', 'balance-of-power'],
+                causes: [`${hegemon.name} concentrava ${Math.round(share * 100)}% do poder militar conhecido.`],
+                consequences: ['Reinos menores deixaram suas rivalidades de lado diante de uma ameaça maior.'],
+                threadId: `coalition:${hegemon.id}`,
+                threadTitle: `A coalição contra ${hegemon.name}`
+              }
+            );
+            events.emit('coalitionFormed', { against: hegemon, members: [a, b], share, year: world.year });
+          }
+        }
+      }
+    }
+  }
+
   private tickStrategicDiplomacy(world: CivWorld): void {
     const kingdoms = [...world.kingdoms.values()];
 
