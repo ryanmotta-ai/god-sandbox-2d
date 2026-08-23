@@ -27,6 +27,28 @@ import type { SpatialHash } from '../core/SpatialHash';
 import { perfProfiler } from '../perf/PerformanceProfiler';
 import { BUILDING_DRAW_SCALE } from './CityVisualResolver';
 
+/**
+ * What per-frame work a water tile actually needs, one byte per tile.
+ *
+ * Two independent questions, both answerable from the tile's position and its
+ * neighbours' types and therefore both static:
+ *
+ *  - `WATER_EDGED`: does this tile have a neighbour of a different type? Only
+ *    then does the edge pass paint anything — the shallow/deep rim, the coastal
+ *    underlay, the foam crest.
+ *  - `WATER_ANIMATES`: can its surface ever show movement? The wave crest is
+ *    gated on `h(220)` and the specular glint on `hash2(x, y, 97)`, neither of
+ *    which involves the clock, so for open ocean this is knowable in advance —
+ *    and false for well over half of it.
+ *
+ * A tile with neither bit is already drawn completely in the bake underneath and
+ * is skipped outright. That is the whole optimisation: before, every visible
+ * water tile on the map was set up, noise-sampled, neighbour-scanned and
+ * edge-painted every single frame, and most of them had nothing to draw.
+ */
+const WATER_EDGED = 1;
+const WATER_ANIMATES = 2;
+
 /** Deposit tiers so plentiful that drawing every one clutters the whole map. */
 const COMMON_NODE_TIERS = new Set<GoodTier>(['common']);
 import {
@@ -35,6 +57,7 @@ import {
   clamp,
   mixColor,
   parseColor,
+  hash2,
   terrainAccentColor,
   terrainSurfaceColor,
   valueNoise2D,
@@ -140,7 +163,23 @@ export class PixelRenderer {
   private terrainCtx: CanvasRenderingContext2D | null = null;
   private terrainW: number = 0;
   private terrainH: number = 0;
+  /**
+   * Which edges of each water tile carry coastal foam, one byte per tile.
+   *
+   * Bits 0-3 are left/right/top/bottom; bit 4 marks shallow water, which foams
+   * brighter and wider than open ocean. Static — it is a function of a tile's
+   * type and its four neighbours' — so it is computed once when the tile is
+   * baked and read every frame after.
+   *
+   * Without it the per-frame foam pass had to rediscover the coastline from
+   * scratch on every visible water tile: four `getTile` lookups and four
+   * `isWater` tests each, over three thousand tiles a frame at 1080p, to find
+   * that roughly one in six of them actually touches land. Five sixths of that
+   * work produced nothing at all.
+   */
+  private waterMask: Uint8Array | null = null;
   private readonly bakeTileSize: number = 16;
+
   private readonly visibleEntityScratch: Entity[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
@@ -790,6 +829,7 @@ export class PixelRenderer {
     this.terrainCtx.imageSmoothingEnabled = false;
     this.terrainW = tileMap.width;
     this.terrainH = tileMap.height;
+    this.waterMask = new Uint8Array(tileMap.width * tileMap.height);
     tileMap.markAllDirty();
   }
 
@@ -843,7 +883,33 @@ export class PixelRenderer {
     this.drawHeightRelief(tileMap, tile, x, y, bx, by, ts);
     this.drawTerrainEdges(tileMap, tile, x, y, bx, by, ts);
     this.drawTerrainDetails(tile, x, y, bx, by, ts);
+    this.cacheWaterMask(tileMap, tile, x, y);
   }
+
+  /** Records what per-frame work this water tile will need. See `WATER_EDGED`. */
+  private cacheWaterMask(tileMap: TileMap, tile: Tile, x: number, y: number): void {
+    if (!this.waterMask) return;
+    const index = x * this.terrainH + y;
+    if (!this.isWater(tile.type)) { this.waterMask[index] = 0; return; }
+
+    let mask = 0;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const neighbour = tileMap.getTile(x + dx, y + dy);
+      if (neighbour && neighbour.type !== tile.type) { mask |= WATER_EDGED; break; }
+    }
+
+    // Both gates below are position-only, so a tile that fails them can never
+    // show movement and never needs touching again.
+    const shallow = tile.type === TerrainType.SHALLOW_WATER;
+    this.setHashBase(x, y);
+    const crest = this.h(220) > (shallow ? 0.45 : 0.72);
+    const glint = hash2(x, y, 97) > (shallow ? 0.84 : 0.94);
+    // Shallow water always qualifies: its caustic web is gated purely on time.
+    if (shallow || crest || glint) mask |= WATER_ANIMATES;
+
+    this.waterMask[index] = mask;
+  }
+
 
   private getOverlayTerrainColor(tile: Tile, overlayMode: OverlayMode): string | null {
     if (overlayMode === 'temperature') {
@@ -914,10 +980,27 @@ export class PixelRenderer {
   }
 
   /** Animated surface pass over the cached water/lava base. */
-  private drawAnimatedTerrainAccent(tileMap: TileMap, tile: Tile, x: number, y: number, screenX: number, screenY: number, tileSize: number): void {
+  /**
+   * The per-frame layer over a baked water or lava tile.
+   *
+   * Identical in output to what this used to do — the edge pass still runs at
+   * screen resolution over the bake, exactly as before, which is what gives a
+   * coastline its depth. The only change is that it runs on the tiles that have
+   * an edge or a moving surface instead of on every tile of open sea.
+   */
+  private drawAnimatedTerrainAccent(
+    tileMap: TileMap,
+    tile: Tile,
+    x: number,
+    y: number,
+    screenX: number,
+    screenY: number,
+    tileSize: number,
+    mask: number = WATER_EDGED | WATER_ANIMATES
+  ): void {
     this.setHashBase(x, y);
-    this.drawTerrainTexture(tile, x, y, screenX, screenY, tileSize);
-    this.drawTerrainEdges(tileMap, tile, x, y, screenX, screenY, tileSize);
+    if ((mask & WATER_ANIMATES) !== 0) this.drawTerrainTexture(tile, x, y, screenX, screenY, tileSize);
+    if ((mask & WATER_EDGED) !== 0) this.drawTerrainEdges(tileMap, tile, x, y, screenX, screenY, tileSize);
     if (tile.type === TerrainType.LAVA && tileSize >= 8) this.drawTerrainDetails(tile, x, y, screenX, screenY, tileSize);
   }
 
@@ -1539,8 +1622,15 @@ export class PixelRenderer {
         // cached base and receive only a cheap moving accent.
         if (!useBake) {
           this.drawTerrainTile(tileMap, tile, x, y, sx, sy, tileSize, overlayMode);
-        } else if (this.isWater(tile.type) || tile.type === TerrainType.LAVA) {
+        } else if (tile.type === TerrainType.LAVA) {
           this.drawAnimatedTerrainAccent(tileMap, tile, x, y, sx, sy, tileSize);
+        } else if (this.isWater(tile.type)) {
+          // Open water with no edge and no possible movement is already drawn in
+          // full by the bake underneath. Skipping it is the difference between
+          // touching every tile of the sea each frame and touching only those
+          // that have something to add.
+          const mask = this.waterMask ? this.waterMask[x * this.terrainH + y] : (WATER_EDGED | WATER_ANIMATES);
+          if (mask !== 0) this.drawAnimatedTerrainAccent(tileMap, tile, x, y, sx, sy, tileSize, mask);
         }
 
         // Roads are drawn afterwards as a connected network (drawRoadsPass),

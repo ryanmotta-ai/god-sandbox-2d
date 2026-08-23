@@ -47,11 +47,26 @@ export interface RendererDevSelection {
 
 const BENCHMARK_COUNTS = new Set([10_000, 50_000, 100_000, 250_000, 500_000]);
 
-/** WebGPU is primary; `?renderer=canvas` remains an explicit diagnostic/fallback override. */
+/**
+ * Canvas is primary; `?renderer=webgpu` opts into the GPU path.
+ *
+ * The two renderers are not at parity and the gap is in the canvas path's favour:
+ * it owns the organic coastlines, the layered building silhouettes, the terrain
+ * feathering and the per-tile detail work that give the world its look. The
+ * WebGPU path draws the same *content* from an instance buffer, which is faster
+ * and flatter, and closing the visual gap would mean reimplementing all of that
+ * as shader work.
+ *
+ * So the default follows the art rather than the benchmark. WebGPU stays
+ * reachable behind the flag — it is the right foundation if that work is ever
+ * done, and it is still the honest choice on a machine the canvas path cannot
+ * carry — but nobody should have to pass a URL parameter to see the game look
+ * the way it is meant to look.
+ */
 export function resolveRendererDevSelection(search: string = globalThis.location?.search ?? ''): RendererDevSelection {
   const params = new URLSearchParams(search);
   const requested = params.get('renderer')?.toLowerCase();
-  const preference: WorldRendererPreference = requested === 'canvas' ? 'canvas' : 'webgpu';
+  const preference: WorldRendererPreference = requested === 'webgpu' ? 'webgpu' : 'canvas';
   const rawBenchmark = Number(params.get('renderBenchmark') ?? 0);
   const benchmarkInstances = BENCHMARK_COUNTS.has(rawBenchmark) ? rawBenchmark : 0;
   return { preference, benchmarkInstances };

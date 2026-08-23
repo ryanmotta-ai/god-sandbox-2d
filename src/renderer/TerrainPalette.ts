@@ -201,13 +201,30 @@ export function shadeColor(color: string, factor: number): string {
 }
 
 const withAlphaCache = new Map<string, string>();
+/**
+ * Alpha steps the cache is keyed on.
+ *
+ * The memo was keyed on the raw float, and the renderer's most frequent callers
+ * pass a *continuously animated* alpha — the foam pulse, the specular glint, the
+ * caustic web all derive theirs from `Math.sin(animTimer …)`. So every one of
+ * those calls missed, re-parsed its colour and built a new string, and every miss
+ * added a permanent entry to the map: several thousand new entries a second,
+ * never evicted, for a cache that could never hit.
+ *
+ * Sixty-four steps is finer than 8-bit alpha can even represent (about 4/255 per
+ * step), so nothing on screen changes — but the animated callers now hit, and the
+ * map is bounded at one entry per colour per step instead of growing forever.
+ */
+const ALPHA_STEPS = 64;
+
 export function withAlpha(color: string, alpha: number): string {
-  const key = color + '|' + alpha;
+  const quantised = Math.round(clamp(alpha, 0, 1) * ALPHA_STEPS) / ALPHA_STEPS;
+  const key = color + '|' + quantised;
   const cached = withAlphaCache.get(key);
   if (cached !== undefined) return cached;
 
   const c = parseColor(color);
-  const result = `rgba(${c.r}, ${c.g}, ${c.b}, ${clamp(alpha, 0, 1)})`;
+  const result = `rgba(${c.r}, ${c.g}, ${c.b}, ${quantised})`;
   withAlphaCache.set(key, result);
   return result;
 }
