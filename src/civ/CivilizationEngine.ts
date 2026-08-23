@@ -187,6 +187,7 @@ export class CivilizationEngine {
 
     for (const kingdom of world.kingdoms.values()) {
       this.distributeStaples(kingdom, world);
+      this.tickFaith(kingdom, world);
       this.collectTaxes(kingdom, world);
       this.tickResearch(kingdom, world);
       this.tickEconomy(kingdom, world);
@@ -208,7 +209,7 @@ export class CivilizationEngine {
     this.tickColonialPolitics(world);
     this.tickRebellions(world);
     this.tickTradeBanditry(world);
-    GreatPersonManager.checkAscension(world.entities, world.kingdoms, world.cities, world.tileMap, world.year);
+    GreatPersonManager.checkAscension(world.entities, world.kingdoms, world.cities, world.tileMap, world.year, world.diplomacy);
 
     world.market.settle(world.year);
     // Books close after trade has run, so a year's imports and exports land in
@@ -276,7 +277,9 @@ export class CivilizationEngine {
     }
     const lifecycle = UrbanLifecycleManager.tickCity(city, kingdom, world.tileMap, world.year);
     if (lifecycle.vacatedBuildingIds.length > 0) this.releaseInactiveBuildingAssignments(city, lifecycle);
-    this.produceGoods(city, world, productionMult);
+    // The Grand Aqueduct's irrigation: the other half of the "+50% capacity and
+    // harvest" its own description has always promised the player.
+    this.produceGoods(city, world, productionMult * city.wonderHarvestBonus());
     this.consumeGoods(city, world);
     this.runConstruction(city, world, kingdom);
     this.repairCityInfrastructure(city, world);
@@ -447,7 +450,17 @@ export class CivilizationEngine {
       // actual conversions come from Goods.ts recipes and their building only sets
       // capacity, labour and infrastructure.
       if (def.category === 'craft' && def.craftCapacity) {
-        output += this.runCraftProduction(city, world, kingdom, building, def.craftCapacity * scale);
+        /**
+         * Mass production.
+         *
+         * Unlocked by industrialization, described to the player as the assembly
+         * line, and read by nothing: a realm that industrialised got the factory
+         * building and no change whatsoever in what a workshop could turn out.
+         * The whole point of the institution is throughput, so that is where it
+         * lands — the same inputs, run through more cycles a year.
+         */
+        const line = kingdom?.research.knowsFeature('mass_production') ? 1.45 : 1;
+        output += this.runCraftProduction(city, world, kingdom, building, def.craftCapacity * scale * line);
         continue;
       }
 
@@ -1619,6 +1632,88 @@ export class CivilizationEngine {
   // KINGDOM TOTALS & TAXATION
   // ============================================================
 
+  /**
+   * Writing.
+   *
+   * The tree grants `writing` alongside the library and the temple, and until now
+   * nothing in the world read it — a realm with no script administered its
+   * provinces exactly as well as one with a chancery, kept law reform moving at
+   * the same speed, and lost nothing by never inventing records. Written record
+   * is the difference between an order given and an order enforced two hundred
+   * tiles away, so it lifts the ceiling on administrative reach.
+   */
+  private administrativeCeiling(kingdom: Kingdom): number {
+    return kingdom.research.knowsFeature('writing') ? 1 : 0.72;
+  }
+
+  /**
+   * One year of religion.
+   *
+   * Faith rises where there are temples for people to go to and a settled life to
+   * be grateful for, and where the hand on the brush has recently made itself
+   * felt. It falls in famine, in long wars, and wherever nobody has built a
+   * temple in living memory — a realm's devotion is not a constant of its
+   * culture, it is maintained.
+   *
+   * The effects are deliberately the ones religion actually had: it legitimises a
+   * crown, it satisfies the clergy (see `Society`), and it holds a suffering
+   * settlement together past the point where its material conditions would
+   * predict collapse. It does not produce goods and it does not win battles.
+   */
+  private tickFaith(kingdom: Kingdom, world: CivWorld): void {
+    let temples = 0;
+    let congregation = 0;
+    let famine = 0;
+    let cityCount = 0;
+
+    for (const cityId of kingdom.cityIds) {
+      const city = world.cities.get(cityId);
+      if (!city) continue;
+      cityCount++;
+      congregation += city.population;
+      famine += city.famineYears;
+      for (const building of city.buildings.values()) {
+        if (building.type === 'temple' || building.type === 'monument') {
+          temples += building.operationalFactor();
+        }
+      }
+    }
+    if (cityCount === 0) return;
+
+    // One temple serves roughly forty souls before the rest are out of earshot.
+    const coverage = congregation > 0 ? Math.min(1, (temples * 40) / congregation) : 0;
+    const target = clamp(
+      0.08 +
+        coverage * 0.62 +
+        kingdom.culture.tradition * 0.16 +
+        Math.max(0, kingdom.divineFavour) * 0.25 -
+        Math.min(0.3, (famine / cityCount) * 0.05) -
+        (kingdom.warWeariness / 100) * 0.12,
+      0,
+      1
+    );
+
+    // Devotion is slow in both directions: a generation builds it, a generation
+    // loses it.
+    kingdom.faith += (target - kingdom.faith) * 0.12;
+    kingdom.faith = clamp(kingdom.faith, 0, 1);
+    // The god's attention fades from memory.
+    kingdom.divineFavour *= 0.82;
+
+    // What faith is for. A realm whose people believe its crown is sanctioned
+    // tolerates a great deal more from it.
+    kingdom.legitimacy = clamp(kingdom.legitimacy + (kingdom.faith - 0.35) * 0.02, 0, 1);
+    // And a congregation endures a hard year better than a merely well-fed one.
+    if (kingdom.faith > 0.5) {
+      for (const cityId of kingdom.cityIds) {
+        const city = world.cities.get(cityId);
+        if (city && city.famineYears > 0) {
+          city.prosperity = clamp(city.prosperity + (kingdom.faith - 0.5) * 0.02, 0, 1);
+        }
+      }
+    }
+  }
+
   private refreshKingdomTotals(world: CivWorld): void {
     for (const kingdom of world.kingdoms.values()) {
       let population = 0;
@@ -1752,6 +1847,9 @@ export class CivilizationEngine {
     for (const cityId of kingdom.cityIds) {
       output += world.cities.get(cityId)?.researchOutput ?? 0;
     }
+    // The Great Library's advertised +50% national research, which until now
+    // existed only in its description.
+    output *= kingdom.wonderEffects(world.cities).research;
     kingdom.research.output = output;
     if (output <= 0) return;
 
@@ -2066,7 +2164,10 @@ export class CivilizationEngine {
       kingdom.culture.tradition * 6 +
       (lawEffects.administrativeReach ?? 0) * 80;
     const cityBurden = Math.max(0, cityCount - 3) * 0.035;
-    const adminTarget = clamp(1 - avgDistance / Math.max(20, adminCapacity) - cityBurden, 0.18, 1);
+    // A realm with no written record cannot administer past what a rider can
+    // remember, however loyal its clerks. See `administrativeCeiling`.
+    const ceiling = this.administrativeCeiling(kingdom);
+    const adminTarget = clamp(1 - avgDistance / Math.max(20, adminCapacity) - cityBurden, 0.18, ceiling);
     kingdom.administrativeReach += (adminTarget - kingdom.administrativeReach) * 0.25;
 
     const tradeRouteValue = world.trade.routesFor(kingdom.id)
@@ -2111,18 +2212,23 @@ export class CivilizationEngine {
       kingdom.society.revoltRisk * 0.18 -
       kingdom.society.coupRisk * 0.12 -
       kingdom.society.reformPressure * 0.06;
+    // The Founder's Statue's advertised +30% realm stability. Applied to the
+    // target the realm converges on rather than to the current value, so a
+    // monument raises the floor a realm settles at instead of handing it a
+    // one-off jolt the next crisis erases.
+    const monumentStability = kingdom.wonderEffects(world.cities).stability;
     const stabilityTarget = Math.max(
       0,
       Math.min(
         1,
-        gov.stability * 0.34 +
+        monumentStability * (gov.stability * 0.34 +
           prosperity * 0.28 +
           kingdom.legitimacy * 0.22 +
           kingdom.foodSecurity * 0.18 +
           kingdom.administrativeReach * 0.12 +
           culturalCohesion +
           socialCohesion +
-          (lawEffects.stability ?? 0) -
+          (lawEffects.stability ?? 0)) -
           economy.inequality * 0.24 -
           inflationPain -
           taxPain -
@@ -2169,6 +2275,20 @@ export class CivilizationEngine {
     // Returns are capped against real output: a state cannot compound its way to
     // infinite wealth on an economy that only produces so much.
     if (kingdom.research.knowsFeature('banking')) {
+      /**
+       * The exchange.
+       *
+       * `stock_market` was unlocked by capitalism and read nowhere, so a realm
+       * that reached the joint-stock company had exactly the same capital market
+       * as one that had just invented the ledger. It deepens the market rather
+       * than replacing it: more return on reserves, and a higher ceiling on what
+       * finance can contribute before it is just printing.
+       */
+      const exchange = kingdom.research.knowsFeature('stock_market');
+      if (exchange) {
+        const listed = Math.min(economy.gdp * 0.22, Math.max(0, economy.treasury) * 0.05);
+        economy.treasury += listed;
+      }
       const rate = gov.economy === 'market' ? 0.035 : 0.015;
       const interest = Math.min(economy.treasury * rate, Math.max(0, economy.gdp * 0.5));
       economy.treasury += interest;
@@ -2276,6 +2396,7 @@ export class CivilizationEngine {
       tradeDependency: kingdom.tradeDependency,
       externalThreat: kingdom.externalThreat,
       administrativeReach: kingdom.administrativeReach,
+      faith: kingdom.faith,
       inequality: kingdom.economy.inequality,
       industrialisation: kingdom.economy.industrialisation,
       gdpPerCapita: kingdom.economy.gdpPerCapita,
@@ -3379,29 +3500,42 @@ export class CivilizationEngine {
       .filter((c): c is City => !!c);
     if (cities.length < 2) return;
 
+    /**
+     * Central planning.
+     *
+     * Unlocked by communism, shown in the technology screen, and consulted by no
+     * rule anywhere — a planned economy redistributed grain exactly like a feudal
+     * one. Its whole content is that the state moves staples deliberately instead
+     * of incidentally: a planned realm hauls in far larger consignments, holds a
+     * higher reserve in every settlement, and will strip a donor closer to the
+     * bone to do it. That is also its cost, since a plan that empties the
+     * granaries it drew from is how a planned economy fails.
+     */
+    const planned = kingdom.research.knowsFeature('central_planning');
+    const target = CivilizationEngine.STAPLE_TARGET * (planned ? 1.5 : 1);
+    const donorFloor = CivilizationEngine.STAPLE_DONOR_FLOOR * (planned ? 0.7 : 1);
+    const haulCap = CivilizationEngine.STAPLE_HAUL_CAP * (planned ? 2.2 : 1);
+
     for (const good of CivilizationEngine.REALM_STAPLES) {
       const needy = cities
-        .filter(c => c.stock.get(good) < CivilizationEngine.STAPLE_TARGET)
+        .filter(c => c.stock.get(good) < target)
         .sort((a, b) => a.stock.get(good) - b.stock.get(good));
       if (needy.length === 0) continue;
 
       const donors = cities
-        .filter(c => c.stock.get(good) > CivilizationEngine.STAPLE_DONOR_FLOOR)
+        .filter(c => c.stock.get(good) > donorFloor)
         .sort((a, b) => b.stock.get(good) - a.stock.get(good));
       if (donors.length === 0) continue;
 
       for (const receiver of needy) {
-        let wanted = Math.min(
-          CivilizationEngine.STAPLE_HAUL_CAP,
-          CivilizationEngine.STAPLE_TARGET - receiver.stock.get(good)
-        );
+        let wanted = Math.min(haulCap, target - receiver.stock.get(good));
 
         for (const donor of donors) {
           if (wanted <= 0) break;
           if (donor.id === receiver.id) continue;
           if (Math.hypot(donor.x - receiver.x, donor.y - receiver.y) > CivilizationEngine.STAPLE_HAUL_RANGE) continue;
 
-          const spare = donor.stock.get(good) - CivilizationEngine.STAPLE_DONOR_FLOOR;
+          const spare = donor.stock.get(good) - donorFloor;
           if (spare <= 0) continue;
 
           const loaded = donor.stock.take(good, Math.min(spare, wanted));
@@ -3422,7 +3556,20 @@ export class CivilizationEngine {
       const b = world.kingdoms.get(agreement.kingdomB);
       if (!a || !b) continue;
       if (!world.trade.canOpenRoute(a.id) || !world.trade.canOpenRoute(b.id)) continue;
-      if (!rng.chance(0.4)) continue;
+      /**
+       * Trade routes as an institution.
+       *
+       * `trade_routes` is granted by both the wheel and currency, and was read by
+       * nothing at all: a stone-age realm with a trade agreement opened caravan
+       * lines exactly as readily as a mercantile empire. It is what a standing
+       * route *is* — an agreed road with agreed terms — so a realm without it can
+       * still trade, just slowly and opportunistically, while one that has it
+       * opens lines at more than twice the rate.
+       */
+      const institutions =
+        (a.research.knowsFeature('trade_routes') ? 1 : 0) +
+        (b.research.knowsFeature('trade_routes') ? 1 : 0);
+      if (!rng.chance(0.14 + institutions * 0.16)) continue;
 
       // Match a surplus in one realm against a shortage in the other.
       const pairing = this.findTradePairing(a, b, world);

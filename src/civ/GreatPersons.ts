@@ -7,6 +7,7 @@ import { events } from '../core/EventBus';
 import { rng, nextId } from '../core/Random';
 import { LEGENDARY_ITEMS } from '../entities/Equipment';
 import { TileMap } from '../world/TileMap';
+import type { DiplomacyManager } from './Diplomacy';
 
 export type GreatPersonType = 'scholar' | 'builder' | 'hero' | 'diplomat';
 
@@ -43,7 +44,8 @@ export class GreatPersonManager {
     kingdoms: Map<string, Kingdom>,
     cities: Map<string, City>,
     tileMap: TileMap,
-    year: number
+    year: number,
+    diplomacy?: DiplomacyManager
   ): void {
     if (year < 5) return;
 
@@ -75,7 +77,7 @@ export class GreatPersonManager {
       }
 
       if (type) {
-        this.ascend(e, type, kingdom, cities, tileMap, year);
+        this.ascend(e, type, kingdom, cities, tileMap, year, diplomacy);
         break; // Max 1 ascension per tick
       }
     }
@@ -87,7 +89,8 @@ export class GreatPersonManager {
     kingdom: Kingdom,
     cities: Map<string, City>,
     tileMap: TileMap,
-    year: number
+    year: number,
+    diplomacy?: DiplomacyManager
   ): void {
     e.isGreatPerson = true;
     e.greatPersonType = type;
@@ -129,7 +132,7 @@ export class GreatPersonManager {
     events.emit('greatPersonBorn', { entity: e, type, kingdom, year });
 
     // Perform their Great Legacy Action!
-    this.executeGreatAction(e, type, kingdom, cities, tileMap, year);
+    this.executeGreatAction(e, type, kingdom, cities, tileMap, year, diplomacy);
   }
 
   /** Execute unique legacy action for the Great Person */
@@ -139,7 +142,8 @@ export class GreatPersonManager {
     kingdom: Kingdom,
     cities: Map<string, City>,
     tileMap: TileMap,
-    year: number
+    year: number,
+    diplomacy?: DiplomacyManager
   ): void {
     const city = e.cityId ? cities.get(e.cityId) : Array.from(cities.values())[0];
     if (!city) return;
@@ -290,9 +294,29 @@ export class GreatPersonManager {
       }
 
       case 'diplomat': {
-        // Great Diplomat: High relation boost & Non-Aggression Pact
+        /**
+         * Great Diplomat: real non-aggression pacts.
+         *
+         * This used to emit `diplomaticPact` for every realm the crown knew — an
+         * event with no listener anywhere in the codebase. So the single most
+         * expensive Great Person in the game produced a chronicle entry claiming
+         * treaties had been brokered, a stability bump, and not one change to any
+         * relation or truce. The pacts were announced and never signed.
+         *
+         * A non-aggression pact is a truce plus warm relations, which is exactly
+         * what the diplomacy layer already models — it simply was never called.
+         */
         for (const targetId of kingdom.knownKingdoms) {
-          events.emit('diplomaticPact', { from: kingdom.id, to: targetId, pact: 'Non-Aggression' });
+          if (targetId === kingdom.id) continue;
+          if (diplomacy) {
+            // An active war is not ended by a diplomat's arrival; everything
+            // short of that is.
+            if (!diplomacy.isAtWar(kingdom.id, targetId)) {
+              diplomacy.changeRelation(kingdom.id, targetId, 28);
+              diplomacy.recordTruce(kingdom.id, targetId, year, 15, 'non_aggression_pact');
+            }
+          }
+          events.emit('diplomaticPact', { from: kingdom.id, to: targetId, pact: 'Non-Aggression', year });
         }
         kingdom.economy.stability = Math.min(1.0, kingdom.economy.stability + 0.2);
 

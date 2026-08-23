@@ -316,13 +316,17 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     type: 'temple',
     name: 'Templo',
     icon: '⛩️',
+    // Filed under knowledge because the monastery kept the books, not because a
+    // temple is a laboratory. Its real output is faith, which `tickFaith` reads
+    // from the building itself rather than from a `produces` entry — devotion is
+    // not a good, cannot be stockpiled and cannot be sold.
     category: 'knowledge',
     maxHp: 300,
-    cost: { stone: 50, wood: 25 },
-    research: 3,
+    cost: { stone: 50, wood: 25, clay: 12 },
+    research: 2,
     jobs: 2,
     unique: true,
-    description: 'Um lugar para fazer petições a quem estiver segurando o pincel.'
+    description: 'Um lugar para fazer petições a quem estiver segurando o pincel. Onde há templo, há fé — e uma coroa que a fé sanciona suporta o que a razão não suportaria.'
   },
 
   market: {

@@ -2794,7 +2794,18 @@ if (e.kingdomId) {
         for (const e of this.entities) {
           if (e.cityId === cityId && e.hp > 0 && e.profession === 'soldier') soldiersNow++;
         }
-        const levy = Math.max(2, Math.round(city.population * 0.12));
+        /**
+         * Conscription.
+         *
+         * `conscription` is unlocked by gunpowder, described to the player, and
+         * was never read by anything — one of six technology features the tree
+         * granted and no rule consulted. The levée en masse is precisely what it
+         * should mean: a realm that has the institution can call up half again as
+         * many of its people, and can reach into the barracks with more of them
+         * at once.
+         */
+        const conscripted = kingdom.research.knowsFeature('conscription');
+        const levy = Math.max(2, Math.round(city.population * (conscripted ? 0.19 : 0.12)));
         const need = Math.max(0, levy - soldiersNow);
         if (need <= 0) continue;
 
@@ -2816,7 +2827,8 @@ if (e.kingdomId) {
         const priority: Record<string, number> = { none: -1, builder: 0, scout: 1, miner: 2, woodcutter: 3, farmer: 4 };
         const ordered = pool.sort((a, b) => (priority[a.profession] ?? 9) - (priority[b.profession] ?? 9));
 
-        for (let i = 0; i < Math.min(openSlots, need, 4, ordered.length); i++) {
+        const perYear = conscripted ? 7 : 4;
+        for (let i = 0; i < Math.min(openSlots, need, perYear, ordered.length); i++) {
           const e = ordered[i];
           const b = barracksList.find(bb => bb.assignedWorkerIds.size < (bb.definition.jobs ?? 0) * bb.level);
           if (!b) break;

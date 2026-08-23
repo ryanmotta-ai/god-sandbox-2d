@@ -334,10 +334,30 @@ export class City {
   /** Total citizens the settlement can house. Growth stalls beyond this. */
   public housingCapacity(): number {
     let capacity = 0;
+    let aqueduct = 0;
     for (const b of this.buildings.values()) {
       capacity += (b.definition.housing ?? 0) * b.level * b.operationalFactor();
+      // The Grand Aqueduct's own description promises "+50% city population
+      // capacity and harvest" and delivered neither: it carried `housing: 30`
+      // like an oversized tenement and the multiplier existed only as prose in
+      // MONUMENT_TYPES. Fresh water is what lifts the ceiling on a whole city,
+      // not thirty extra beds.
+      if (b.type === 'grand_aqueduct') aqueduct = Math.max(aqueduct, b.operationalFactor());
     }
-    return capacity;
+    return capacity * (1 + 0.5 * aqueduct);
+  }
+
+  /**
+   * Multiplier on this settlement's harvest from its wonders.
+   *
+   * The other half of the Grand Aqueduct's promise: irrigation.
+   */
+  public wonderHarvestBonus(): number {
+    let bonus = 1;
+    for (const b of this.buildings.values()) {
+      if (b.type === 'grand_aqueduct') bonus = Math.max(bonus, 1 + 0.5 * b.operationalFactor());
+    }
+    return bonus;
   }
 
   /** Workers needed to fully staff every building. */

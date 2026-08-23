@@ -104,6 +104,9 @@ export class WarFrontSystem {
   /** Live sectors, keyed by id. Rebuilt each year but `push` carries over. */
   public sectors: Map<string, FrontSector> = new Map();
   /** Settlements currently cut off from their realm's seat of power. */
+  /** Per-realm morale multiplier from wonders, refreshed once a year. */
+  private wonderMorale: Map<string, number> = new Map();
+
   public isolated: Set<string> = new Set();
   /** Sectors a chronicle entry has already been written for. */
   private announced: Set<string> = new Set();
@@ -121,7 +124,26 @@ export class WarFrontSystem {
   public tickYear(world: FrontsWorld): void {
     this.rebuildSectors(world);
     this.measurePresence(world);
+    this.refreshWonderMorale(world);
     // Supply is filled in between measuring and resolving: WAR-V3 runs here.
+  }
+
+  /**
+   * The Great Colosseum's advertised "+30% military morale, reduces war
+   * exhaustion" — which existed as prose in `MONUMENT_TYPES` and nowhere else.
+   *
+   * Read once a year rather than per sector, because it walks every settlement's
+   * buildings and `morale()` is called twice for every stretch of line.
+   */
+  private refreshWonderMorale(world: FrontsWorld): void {
+    this.wonderMorale.clear();
+    for (const kingdom of world.kingdoms.values()) {
+      const morale = kingdom.wonderEffects(world.cities).morale;
+      this.wonderMorale.set(kingdom.id, morale);
+      // And the exhaustion side of the promise: games and bread make a long war
+      // easier to bear, so weariness bleeds off faster where the arena stands.
+      if (morale > 1) kingdom.warWeariness = Math.max(0, kingdom.warWeariness - (morale - 1) * 12);
+    }
   }
 
   /** Second half of the year, after logistics has filled in supply. */
@@ -368,7 +390,7 @@ export class WarFrontSystem {
   }
 
   private morale(kingdom: Kingdom): number {
-    return Math.max(0.5, 1 - kingdom.warWeariness / 220);
+    return Math.max(0.5, 1 - kingdom.warWeariness / 220) * (this.wonderMorale.get(kingdom.id) ?? 1);
   }
 
   /**

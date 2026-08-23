@@ -6,6 +6,7 @@ import { GovernmentType, GOVERNMENTS, GovernmentDefinition } from './Government'
 import { KingdomEconomy } from './Economy';
 import { CulturalProfile, createCulturalProfile, deserializeCulturalProfile } from './Culture';
 import { SocietyProfile, createSocietyProfile, deserializeSocietyProfile } from './Society';
+import type { City } from './City';
 import { LawProfile, aggregateLawEffects, createLawProfile, deserializeLawProfile } from './Laws';
 
 // Kingdom emblem IDs for pixel-art badge rendering
@@ -152,6 +153,24 @@ export class Kingdom {
   public legitimacy: number = 0.7;
   /** 0..1 - how well the capital can actually administer far-flung cities. */
   public administrativeReach: number = 1;
+  /**
+   * How devout the realm is, 0..1.
+   *
+   * There was no religion in this world at all. Temples were filed under
+   * `knowledge`, produced research points, and their own description — "a place
+   * to petition whoever is holding the brush" — described a system that did not
+   * exist. A god sandbox in which the god's worshippers are a research building
+   * is missing its subject.
+   *
+   * Faith is what a population's relationship to the hand on the brush actually
+   * does to a realm: it legitimises a crown that has no other claim, it keeps the
+   * clergy loyal, and it holds a hungry settlement together for one more winter
+   * than reason would. It is grown by temples and by divine attention, and it
+   * decays wherever both are absent.
+   */
+  public faith: number = 0.2;
+  /** Faith won or lost by the god's own acts, decaying year on year. */
+  public divineFavour: number = 0;
   /** 0..1 - strategic reserve and reliability of food supply. */
   public foodSecurity: number = 1;
   /** 0..1 - pressure from stronger neighbours and active enemies. */
@@ -352,6 +371,38 @@ export class Kingdom {
   // ============================ POWER ============================
 
   /** Combined strength used for war resolution and the power ranking. */
+  /**
+   * The national effects of the Great Wonders, as their own descriptions promise.
+   *
+   * All four wonders were built, placed, rendered, protected from demolition and
+   * scored by the district planner — and not one of their advertised bonuses
+   * existed anywhere in the simulation. `MONUMENT_TYPES` announced "+30% realm
+   * stability", "+50% national research", "+50% city capacity and harvest" and
+   * "+30% military morale, reduces war exhaustion" to the player, and the code
+   * behind them granted a pile of housing and a research figure. A wonder that
+   * costs three hundred stone and a Great Person has to change the realm.
+   *
+   * Recomputed from the buildings each year rather than cached, so a ruined
+   * wonder stops helping and a rebuilt one starts again.
+   */
+  public wonderEffects(cities: Map<string, City>): { stability: number; research: number; morale: number } {
+    let stability = 1;
+    let research = 1;
+    let morale = 1;
+    for (const cityId of this.cityIds) {
+      const city = cities.get(cityId);
+      if (!city) continue;
+      for (const building of city.buildings.values()) {
+        const share = building.operationalFactor();
+        if (share <= 0) continue;
+        if (building.type === 'monument') stability = Math.max(stability, 1 + 0.3 * share);
+        if (building.type === 'great_library') research = Math.max(research, 1 + 0.5 * share);
+        if (building.type === 'colosseum') morale = Math.max(morale, 1 + 0.3 * share);
+      }
+    }
+    return { stability, research, morale };
+  }
+
   public computePower(): number {
     const techMods = this.research.modifiers();
     const gov = this.governmentInfo;
@@ -434,6 +485,8 @@ export class Kingdom {
       warWeariness: this.warWeariness,
       legitimacy: this.legitimacy,
       administrativeReach: this.administrativeReach,
+      faith: this.faith,
+      divineFavour: this.divineFavour,
       foodSecurity: this.foodSecurity,
       externalThreat: this.externalThreat,
       tradeDependency: this.tradeDependency,
@@ -486,6 +539,8 @@ export class Kingdom {
     kingdom.warWeariness = data.warWeariness ?? 0;
     kingdom.legitimacy = data.legitimacy ?? 0.7;
     kingdom.administrativeReach = data.administrativeReach ?? 1;
+    kingdom.faith = data.faith ?? 0.2;
+    kingdom.divineFavour = data.divineFavour ?? 0;
     kingdom.foodSecurity = data.foodSecurity ?? 1;
     kingdom.externalThreat = data.externalThreat ?? 0;
     kingdom.tradeDependency = data.tradeDependency ?? 0;

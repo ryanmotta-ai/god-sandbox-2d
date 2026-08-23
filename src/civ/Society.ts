@@ -96,6 +96,8 @@ export interface SocietyTickContext {
   tradeDependency: number;
   externalThreat: number;
   administrativeReach: number;
+  /** How devout the realm is, 0..1. See `Kingdom.faith`. */
+  faith: number;
   inequality: number;
   industrialisation: number;
   gdpPerCapita: number;
@@ -426,8 +428,11 @@ function factionTargets(
       break;
 
     case 'clergy_scholars':
-      influence += (ctx.culture.tradition + ctx.culture.innovation) * 0.05 + ctx.legitimacy * 0.04;
-      satisfaction += ctx.legitimacy * 0.2 + ctx.culture.tradition * 0.1 + ctx.culture.innovation * 0.08 - warPain * 0.08;
+      // A devout realm gives its clergy both standing and contentment; an
+      // irreligious one leaves them a learned minority with nothing to lose.
+      influence += (ctx.culture.tradition + ctx.culture.innovation) * 0.05 + ctx.legitimacy * 0.04 + ctx.faith * 0.14;
+      satisfaction += ctx.legitimacy * 0.2 + ctx.culture.tradition * 0.1 + ctx.culture.innovation * 0.08
+        + ctx.faith * 0.22 - warPain * 0.08;
       wealth = 0.34 + ctx.gdpPerCapita / 80 + ctx.legitimacy * 0.08;
       warSupport -= ctx.culture.diplomaticTrust * 0.12;
       reformSupport += ctx.culture.innovation * 0.14;

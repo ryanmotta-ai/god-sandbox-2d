@@ -79,6 +79,45 @@ export interface TerraformContext {
   kingdoms: Map<string, Kingdom>;
 }
 
+/** How far a divine act is felt by the settlements that witness it. */
+const WITNESS_RANGE = 26;
+
+/**
+ * Records what the god just did, in the memory of whoever saw it happen.
+ *
+ * The temple's own description calls it "a place to petition whoever is holding
+ * the brush", and until the faith system existed there was nothing on the other
+ * end of that petition: the player could raise mountains and drown provinces in
+ * full view of a civilisation that had no opinion about it whatsoever.
+ *
+ * A blessing on a realm's land earns devotion; a calamity visited on it costs
+ * far more than the blessing earned, because a god who ruins a harvest is not
+ * forgiven at the same rate as one who sends rain. Wrath aimed at an *enemy's*
+ * land is not held against the god by the realm that benefits from it.
+ */
+function recordDivineAct(powerId: string, tx: number, ty: number, ctx?: TerraformContext): void {
+  if (!ctx) return;
+
+  const blessings = new Set([
+    'rain', 'fertile_soil', 'trees', 'biome_forest', 'add_land', 'spawn_ore', 'build_road', 'heal', 'bless'
+  ]);
+  const calamities = new Set([
+    'wildfire', 'earthquake', 'meteorite', 'plague', 'lava', 'remove_land', 'shallow_water',
+    'biome_corrupted', 'spawn_dragon', 'lightning', 'smite'
+  ]);
+
+  const weight = blessings.has(powerId) ? 0.06 : calamities.has(powerId) ? -0.16 : 0;
+  if (weight === 0) return;
+
+  for (const city of ctx.cities.values()) {
+    if (!city.kingdomId) continue;
+    if (Math.hypot(city.x - tx, city.y - ty) > WITNESS_RANGE) continue;
+    const kingdom = ctx.kingdoms.get(city.kingdomId);
+    if (!kingdom) continue;
+    kingdom.divineFavour = Math.max(-1, Math.min(1, kingdom.divineFavour + weight));
+  }
+}
+
 /** Terrain a person, a building, a road or a tree cannot be on. */
 function isDrowned(type: TerrainType): boolean {
   return TERRAINS[type].isWater || type === TerrainType.LAVA;
@@ -257,6 +296,7 @@ export class PowerExecutor {
     if (!tile) return;
 
     sound.playClick();
+    recordDivineAct(powerId, tx, ty, terraform);
 
     switch (powerId) {
       // TERRAIN
