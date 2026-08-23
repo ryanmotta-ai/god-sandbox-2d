@@ -344,7 +344,12 @@ export class DiplomacyManager {
     return alliance;
   }
 
-  private allianceOf(kingdomId: string): Alliance | null {
+  /**
+   * The bloc a realm belongs to, if any. Public because the coalition rule needs
+   * to know whether a frightened realm is already in a league before opening
+   * another one.
+   */
+  public allianceOf(kingdomId: string): Alliance | null {
     for (const a of this.alliances.values()) {
       if (a.members.has(kingdomId)) return a;
     }
