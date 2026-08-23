@@ -23,9 +23,9 @@ export class SimulationScheduler {
   private readonly maxDebtTicks: number;
 
   constructor(options: SchedulerOptions = {}) {
-    this.frameBudgetMs = options.frameBudgetMs ?? 5;
-    this.maxTicksPerFrame = options.maxTicksPerFrame ?? 48;
-    this.maxDebtTicks = options.maxDebtTicks ?? 240;
+    this.frameBudgetMs = options.frameBudgetMs ?? 8;
+    this.maxTicksPerFrame = options.maxTicksPerFrame ?? 96;
+    this.maxDebtTicks = options.maxDebtTicks ?? 360;
   }
 
   public runFrame(speed: number, runTick: (absoluteTick: number) => void): SchedulerFrameResult {

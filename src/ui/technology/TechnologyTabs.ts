@@ -11,6 +11,7 @@ import { TECH_ERAS, TECHNOLOGIES, type TechTrack } from '../../civ/TechTree';
 import { buildProductionChainPreview } from '../economy/EconomyTabs';
 import type { EconomyMetrics } from '../economy/EconomyMetrics';
 import type { GameContext } from '../core/GameContext';
+import { sound } from '../../core/SoundSynth';
 import {
   CAPABILITY_LABEL, capabilityStatus, technologicalBottlenecks,
   technologicalConditions, technologyImpacts, whyItMatters,
@@ -351,7 +352,54 @@ export function buildTree(
   enableTreePan(viewport);
   const root = panel({
     title: 'Árvore de conhecimento', icon: 'technology', padded: false,
-    subtitle: 'Eras em colunas · arraste o espaço vazio para navegar · linhas destacadas mostram o caminho selecionado'
+    subtitle: 'Eras em colunas · arraste o espaço vazio para navegar · linhas destacadas mostram o caminho selecionado',
+    actions: [
+      button('⚡ Desbloquear Era', () => {
+        const kingdom = host.ctx.sim.kingdoms.get(snapshot.kingdomId);
+        if (kingdom) {
+          const currentEra = kingdom.research.currentEra();
+          kingdom.research.completeEra(currentEra);
+          if (kingdom.research.knows('steam_power')) {
+            host.ctx.sim.railways.connectKingdomNetwork(kingdom, {
+              year: host.ctx.sim.currentYear,
+              cities: host.ctx.sim.cities,
+              kingdoms: host.ctx.sim.kingdoms,
+              tileMap: host.ctx.tileMap,
+              diplomacy: host.ctx.sim.diplomacy,
+              trade: host.ctx.sim.trade
+            }, true);
+          }
+          host.ctx.toast(`Todas as tecnologias da ${TECH_ERAS[currentEra]?.name ?? currentEra} foram desbloqueadas!`, 'info');
+          sound.playMagic();
+          host.inspectTechnology(selectedId || 'tribalism', 'tree');
+        }
+      }, {
+        variant: 'secondary', size: 'sm', icon: 'flask',
+        tooltip: { title: 'Desbloquear Era Atual', description: 'Desbloqueia instantaneamente todas as tecnologias da era atual deste reino.' }
+      }),
+      button('✨ Iluminação Total', () => {
+        const kingdom = host.ctx.sim.kingdoms.get(snapshot.kingdomId);
+        if (kingdom) {
+          kingdom.research.completeAll();
+          if (kingdom.research.knows('steam_power')) {
+            host.ctx.sim.railways.connectKingdomNetwork(kingdom, {
+              year: host.ctx.sim.currentYear,
+              cities: host.ctx.sim.cities,
+              kingdoms: host.ctx.sim.kingdoms,
+              tileMap: host.ctx.tileMap,
+              diplomacy: host.ctx.sim.diplomacy,
+              trade: host.ctx.sim.trade
+            }, true);
+          }
+          host.ctx.toast(`Árvore tecnológica completa desbloqueada para ${kingdom.name}!`, 'info');
+          sound.playMagic();
+          host.inspectTechnology(selectedId || 'tribalism', 'tree');
+        }
+      }, {
+        variant: 'primary', size: 'sm', icon: 'crown',
+        tooltip: { title: 'Iluminação Total', description: 'Desbloqueia 100% da árvore tecnológica (todas as 6 eras) para este reino.' }
+      })
+    ]
   }, [viewport]);
   drawTreeConnections(root, selectedId);
   const selected = selectedId ? snapshot.technologies.find(view => view.definition.id === selectedId) ?? null : null;
@@ -434,6 +482,34 @@ function buildInspector(view: TechnologyView, snapshot: TechnologyUISnapshot, ho
       ])
     ]),
     el('p', { class: 'ae-tech-description', text: view.definition.description }),
+    view.status !== 'discovered'
+      ? el('div', { style: 'margin-top: var(--ae-space-2);' }, [
+          button(`⚡ Desbloquear Instantaneamente`, () => {
+            const kingdom = host.ctx.sim.kingdoms.get(snapshot.kingdomId);
+            if (kingdom) {
+              kingdom.research.complete(view.definition.id);
+              if (view.definition.id === 'steam_power' || view.definition.id === 'industrialization') {
+                host.ctx.sim.railways.connectKingdomNetwork(kingdom, {
+                  year: host.ctx.sim.currentYear,
+                  cities: host.ctx.sim.cities,
+                  kingdoms: host.ctx.sim.kingdoms,
+                  tileMap: host.ctx.tileMap,
+                  diplomacy: host.ctx.sim.diplomacy,
+                  trade: host.ctx.sim.trade
+                }, true);
+              }
+              host.ctx.toast(`Tecnologia [${view.definition.name}] desbloqueada por decreto divino!`, 'info');
+              sound.playMagic();
+              host.inspectTechnology(view.definition.id, 'tree');
+            }
+          }, {
+            variant: 'primary',
+            block: true,
+            icon: 'flask',
+            tooltip: { title: 'Desbloqueio Divino', description: 'Aprende esta tecnologia imediatamente sem consumir pontos de pesquisa.' }
+          })
+        ])
+      : null,
     divider(),
     view.prerequisites.length
       ? section('Requer', [badgeRow(view.prerequisites.map(required => objectLink(

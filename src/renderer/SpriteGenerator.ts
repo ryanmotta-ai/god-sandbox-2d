@@ -1,4 +1,5 @@
 import { SpeciesType } from '../entities/Species';
+import { stableSlot, MARCH_SLOTS } from '../core/Random';
 
 export type SpriteDirection = 'down' | 'up' | 'left' | 'right';
 export type EntitySpriteAnimation =
@@ -51,6 +52,15 @@ export interface EntitySpriteVisualState {
   armorName?: string;
   isGreatPerson?: boolean;
   greatPersonType?: string | null;
+  /**
+   * The realm's colour, worn on the helmet crest and flown from the standard.
+   *
+   * A crest was already drawn but hardcoded crimson, so two armies meeting in the
+   * field wore the same plume and the only thing telling them apart was a
+   * one-pixel outline. Kingdom colours are a small fixed set, so keying the sprite
+   * cache on this costs a handful of extra entries.
+   */
+  plumeColor?: string;
 }
 
 interface HumanoidSpritePalette {
@@ -176,6 +186,22 @@ export class SpriteGenerator {
     ctx.fillRect(Math.round(x), Math.round(y), Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
   }
 
+  /**
+   * A darker or lighter cousin of a hex colour, for the shadow side of anything
+   * painted in a realm's own colour. `factor` under 1 darkens, over 1 lightens.
+   * Falls through unchanged on anything that is not a six-digit hex, so a palette
+   * entry written as `rgba(...)` cannot crash a sprite.
+   */
+  private static shadeHex(color: string, factor: number): string {
+    const hex = /^#([0-9a-f]{6})$/i.exec(color.trim());
+    if (!hex) return color;
+    const n = parseInt(hex[1], 16);
+    const ch = (shift: number) =>
+      Math.max(0, Math.min(255, Math.round(((n >> shift) & 0xff) * factor)))
+        .toString(16).padStart(2, '0');
+    return `#${ch(16)}${ch(8)}${ch(0)}`;
+  }
+
   public static getSpeciesSprite(
     species: SpeciesType,
     direction: SpriteDirection = 'down',
@@ -208,12 +234,22 @@ export class SpriteGenerator {
     const normalizedFrame = Math.abs(frame) % 4;
     const safe = (value?: string | null) => (value || 'none').toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 42);
     const look = humanSkinIndex(visual.appearanceSeed);
+    /**
+     * Who carries the colours: the soldier standing in the centre of the front
+     * rank, which is the same slot `EntityAI.marchStepToward` walks them to. One
+     * in twenty, so a warband of any size has about one standard.
+     */
+    const bearer = visual.profession === 'soldier'
+      && !!visual.appearanceSeed
+      && stableSlot(visual.appearanceSeed, MARCH_SLOTS) === 0;
     const visualKey = [
       `look${look}`,
       safe(visual.profession),
       safe(visual.weaponName),
       safe(visual.weaponCategory),
       safe(visual.armorName),
+      safe(visual.plumeColor),
+      bearer ? 'colours' : 'ranker',
       visual.isGreatPerson ? safe(visual.greatPersonType || 'great') : 'ordinary'
     ].join('_');
     const key = `entity_anim_${species}_${direction}_${animation}_${normalizedFrame}_${visualKey}`;
@@ -221,7 +257,7 @@ export class SpriteGenerator {
     return this.getSprite(key, (ctx) => {
       this.drawSpeciesFrame(ctx, species, direction, animation, normalizedFrame, Boolean(visual.weaponName), look);
       if (this.isHumanoid(species)) {
-        this.drawHumanoidVisualState(ctx, species, direction, animation, normalizedFrame, visual);
+        this.drawHumanoidVisualState(ctx, species, direction, animation, normalizedFrame, visual, bearer);
       }
     }, 24, 24);
   }
@@ -332,57 +368,141 @@ export class SpriteGenerator {
     direction: SpriteDirection,
     animation: EntitySpriteAnimation,
     frame: number,
-    step: number,
+    _step: number,
     bob: number,
     attack: boolean,
     suppressFallbackWeapon: boolean = false
   ): void {
-    // A small, flat-coloured person: head, tunic, two stick arms, two legs.
-    // About 13px tall inside the 24px cell — roughly two thirds of the old
-    // fantasy bodies — so a crowd reads as a crowd instead of a pile of detail.
     const back = direction === 'up';
-    const leftLegX = 9 + Math.min(0, step);
-    const rightLegX = 13 + Math.max(0, step);
-    const armSwing = animation === 'walk' || animation === 'flee' || animation === 'carry' ? step : 0;
-    const top = 7 + bob;
+    const isMoving = animation === 'walk' || animation === 'flee' || animation === 'carry';
+    const isFleeing = animation === 'flee';
+    const isResting = animation === 'rest';
+    const isSocializing = animation === 'socialize';
+    const isHealing = animation === 'heal';
 
-    this.rect(ctx, leftLegX, 17, 2, 3, p.clothShade);
-    this.rect(ctx, rightLegX, 17, 2, 3, p.clothShade);
-    this.rect(ctx, leftLegX, 19, 2, 1, p.boot);
-    this.rect(ctx, rightLegX, 19, 2, 1, p.boot);
+    // 4-Phase Stride Gait for Front/Back View
+    // F0: Left Contact, F1: Left Passing (Up), F2: Right Contact, F3: Right Passing (Up)
+    let leftLegX = 9;
+    let rightLegX = 13;
+    let leftLegY = 17;
+    let rightLegY = 17;
+    let leftArmY = 0;
+    let rightArmY = 0;
 
-    // Torso: one solid block of cloth with a belt across it.
+    if (isMoving) {
+      if (frame === 0) {
+        leftLegX = 8;
+        rightLegX = 14;
+        leftArmY = 1;
+        rightArmY = -1;
+      } else if (frame === 1) {
+        leftLegX = 9;
+        rightLegX = 13;
+        rightLegY = 16; // Lifted passing foot
+        leftArmY = 0;
+        rightArmY = 0;
+      } else if (frame === 2) {
+        leftLegX = 14;
+        rightLegX = 8;
+        leftArmY = -1;
+        rightArmY = 1;
+      } else {
+        leftLegX = 13;
+        leftLegY = 16; // Lifted passing foot
+        rightLegX = 9;
+        leftArmY = 0;
+        rightArmY = 0;
+      }
+    }
+
+    if (isFleeing) {
+      // Frantic sprint arm pump
+      leftArmY *= 2;
+      rightArmY *= 2;
+    }
+
+    // Seated posture for resting
+    const top = isResting ? 10 : (7 + bob);
+
+    // Legs rendering
+    if (isResting) {
+      // Cross-legged seated on ground
+      this.rect(ctx, 7, 19, 10, 2, p.clothShade);
+      this.rect(ctx, 6, 20, 3, 2, p.boot);
+      this.rect(ctx, 15, 20, 3, 2, p.boot);
+      this.px(ctx, 6, 21, '#1c1917');
+      this.px(ctx, 17, 21, '#1c1917');
+    } else {
+      // Articulated legs with knee definition & boot soles
+      this.rect(ctx, leftLegX, leftLegY, 2, 20 - leftLegY, p.clothShade);
+      this.rect(ctx, rightLegX, rightLegY, 2, 20 - rightLegY, p.clothShade);
+      this.rect(ctx, leftLegX, 19, 2, 1, p.boot);
+      this.rect(ctx, rightLegX, 19, 2, 1, p.boot);
+      this.px(ctx, leftLegX, 20, '#1c1917');
+      this.px(ctx, rightLegX, 20, '#1c1917');
+    }
+
+    // Torso: Tunic with collar shading, belt buckle and trim
     this.rect(ctx, 9, top + 5, 6, 5, p.cloth);
-    this.rect(ctx, 9, top + 8, 6, 1, p.trim);
+    this.rect(ctx, 9, top + 8, 6, 1, p.clothShade); // Belt line
+    this.px(ctx, 11, top + 8, p.accent);            // Belt buckle
+    this.rect(ctx, 9, top + 9, 6, 1, p.trim);       // Tunic hem
 
+    // Arms & Hands based on State
     const activeHands = attack || animation === 'gather' || animation === 'build' || animation === 'shoot';
     if (activeHands) {
-      this.rect(ctx, 7, top + 6, 2, 2, p.skin);
-      this.rect(ctx, 15, top + 5, 3, 2, p.skin);
+      // Attack / Action Hand Posture
+      this.rect(ctx, 7, top + 5, 2, 2, p.skin);
+      this.rect(ctx, 15, top + 4 + (frame < 2 ? -1 : 1), 3, 2, p.skin);
       if (attack && !suppressFallbackWeapon) this.drawHumanoidWeapon(ctx, species, 17, top + 3, 'right', frame);
     } else if (animation === 'carry') {
-      this.rect(ctx, 8, top + 4, 2, 2, p.skin);
-      this.rect(ctx, 14, top + 4, 2, 2, p.skin);
+      // Carrying crate in front of chest
+      this.rect(ctx, 8, top + 5, 2, 2, p.skin);
+      this.rect(ctx, 14, top + 5, 2, 2, p.skin);
+    } else if (isHealing) {
+      // Divine healing: arms raised outward with open palms
+      this.rect(ctx, 6, top + 3, 2, 2, p.skin);
+      this.rect(ctx, 16, top + 3, 2, 2, p.skin);
+      this.rect(ctx, 7, top + 4, 2, 1, p.trim);
+      this.rect(ctx, 15, top + 4, 2, 1, p.trim);
+    } else if (isSocializing) {
+      // Raising drink/bread or chatting
+      const mugLift = frame % 2 === 0 ? 0 : -2;
+      this.rect(ctx, 7, top + 6, 2, 2, p.skin);
+      this.rect(ctx, 15, top + 5 + mugLift, 2, 2, p.skin);
+      if (!back) {
+        // Wooden tankard in hand
+        this.rect(ctx, 16, top + 4 + mugLift, 3, 3, '#78350f');
+        this.px(ctx, 17, top + 3 + mugLift, '#fef08a'); // Froth
+      }
+    } else if (isResting) {
+      // Hands resting gently in lap
+      this.rect(ctx, 9, top + 7, 2, 2, p.skin);
+      this.rect(ctx, 13, top + 7, 2, 2, p.skin);
     } else {
-      // Idle and walking: arms straight out to the sides, swinging with the step.
-      this.rect(ctx, 7, top + 6 + armSwing, 2, 3, p.skin);
-      this.rect(ctx, 15, top + 6 - armSwing, 2, 3, p.skin);
+      // Natural walking / idle arm swing
+      this.rect(ctx, 7, top + 6 + leftArmY, 2, 3, p.skin);
+      this.rect(ctx, 15, top + 6 + rightArmY, 2, 3, p.skin);
+      // Sleeve cuffs
+      this.rect(ctx, 7, top + 5 + leftArmY, 2, 1, p.trim);
+      this.rect(ctx, 15, top + 5 + rightArmY, 2, 1, p.trim);
     }
 
     if (back) {
-      // From behind, the whole head is hair.
+      // Hair volume from rear with nape shading
       this.rect(ctx, 9, top, 6, 5, p.hair);
       this.rect(ctx, 9, top + 4, 6, 1, p.skinShade);
       return;
     }
 
-    // Head: skin block, hair cap over the top and down the temples, two eyes.
+    // Head: skin block, hair cap, sideburns, eyes, nose bridge
     this.rect(ctx, 9, top + 1, 6, 4, p.skin);
     this.rect(ctx, 9, top, 6, 2, p.hair);
     this.px(ctx, 9, top + 2, p.hair);
     this.px(ctx, 14, top + 2, p.hair);
     this.px(ctx, 10, top + 3, p.eye);
     this.px(ctx, 13, top + 3, p.eye);
+    this.px(ctx, 11, top + 4, p.skinShade); // Nose bridge
   }
 
   private static drawHumanoidSide(
@@ -391,38 +511,115 @@ export class SpriteGenerator {
     p: HumanoidSpritePalette,
     animation: EntitySpriteAnimation,
     frame: number,
-    step: number,
+    _step: number,
     bob: number,
     attack: boolean,
     suppressFallbackWeapon: boolean = false
   ): void {
-    // The same person in profile: one visible arm, one visible eye.
-    const lunge = attack ? 1 : 0;
-    const armSwing = animation === 'walk' || animation === 'flee' || animation === 'carry' ? step : 0;
-    const top = 7 + bob;
-    const x = 9 + lunge;
+    const isMoving = animation === 'walk' || animation === 'flee' || animation === 'carry';
+    const isFleeing = animation === 'flee';
+    const isResting = animation === 'rest';
+    const isSocializing = animation === 'socialize';
+    const isHealing = animation === 'heal';
 
-    this.rect(ctx, 9, 17, 2, 3, p.clothShade);
-    this.rect(ctx, 12, 17 + Math.abs(step), 2, Math.max(1, 3 - Math.abs(step)), p.clothShade);
-    this.rect(ctx, 9, 19, 2, 1, p.boot);
-    this.rect(ctx, 12, 19, 2, 1, p.boot);
+    // Combat Lunge & Flee Lean Mechanics
+    const attackLunge = attack ? (frame === 1 || frame === 2 ? 3 : 1) : 0;
+    const fleeLean = isFleeing ? 2 : 0;
+    const carryLean = animation === 'carry' ? -1 : 0;
+    const top = isResting ? 10 : (7 + bob);
+    const x = 9 + attackLunge + fleeLean + carryLean;
 
+    // 4-Phase Profile Leg Stride & Foot Plant
+    let leadLegX = 10;
+    let trailLegX = 10;
+    let leadLegY = 17;
+    let trailLegY = 17;
+    let armSwingX = 0;
+    let armSwingY = 0;
+
+    if (isMoving) {
+      if (frame === 0) {
+        leadLegX = 13;
+        trailLegX = 7;
+        armSwingX = -1;
+        armSwingY = 1;
+      } else if (frame === 1) {
+        leadLegX = 10;
+        trailLegX = 9;
+        trailLegY = 16; // Knee bent / passing phase
+        armSwingX = 0;
+        armSwingY = 0;
+      } else if (frame === 2) {
+        leadLegX = 7;
+        trailLegX = 13;
+        armSwingX = 1;
+        armSwingY = -1;
+      } else {
+        leadLegX = 9;
+        leadLegY = 16; // Knee bent / passing phase
+        trailLegX = 10;
+        armSwingX = 0;
+        armSwingY = 0;
+      }
+    }
+
+    if (isFleeing) {
+      leadLegX += 1;
+      trailLegX -= 1;
+      armSwingX *= 2;
+    }
+
+    // Legs Profile Rendering
+    if (isResting) {
+      // Sitting with legs stretched forward
+      this.rect(ctx, x, 19, 6, 2, p.clothShade);
+      this.rect(ctx, x + 4, 19, 3, 2, p.boot);
+      this.px(ctx, x + 6, 20, '#1c1917');
+    } else {
+      this.rect(ctx, leadLegX, leadLegY, 2, 20 - leadLegY, p.clothShade);
+      this.rect(ctx, trailLegX, trailLegY, 2, 20 - trailLegY, p.clothShade);
+      this.rect(ctx, leadLegX, 19, 2, 1, p.boot);
+      this.rect(ctx, trailLegX, 19, 2, 1, p.boot);
+      this.px(ctx, leadLegX + 1, 20, '#1c1917');
+      this.px(ctx, trailLegX + 1, 20, '#1c1917');
+    }
+
+    // Torso Profile
     this.rect(ctx, x, top + 5, 5, 5, p.cloth);
-    this.rect(ctx, x, top + 8, 5, 1, p.trim);
+    this.rect(ctx, x, top + 8, 5, 1, p.clothShade); // Belt
+    this.px(ctx, x + 3, top + 8, p.accent);         // Belt buckle
+    this.rect(ctx, x, top + 9, 5, 1, p.trim);
 
+    // Head Profile
     this.rect(ctx, x, top + 1, 5, 4, p.skin);
     this.rect(ctx, x, top, 5, 2, p.hair);
     this.px(ctx, x, top + 2, p.hair);
     this.px(ctx, x + 3, top + 3, p.eye);
+    this.px(ctx, x + 4, top + 3, p.skinShade); // Nose contour
 
+    // Profile Hands & Action Poses
     const activeHands = attack || animation === 'gather' || animation === 'build' || animation === 'shoot';
     if (activeHands) {
-      this.rect(ctx, x + 5, top + 5, 3, 2, p.skin);
-      if (attack && !suppressFallbackWeapon) this.drawHumanoidWeapon(ctx, species, x + 7, top + 3, 'right', frame);
+      const reachX = attack ? (frame === 1 || frame === 2 ? 7 : 5) : 5;
+      const reachY = attack ? (frame === 0 ? 3 : frame === 1 ? 5 : 6) : 5;
+      this.rect(ctx, x + reachX, top + reachY, 3, 2, p.skin);
+      if (attack && !suppressFallbackWeapon) this.drawHumanoidWeapon(ctx, species, x + reachX + 2, top + reachY - 2, 'right', frame);
     } else if (animation === 'carry') {
-      this.rect(ctx, x + 5, top + 4, 2, 2, p.skin);
+      this.rect(ctx, x + 5, top + 5, 2, 2, p.skin);
+    } else if (isHealing) {
+      this.rect(ctx, x + 5, top + 3, 2, 2, p.skin);
+      this.rect(ctx, x + 4, top + 4, 2, 1, p.trim);
+    } else if (isSocializing) {
+      const mugLift = frame % 2 === 0 ? 0 : -2;
+      this.rect(ctx, x + 5, top + 5 + mugLift, 2, 2, p.skin);
+      this.rect(ctx, x + 6, top + 4 + mugLift, 3, 3, '#78350f'); // Wooden tankard
+      this.px(ctx, x + 7, top + 3 + mugLift, '#fef08a');
+    } else if (isResting) {
+      this.rect(ctx, x + 3, top + 7, 2, 2, p.skin);
     } else {
-      this.rect(ctx, x + 5, top + 6 - armSwing, 2, 3, p.skin);
+      // Natural walking arm pump in profile
+      this.rect(ctx, x + 3 + armSwingX, top + 6 + armSwingY, 2, 3, p.skin);
+      this.rect(ctx, x + 2 + armSwingX, top + 5 + armSwingY, 2, 1, p.trim);
     }
   }
 
@@ -432,11 +629,16 @@ export class SpriteGenerator {
     direction: SpriteDirection,
     animation: EntitySpriteAnimation,
     frame: number,
-    visual: EntitySpriteVisualState
+    visual: EntitySpriteVisualState,
+    bearer: boolean = false
   ): void {
     const p = this.humanoidPalette(species);
     const profession = visual.profession || 'none';
     const armor = (visual.armorName || '').toLowerCase();
+    const hasCustomWeapon = Boolean(visual.weaponName);
+    // Crimson is the fallback, not the rule: a soldier with no realm behind them
+    // still gets a crest.
+    const plume = visual.plumeColor || '#ef4444';
 
     ctx.save();
     if (direction === 'left') {
@@ -448,72 +650,48 @@ export class SpriteGenerator {
     const side = direction === 'right';
     const back = direction === 'up';
     const bob = (animation === 'walk' || animation === 'flee' || animation === 'carry') ? [0, -1, 0, -1][frame] : 0;
+    const top = 7 + bob;
 
-    // Armor should read as material, not just as a stat line in the inspector.
-    if (armor) {
-      const plate = armor.includes('plate') || armor.includes('shield');
-      const iron = armor.includes('iron');
-      const steel = armor.includes('steel') || armor.includes('dragon scale');
-      const metal = steel ? '#e2e8f0' : iron ? '#94a3b8' : '#64748b';
-      const shadow = steel ? '#64748b' : '#475569';
+    // ================= 1. MILITARY SPECIALIZATION: SOLDIERS & GUARDS =================
+    if (profession === 'soldier') {
+      // 1.1 Distinct Military Helmet with Plume/Crest, in the realm's colour
+      this.drawSoldierHelmet(ctx, side, back, top, bob, frame, plume);
 
-      if (side) {
-        this.rect(ctx, 8, 10 + bob, 8, plate ? 6 : 4, shadow);
-        this.rect(ctx, 10, 10 + bob, 6, plate ? 5 : 3, metal);
-        if (plate) this.rect(ctx, 7, 10 + bob, 3, 3, metal);
-      } else {
-        this.rect(ctx, 8, 10 + bob, 8, plate ? 6 : 4, shadow);
-        this.rect(ctx, 9, 10 + bob, 6, plate ? 5 : 3, metal);
-        if (plate) {
-          this.rect(ctx, 6, 10 + bob, 3, 3, metal);
-          this.rect(ctx, 15, 10 + bob, 3, 3, metal);
-        }
+      // 1.2 Steel Breastplate & Spiked Pauldrons
+      this.drawSoldierCuirass(ctx, side, back, top, bob, p);
+
+      // 1.3 Off-hand Heater Shield with Heraldic Boss
+      if (animation !== 'carry') {
+        this.drawSoldierShield(ctx, side, back, top, bob, p, frame, animation);
       }
-      this.px(ctx, side ? 14 : 12, 12 + bob, p.accent);
-    }
 
-    // Professions are readable from a glance, even with no emote bubble.
-    if (profession === 'farmer') {
-      this.rect(ctx, side ? 9 : 7, 3 + bob, side ? 9 : 10, 1, '#d6b45f');
-      this.rect(ctx, side ? 11 : 8, 2 + bob, side ? 6 : 8, 1, '#f3d98b');
-      this.rect(ctx, 8, 15 + bob, 8, 1, '#8b5e34');
-    } else if (profession === 'miner') {
-      this.rect(ctx, side ? 9 : 7, 3 + bob, side ? 8 : 10, 2, '#475569');
-      this.rect(ctx, side ? 11 : 9, 2 + bob, side ? 5 : 6, 1, '#94a3b8');
-      this.px(ctx, side ? 15 : 12, 3 + bob, '#fbbf24');
-    } else if (profession === 'builder') {
-      this.rect(ctx, 8, 16 + bob, 8, 1, '#92400e');
-      this.px(ctx, 10, 16 + bob, '#fbbf24');
-      this.px(ctx, 14, 16 + bob, '#cbd5e1');
-    } else if (profession === 'scout') {
-      this.rect(ctx, side ? 8 : 7, 4 + bob, side ? 9 : 10, 2, '#334155');
-      this.rect(ctx, side ? 7 : 6, 10 + bob, side ? 3 : 2, 7, '#475569');
-    } else if (profession === 'healer') {
-      this.rect(ctx, 8, 15 + bob, 8, 1, '#f8fafc');
-      this.rect(ctx, 11, 12 + bob, 2, 6, '#f8fafc');
-      this.rect(ctx, 9, 14 + bob, 6, 2, '#f8fafc');
-    } else if (profession === 'soldier' || profession === 'archer') {
-      this.rect(ctx, side ? 7 : 6, 10 + bob, 2, 5, p.metal);
-      this.rect(ctx, side ? 15 : 16, 10 + bob, 2, 5, p.metal);
+      // 1.4 Standard-Issue Garrison Spear or Shortsword (if no custom weapon)
+      if (!hasCustomWeapon) {
+        this.drawSoldierDefaultWeapon(ctx, side, back, top, bob, frame, animation);
+      }
+
+      // 1.5 The colour party. Drawn last so the pole crosses the body rather than
+      // the body hiding the pole.
+      if (bearer) {
+        this.drawRegimentStandard(ctx, side, back, top, bob, frame, plume);
+      }
+    } else if (profession === 'archer') {
+      // Ranger cowl & quiver
+      this.drawArcherGear(ctx, side, back, top, bob, p, frame, animation, hasCustomWeapon);
     } else if (profession === 'king' || profession === 'leader') {
-      const royal = '#7c3aed';
-      this.rect(ctx, side ? 7 : 6, 10 + bob, 2, 8, royal);
-      this.rect(ctx, side ? 15 : 16, 10 + bob, 2, 8, royal);
-      this.rect(ctx, side ? 10 : 9, 16 + bob, side ? 7 : 6, 1, '#fbbf24');
+      // Royal Crown & Ermine Robes
+      this.drawKingRegalia(ctx, side, back, top, bob, p, frame, animation, hasCustomWeapon);
+    } else {
+      // ================= 2. CIVILIAN PROFESSIONS =================
+      this.drawCivilianProfessionVisualState(ctx, profession, side, back, top, bob, p, animation);
+
+      // Custom Equipped Armor Overlay
+      if (armor) {
+        this.drawCustomArmorOverlay(ctx, armor, side, back, top, bob, p);
+      }
     }
 
-    // Off-hand Shield rendering for soldiers or shield-equipped units
-    const hasShield = armor.includes('shield') || (profession === 'soldier' && !armor.includes('cloth'));
-    if (hasShield && animation !== 'carry') {
-      const shieldX = side ? 5 : 4;
-      const shieldY = 11 + bob;
-      const metalColor = armor.includes('citadel') ? '#e0f2fe' : armor.includes('iron') ? '#94a3b8' : '#78350f';
-      this.rect(ctx, shieldX, shieldY, 4, 6, metalColor);
-      this.rect(ctx, shieldX + 1, shieldY + 1, 2, 4, p.clothShade);
-      this.px(ctx, shieldX + 1, shieldY + 2, p.accent);
-    }
-
-    // Activity props make the simulation legible without opening a menu.
+    // ================= 3. ACTIVITY PROPS & WEAPONS =================
     if (animation === 'carry') {
       const lift = frame % 2 === 0 ? 0 : -1;
       this.rect(ctx, side ? 16 : 9, 12 + bob + lift, side ? 6 : 7, 6, '#78350f');
@@ -527,10 +705,10 @@ export class SpriteGenerator {
       this.drawHammer(ctx, side ? 17 : 16, 8 + bob + (frame < 2 ? -1 : 1), side);
     } else if (animation === 'shoot') {
       this.drawVisualWeapon(ctx, side, frame, visual.weaponCategory || 'ranged', visual.weaponName || 'Bow', species, bob);
-    } else if (animation === 'attack' && visual.weaponName) {
-      this.drawVisualWeapon(ctx, side, frame, visual.weaponCategory || 'melee', visual.weaponName, species, bob);
-    } else if ((animation === 'idle' || animation === 'walk' || animation === 'flee') && visual.weaponName) {
-      this.drawSheathedWeapon(ctx, side, visual.weaponCategory || 'melee', visual.weaponName, bob);
+    } else if (animation === 'attack' && hasCustomWeapon) {
+      this.drawVisualWeapon(ctx, side, frame, visual.weaponCategory || 'melee', visual.weaponName!, species, bob);
+    } else if ((animation === 'idle' || animation === 'walk' || animation === 'flee') && hasCustomWeapon) {
+      this.drawSheathedWeapon(ctx, side, visual.weaponCategory || 'melee', visual.weaponName!, bob);
     }
 
     if (animation === 'socialize') {
@@ -544,8 +722,7 @@ export class SpriteGenerator {
       this.rect(ctx, side ? 21 : 19, 1, 2, 1, '#dbeafe');
     }
 
-    // Great-person standing gets a tiny insignia; the renderer still supplies
-    // the larger aura/star so this does not overpower the base sprite.
+    // Great-person standing gets a radiant insignia
     if (visual.isGreatPerson) {
       const insignia = visual.greatPersonType === 'hero' ? '#ef4444'
         : visual.greatPersonType === 'scholar' ? '#38bdf8'
@@ -558,6 +735,400 @@ export class SpriteGenerator {
     ctx.restore();
   }
 
+  /** Soldier Military Helmet with Nasal Guard & High-Contrast Crest Plume */
+  private static drawSoldierHelmet(
+    ctx: CanvasRenderingContext2D,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    frame: number,
+    plumeColor: string = '#ef4444'
+  ): void {
+    const plumeShade = this.shadeHex(plumeColor, 0.62);
+    const goldSocket = '#fbbf24';
+    const steel = '#94a3b8';
+    const steelHighlight = '#f1f5f9';
+    const steelShadow = '#475569';
+
+    if (side) {
+      // Profile Nasal Helmet
+      this.rect(ctx, 8, top, 7, 4, steel);
+      this.rect(ctx, 10, top, 4, 1, steelHighlight);
+      this.rect(ctx, 13, top + 3, 2, 3, steelShadow); // Cheek guard & nasal
+      // Plume mount & arching crest
+      this.rect(ctx, 10, top - 1, 3, 1, goldSocket);
+      this.rect(ctx, 7, top - 3, 6, 2, plumeColor);
+      this.px(ctx, 6 + (frame % 2), top - 2, plumeShade);
+    } else if (back) {
+      // Rear Closed Helm
+      this.rect(ctx, 9, top, 6, 5, steelShadow);
+      this.rect(ctx, 10, top, 4, 1, steel);
+      this.rect(ctx, 11, top - 1, 2, 1, goldSocket);
+      this.rect(ctx, 11, top - 3, 2, 6, plumeColor);
+      this.px(ctx, 11 + (frame % 2), top + 3, plumeShade);
+    } else {
+      // Frontal Conical Helm with T-visor / Nasal Bar
+      this.rect(ctx, 9, top, 6, 4, steel);
+      this.rect(ctx, 10, top + 1, 4, 1, steelHighlight);
+      this.rect(ctx, 11, top + 2, 2, 3, steelShadow); // Nasal bar
+      this.rect(ctx, 11, top - 1, 2, 1, goldSocket);
+      this.rect(ctx, 11, top - 3, 2, 2, plumeColor);
+      this.rect(ctx, 10, top - 4, 4, 1, plumeColor);
+    }
+  }
+
+  /** Soldier Steel Cuirass & Pauldrons */
+  private static drawSoldierCuirass(
+    ctx: CanvasRenderingContext2D,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    p: HumanoidSpritePalette
+  ): void {
+    const steel = '#94a3b8';
+    const steelLight = '#e2e8f0';
+    const steelShadow = '#334155';
+    const goldRivet = '#fbbf24';
+
+    if (side) {
+      this.rect(ctx, 8, top + 5, 6, 5, steel);
+      this.rect(ctx, 10, top + 5, 2, 4, steelLight);
+      this.rect(ctx, 8, top + 8, 6, 2, steelShadow);
+      this.rect(ctx, 7, top + 4, 3, 3, steelLight); // Pauldron
+      this.px(ctx, 7, top + 4, goldRivet);
+    } else if (back) {
+      this.rect(ctx, 9, top + 5, 6, 5, steelShadow);
+      this.rect(ctx, 10, top + 6, 4, 1, '#451a03'); // Leather harness
+      this.rect(ctx, 6, top + 4, 3, 3, steel);
+      this.rect(ctx, 15, top + 4, 3, 3, steel);
+    } else {
+      this.rect(ctx, 9, top + 5, 6, 5, steel);
+      this.rect(ctx, 11, top + 5, 2, 4, '#f8fafc'); // Specular center ridge
+      this.rect(ctx, 9, top + 9, 6, 1, steelShadow);
+      this.rect(ctx, 6, top + 4, 3, 3, steelLight);  // Left Pauldron
+      this.rect(ctx, 15, top + 4, 3, 3, steelLight); // Right Pauldron
+      this.px(ctx, 7, top + 4, goldRivet);
+      this.px(ctx, 16, top + 4, goldRivet);
+    }
+  }
+
+  /** Soldier Off-hand Heater Shield with Combat Guard Postures */
+  private static drawSoldierShield(
+    ctx: CanvasRenderingContext2D,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    p: HumanoidSpritePalette,
+    frame: number,
+    animation: EntitySpriteAnimation
+  ): void {
+    const rim = '#e2e8f0';
+    const field = '#1e3a8a'; // Royal Navy Shield Field
+    const boss = '#fbbf24';  // Gold central boss
+    const isAttacking = animation === 'attack' || animation === 'shoot';
+
+    if (side) {
+      // Dynamic combat guard: pushes forward during strike frames (F1 & F2)
+      const shieldAdvance = isAttacking ? (frame === 1 || frame === 2 ? 2 : 0) : 0;
+      const shieldYShift = isAttacking ? (frame === 1 ? -1 : 0) : 0;
+      const shieldX = 4 + shieldAdvance;
+      const shieldY = top + 3 + shieldYShift;
+
+      this.rect(ctx, shieldX, shieldY, 5, 7, rim);
+      this.rect(ctx, shieldX + 1, shieldY + 1, 3, 5, field);
+      this.px(ctx, shieldX + 2, shieldY + 3, boss);
+      this.px(ctx, shieldX + 2, shieldY + 2, boss);
+      this.px(ctx, shieldX + 2, shieldY + 4, boss);
+      // Shield edge bevel highlight
+      this.rect(ctx, shieldX, shieldY, 1, 7, '#ffffff');
+    } else if (back) {
+      this.rect(ctx, 4, top + 4, 3, 6, '#64748b');
+      this.rect(ctx, 5, top + 5, 2, 4, '#475569');
+    } else {
+      const shieldYShift = isAttacking ? -1 : 0;
+      const shieldX = 4;
+      const shieldY = top + 4 + shieldYShift;
+      this.rect(ctx, shieldX, shieldY, 4, 7, rim);
+      this.rect(ctx, shieldX + 1, shieldY + 1, 2, 5, field);
+      this.px(ctx, shieldX + 1, shieldY + 3, boss);
+      this.rect(ctx, shieldX, shieldY, 1, 7, '#ffffff');
+    }
+  }
+
+  /** Standard-Issue Garrison Spear or Shortsword with 4-Phase Thrusting/Lunge Mechanics */
+  private static drawSoldierDefaultWeapon(
+    ctx: CanvasRenderingContext2D,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    frame: number,
+    animation: EntitySpriteAnimation
+  ): void {
+    const woodShaft = '#78350f';
+    const steelHead = '#e2e8f0';
+    const spearTip = '#ffffff';
+    const pennant = '#ef4444';
+
+    if (animation === 'attack') {
+      // 4-Phase Expressive Spear Thrust:
+      // F0: Coiled back, F1: Explosive Lunge, F2: Maximum Extension & Impact, F3: Snap Recovery
+      let reachX = side ? 11 : 10;
+      let reachY = top + 5;
+      let shaftLen = 8;
+      let thrustStreak = false;
+
+      if (frame === 0) {
+        reachX = side ? 10 : 9;
+        reachY = top + 5;
+        shaftLen = 7;
+      } else if (frame === 1) {
+        reachX = side ? 15 : 13;
+        reachY = top + 4;
+        shaftLen = 9;
+        thrustStreak = true;
+      } else if (frame === 2) {
+        reachX = side ? 16 : 14;
+        reachY = top + 4;
+        shaftLen = 10;
+      } else {
+        reachX = side ? 12 : 11;
+        reachY = top + 5;
+        shaftLen = 8;
+      }
+
+      // Spear shaft
+      this.rect(ctx, reachX, reachY, shaftLen, 1, woodShaft);
+      // Steel Spearhead
+      this.rect(ctx, reachX + shaftLen, reachY - 1, 2, 3, steelHead);
+      this.px(ctx, reachX + shaftLen + 2, reachY, spearTip);
+      // Crimson Pennant trailing behind spearhead
+      this.rect(ctx, reachX + shaftLen - 2, reachY + 1, 2, 1, pennant);
+
+      if (thrustStreak) {
+        // Motion puncture smear
+        this.rect(ctx, reachX + 2, reachY, 6, 1, 'rgba(255, 255, 255, 0.6)');
+      }
+      if (frame === 2) {
+        // Impact clash spark
+        this.px(ctx, reachX + shaftLen + 3, reachY - 1, '#fde047');
+        this.px(ctx, reachX + shaftLen + 3, reachY + 1, '#ffffff');
+      }
+    } else {
+      // Tall Upright Garrison Spear swaying with walking bob
+      const spearX = side ? 17 : 16;
+      this.rect(ctx, spearX, top - 6, 1, 16, woodShaft);
+      this.rect(ctx, spearX - 1, top - 7, 3, 2, steelHead);
+      this.px(ctx, spearX, top - 8, spearTip);
+      this.rect(ctx, spearX + 1, top - 6, 2, 2, pennant);
+      this.px(ctx, spearX + 3, top - 5, '#b91c1c');
+    }
+  }
+
+  /** Regiment Standard / Banner Bearer */
+  private static drawRegimentStandard(
+    ctx: CanvasRenderingContext2D,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    frame: number,
+    plumeColor: string = '#ef4444'
+  ): void {
+    const poleX = side ? 16 : 15;
+    const poleY = top - 10 + bob;
+    // Wood shaft
+    this.rect(ctx, poleX, poleY, 1, 20, '#78350f');
+    // Gold finial / spear point
+    this.rect(ctx, poleX - 1, poleY - 2, 3, 2, '#fbbf24');
+    this.px(ctx, poleX, poleY - 3, '#fef08a');
+    // Flowing Banner / Standard
+    const wave = (frame % 2 === 0) ? 0 : 1;
+    const bannerColor = plumeColor || '#dc2626';
+    const bannerShadow = this.shadeHex(bannerColor, 0.7);
+    this.rect(ctx, poleX + 1, poleY, 5 + wave, 6, bannerColor);
+    this.rect(ctx, poleX + 2, poleY + 1, 3, 4, '#fbbf24'); // Gold heraldic motif
+    this.rect(ctx, poleX + 1, poleY + 6, 4 + wave, 2, bannerShadow);
+  }
+
+  /** Archer Cowl, Quiver & 4-Phase Archery Mechanics */
+  private static drawArcherGear(
+    ctx: CanvasRenderingContext2D,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    p: HumanoidSpritePalette,
+    frame: number,
+    animation: EntitySpriteAnimation,
+    hasCustomWeapon: boolean
+  ): void {
+    // Forest Green Ranger Hood with Robin Feather
+    this.rect(ctx, side ? 8 : 8, top, side ? 7 : 8, 3, '#14532d');
+    this.px(ctx, side ? 7 : 8, top - 1, '#f59e0b'); // Feather
+    this.px(ctx, side ? 6 : 7, top - 2, '#ef4444');
+
+    // Quiver across torso
+    this.rect(ctx, side ? 7 : 7, top + 4, 2, 6, '#451a03');
+    this.px(ctx, side ? 7 : 7, top + 3, '#ef4444'); // Fletching
+    this.px(ctx, side ? 8 : 8, top + 2, '#ffffff');
+
+    if (!hasCustomWeapon) {
+      const bowX = side ? 17 : 16;
+      if (animation === 'shoot') {
+        // 4-Phase Archery: F0: Nock, F1: Full Draw Tension, F2: Arrow Snap Release, F3: Draw Next
+        if (frame === 0) {
+          // Nock arrow
+          this.rect(ctx, bowX, top + 1, 1, 10, '#78350f');
+          this.rect(ctx, bowX - 1, top + 2, 1, 8, 'rgba(255,255,255,0.7)');
+          this.rect(ctx, bowX - 2, top + 5, 5, 1, '#d97706'); // Arrow on rest
+        } else if (frame === 1) {
+          // Full draw — bow limbs flex, string pulled taut to ear
+          this.rect(ctx, bowX + 1, top, 1, 3, '#78350f');
+          this.rect(ctx, bowX, top + 3, 1, 5, '#78350f');
+          this.rect(ctx, bowX + 1, top + 8, 1, 3, '#78350f');
+          // Taut drawn string
+          this.rect(ctx, bowX - 3, top + 5, 1, 1, '#ffffff');
+          this.rect(ctx, bowX - 4, top + 5, 6, 1, '#d97706'); // Arrow shaft
+          this.px(ctx, bowX + 2, top + 5, '#f8fafc');         // Steel arrowhead
+        } else if (frame === 2) {
+          // Arrow released! Motion blur streak & string snaps forward
+          this.rect(ctx, bowX, top + 1, 1, 10, '#78350f');
+          this.rect(ctx, bowX + 1, top + 3, 1, 6, 'rgba(255,255,255,0.9)');
+          this.rect(ctx, bowX + 3, top + 5, 6, 1, '#ffffff'); // Released Arrow Streak
+          this.px(ctx, bowX + 9, top + 5, '#fbbf24');         // Arrow Flash
+        } else {
+          // Recovery / Hand reaches to quiver
+          this.rect(ctx, bowX, top + 2, 1, 9, '#78350f');
+          this.rect(ctx, bowX - 1, top + 3, 1, 7, 'rgba(255,255,255,0.5)');
+        }
+      } else {
+        // Longbow held idle / walking
+        this.rect(ctx, bowX, top + 1, 1, 10, '#78350f');
+        this.px(ctx, bowX - 1, top + 2, '#a16207');
+        this.px(ctx, bowX - 1, top + 9, '#a16207');
+        this.rect(ctx, bowX - 1, top + 3, 1, 6, 'rgba(255,255,255,0.6)');
+      }
+    }
+  }
+
+  /** King / Supreme Leader Imperial Regalia */
+  private static drawKingRegalia(
+    ctx: CanvasRenderingContext2D,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    p: HumanoidSpritePalette,
+    frame: number,
+    animation: EntitySpriteAnimation,
+    hasCustomWeapon: boolean
+  ): void {
+    // 3-Point Gold Crown with Ruby & Sapphire
+    this.rect(ctx, side ? 8 : 8, top - 2, side ? 6 : 8, 3, '#fbbf24');
+    this.px(ctx, side ? 8 : 8, top - 3, '#fbbf24');
+    this.px(ctx, side ? 11 : 12, top - 4, '#fbbf24');
+    this.px(ctx, side ? 13 : 15, top - 3, '#fbbf24');
+    this.px(ctx, side ? 11 : 12, top - 2, '#ef4444'); // Ruby
+    this.px(ctx, side ? 9 : 10, top - 2, '#3b82f6');  // Sapphire
+
+    // Royal Purple Mantle with Ermine Fur Collar
+    this.rect(ctx, side ? 7 : 8, top + 5, side ? 3 : 8, 7, '#581c87');
+    this.rect(ctx, side ? 8 : 8, top + 4, side ? 5 : 8, 2, '#f8fafc');
+    this.px(ctx, side ? 9 : 10, top + 5, '#0f172a');
+    this.px(ctx, side ? 12 : 14, top + 5, '#0f172a');
+
+    if (!hasCustomWeapon) {
+      // Golden Scepter
+      this.rect(ctx, side ? 17 : 16, top + 2, 1, 8, '#fbbf24');
+      this.px(ctx, side ? 17 : 16, top + 1, '#ef4444');
+    }
+  }
+
+  /** Civilian Profession Visual Overlays */
+  private static drawCivilianProfessionVisualState(
+    ctx: CanvasRenderingContext2D,
+    profession: string,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    p: HumanoidSpritePalette,
+    animation: EntitySpriteAnimation
+  ): void {
+    if (profession === 'farmer') {
+      // Wide Straw Hat & Leather Apron
+      this.rect(ctx, side ? 8 : 6, top, side ? 9 : 12, 2, '#fef08a');
+      this.rect(ctx, side ? 10 : 8, top - 2, side ? 5 : 8, 2, '#fef08a');
+      this.rect(ctx, side ? 10 : 8, top, side ? 5 : 8, 1, '#b45309');
+      this.rect(ctx, side ? 9 : 7, top + 2, side ? 7 : 10, 1, 'rgba(0,0,0,0.2)');
+      this.rect(ctx, 9, top + 6, 6, 4, '#78350f');
+    } else if (profession === 'woodcutter') {
+      // Rugged Fur & Leather Vest
+      this.rect(ctx, side ? 8 : 8, top + 1, side ? 7 : 8, 1, '#78350f');
+      this.rect(ctx, 8, top + 5, 8, 5, '#451a03');
+      this.rect(ctx, 8, top + 4, 8, 1, '#d97706');
+    } else if (profession === 'miner') {
+      // Miner's Helmet with Carbide Lantern
+      this.rect(ctx, side ? 8 : 8, top, side ? 7 : 8, 3, '#475569');
+      this.rect(ctx, side ? 8 : 7, top + 2, side ? 8 : 10, 1, '#334155');
+      this.px(ctx, side ? 14 : 12, top + 1, '#fbbf24');
+      this.px(ctx, side ? 15 : 12, top + 2, '#f97316');
+      this.px(ctx, side ? 11 : 10, top + 4, '#1e293b');
+    } else if (profession === 'builder') {
+      // Artisan Leather Apron with Tools
+      this.rect(ctx, 8, top + 5, 8, 5, '#92400e');
+      this.rect(ctx, side ? 13 : 13, top + 7, 2, 3, '#f59e0b');
+      this.rect(ctx, side ? 8 : 9, top + 8, 3, 2, '#78350f');
+    } else if (profession === 'scout') {
+      // Traveler Hood & Knapsack
+      this.rect(ctx, side ? 8 : 7, top, side ? 8 : 10, 4, '#1e293b');
+      this.rect(ctx, side ? 7 : 7, top + 4, side ? 9 : 10, 2, '#0f172a');
+      this.px(ctx, side ? 11 : 11, top + 4, '#fbbf24');
+      this.rect(ctx, side ? 6 : 6, top + 4, 2, 5, '#78350f');
+      this.rect(ctx, side ? 5 : 5, top + 3, 3, 2, '#b45309');
+    } else if (profession === 'healer') {
+      // Sacred White Robes & Golden Sun
+      this.rect(ctx, 8, top + 3, 8, 8, '#f8fafc');
+      this.rect(ctx, 10, top + 4, 4, 7, '#059669');
+      this.px(ctx, 11, top + 6, '#fbbf24');
+    }
+  }
+
+  /** Custom Equipped Armor Overlay */
+  private static drawCustomArmorOverlay(
+    ctx: CanvasRenderingContext2D,
+    armor: string,
+    side: boolean,
+    back: boolean,
+    top: number,
+    bob: number,
+    p: HumanoidSpritePalette
+  ): void {
+    const plate = armor.includes('plate') || armor.includes('shield');
+    const iron = armor.includes('iron');
+    const steel = armor.includes('steel') || armor.includes('dragon scale');
+    const metal = steel ? '#e2e8f0' : iron ? '#94a3b8' : '#64748b';
+    const shadow = steel ? '#64748b' : '#475569';
+
+    if (side) {
+      this.rect(ctx, 8, 10 + bob, 8, plate ? 6 : 4, shadow);
+      this.rect(ctx, 10, 10 + bob, 6, plate ? 5 : 3, metal);
+      if (plate) this.rect(ctx, 7, 10 + bob, 3, 3, metal);
+    } else {
+      this.rect(ctx, 8, 10 + bob, 8, plate ? 6 : 4, shadow);
+      this.rect(ctx, 9, 10 + bob, 6, plate ? 5 : 3, metal);
+      if (plate) {
+        this.rect(ctx, 6, 10 + bob, 3, 3, metal);
+        this.rect(ctx, 15, 10 + bob, 3, 3, metal);
+      }
+    }
+    this.px(ctx, side ? 14 : 12, 12 + bob, p.accent);
+  }
+
   private static drawProfessionTool(
     ctx: CanvasRenderingContext2D,
     profession: string,
@@ -565,35 +1136,145 @@ export class SpriteGenerator {
     frame: number,
     bob: number
   ): void {
-    const swing = frame < 2 ? -1 : 1;
     const x = side ? 17 : 16;
-    const y = 8 + bob + swing;
+    const top = 8 + bob;
 
     if (profession === 'miner') {
-      this.rect(ctx, x, y, 1, 9, '#78350f');
-      this.rect(ctx, x - 3, y, 7, 2, '#cbd5e1');
-      this.px(ctx, x - 4, y + 1, '#64748b');
+      // 4-Phase Miner Choreography:
+      // F0: High overhead, F1: Peak tension, F2: Downward strike, F3: Rock penetration & sparks
+      let toolX = x;
+      let toolY = top;
+      if (frame === 0) {
+        toolX = side ? x - 1 : x - 1;
+        toolY = top - 3;
+      } else if (frame === 1) {
+        toolX = side ? x - 2 : x - 2;
+        toolY = top - 4;
+      } else if (frame === 2) {
+        toolX = side ? x + 2 : x + 1;
+        toolY = top + 4;
+      } else {
+        toolX = side ? x + 3 : x + 2;
+        toolY = top + 5;
+      }
+
+      // Pickaxe shaft
+      this.rect(ctx, toolX, toolY, 1, 9, '#78350f');
+      // Double steel pick head
+      this.rect(ctx, toolX - 3, toolY - 1, 7, 2, '#cbd5e1');
+      this.px(ctx, toolX - 4, toolY, '#64748b');
+      this.px(ctx, toolX + 4, toolY, '#64748b');
+
+      if (frame === 2 || frame === 3) {
+        // Rock dust and impact sparks flying from stone face
+        this.px(ctx, toolX + 5, toolY + 2, '#fde047');
+        this.px(ctx, toolX + 4, toolY + 4, '#cbd5e1');
+        this.px(ctx, toolX + 6, toolY + 1, '#ffffff');
+      }
       return;
     }
-    if (profession === 'farmer') {
-      this.rect(ctx, x, y + 1, 1, 8, '#92400e');
-      this.rect(ctx, x + 1, y, 4, 1, '#e2e8f0');
-      this.px(ctx, x + 4, y + 1, '#94a3b8');
-      return;
-    }
+
     if (profession === 'woodcutter') {
-      this.rect(ctx, x, y + 1, 1, 8, '#78350f');
-      this.rect(ctx, x - 1, y, 5, 3, '#94a3b8');
-      this.rect(ctx, x + 2, y, 2, 2, '#e2e8f0');
+      // 4-Phase Woodcutter Choreography:
+      // F0: Sideways windup, F1: Powerful chop swing, F2: Tree trunk bite, F3: Axe recoil
+      let toolX = x;
+      let toolY = top;
+      if (frame === 0) {
+        toolX = side ? x - 2 : x - 2;
+        toolY = top - 2;
+      } else if (frame === 1) {
+        toolX = side ? x + 1 : x;
+        toolY = top + 1;
+      } else if (frame === 2) {
+        toolX = side ? x + 3 : x + 2;
+        toolY = top + 3;
+      } else {
+        toolX = side ? x + 1 : x + 1;
+        toolY = top + 2;
+      }
+
+      // Double-bitted axe handle & blade
+      this.rect(ctx, toolX, toolY + 1, 1, 9, '#78350f');
+      this.rect(ctx, toolX - 2, toolY - 1, 6, 4, '#94a3b8');
+      this.rect(ctx, toolX - 2, toolY, 2, 2, '#e2e8f0');
+      this.rect(ctx, toolX + 2, toolY, 2, 2, '#e2e8f0');
+
+      if (frame === 2) {
+        // Woodchips flying
+        this.px(ctx, toolX + 5, toolY - 1, '#d97706');
+        this.px(ctx, toolX + 6, toolY + 1, '#b45309');
+      }
       return;
     }
-    this.drawHammer(ctx, x, y, side);
+
+    if (profession === 'farmer') {
+      // 4-Phase Farmer Choreography:
+      // F0: Arm back, F1: Crescent sweep, F2: Full crop slice, F3: Grain bundle gather
+      let toolX = x;
+      let toolY = top;
+      if (frame === 0) {
+        toolX = side ? x - 2 : x - 2;
+        toolY = top - 1;
+      } else if (frame === 1) {
+        toolX = side ? x + 1 : x;
+        toolY = top + 2;
+      } else if (frame === 2) {
+        toolX = side ? x + 3 : x + 2;
+        toolY = top + 4;
+      } else {
+        toolX = side ? x + 1 : x;
+        toolY = top + 2;
+      }
+
+      // Curved Reaping Scythe
+      this.rect(ctx, toolX, toolY + 1, 1, 9, '#92400e');
+      this.rect(ctx, toolX + 1, toolY - 1, 5, 2, '#e2e8f0');
+      this.px(ctx, toolX + 6, toolY, '#94a3b8');
+      this.px(ctx, toolX + 5, toolY + 1, '#cbd5e1');
+
+      if (frame === 2) {
+        // Wheat stalks cutting
+        this.px(ctx, toolX + 6, toolY + 2, '#86efac');
+        this.px(ctx, toolX + 7, toolY + 1, '#fef08a');
+      }
+      return;
+    }
+
+    if (profession === 'scout' || profession === 'none') {
+      // Forager / Scout: Reaching to ground and plucking herbs
+      if (frame === 0) {
+        this.rect(ctx, x, top + 3, 2, 4, '#78350f');
+      } else if (frame === 1 || frame === 2) {
+        this.rect(ctx, x + 1, top + 6, 2, 3, '#78350f');
+        this.px(ctx, x + 2, top + 7, '#ef4444'); // Herb / Berry
+        this.px(ctx, x + 3, top + 6, '#86efac');
+      } else {
+        this.rect(ctx, x, top + 2, 2, 4, '#78350f');
+      }
+      return;
+    }
+
+    // Builder / Crafter Hammer
+    this.drawHammer(ctx, x, top, side, frame);
   }
 
-  private static drawHammer(ctx: CanvasRenderingContext2D, x: number, y: number, _side: boolean): void {
-    this.rect(ctx, x, y + 2, 1, 8, '#78350f');
-    this.rect(ctx, x - 2, y, 6, 3, '#94a3b8');
-    this.rect(ctx, x + 2, y + 1, 2, 2, '#cbd5e1');
+  /** 4-Phase Artisan Hammering (Tap-tap rhythm) */
+  private static drawHammer(ctx: CanvasRenderingContext2D, x: number, top: number, _side: boolean, frame: number = 0): void {
+    let hammerY = top;
+    if (frame === 0) hammerY = top - 2;      // Lifted high
+    else if (frame === 1) hammerY = top + 4; // Hard strike
+    else if (frame === 2) hammerY = top + 1; // Rebound tap
+    else hammerY = top;                      // Inspect
+
+    this.rect(ctx, x, hammerY + 2, 1, 8, '#78350f');
+    this.rect(ctx, x - 2, hammerY, 6, 3, '#94a3b8');
+    this.rect(ctx, x + 2, hammerY + 1, 2, 2, '#cbd5e1');
+
+    if (frame === 1) {
+      // Construction dust / spark
+      this.px(ctx, x + 4, hammerY + 2, '#fbbf24');
+      this.px(ctx, x - 3, hammerY + 2, '#e2e8f0');
+    }
   }
 
   private static drawVisualWeapon(
@@ -613,128 +1294,194 @@ export class SpriteGenerator {
       : lower.includes('aether') ? '#38bdf8'
       : '#fbbf24';
     const x = side ? 17 : 16;
-    const y = 8 + bob + (frame < 2 ? -1 : 0);
+    const y = 8 + bob;
 
-    // 1. FIREARMS (Musket, Blunderbuss, Rifle, Cannon)
+    // 1. FIREARMS (Musket, Blunderbuss, Rifle, Cannon) with Realistic Recoil Kick
     if (lower.includes('musket') || lower.includes('rifle')) {
+      const recoilX = frame === 1 ? -1 : 0;
+      const recoilY = frame === 1 ? -1 : 0;
+      const wx = x + recoilX;
+      const wy = y + recoilY;
+
       // Stock
-      this.rect(ctx, x - 2, y + 4, 5, 2, '#5c2306');
+      this.rect(ctx, wx - 2, wy + 4, 5, 2, '#5c2306');
       // Barrel
-      this.rect(ctx, x + 3, y + 3, 7, 1, '#94a3b8');
+      this.rect(ctx, wx + 3, wy + 3, 7, 1, '#94a3b8');
       // Muzzle & Trigger
-      this.px(ctx, x + 1, y + 5, '#cbd5e1');
-      if (frame % 2 === 0) {
-        // Muzzle smoke flash on fire frame
-        this.px(ctx, x + 10, y + 2, '#fbbf24');
-        this.px(ctx, x + 11, y + 3, '#f97316');
-        this.px(ctx, x + 12, y + 2, 'rgba(226,232,240,0.6)');
+      this.px(ctx, wx + 1, wy + 5, '#cbd5e1');
+
+      if (frame === 1) {
+        // Explosive Muzzle Flash & White Gunsmoke Burst
+        this.rect(ctx, wx + 10, wy + 2, 4, 3, '#fbbf24');
+        this.rect(ctx, wx + 12, wy + 1, 3, 4, '#f97316');
+        this.rect(ctx, wx + 14, wy + 1, 4, 3, 'rgba(226,232,240,0.85)');
+      } else if (frame === 2) {
+        // Lingering barrel smoke
+        this.px(ctx, wx + 10, wy + 1, '#cbd5e1');
+        this.px(ctx, wx + 11, wy, '#94a3b8');
       }
       return;
     }
     if (lower.includes('blunderbuss')) {
-      // Stock
-      this.rect(ctx, x - 1, y + 4, 4, 2, '#78350f');
-      // Flared Brass Barrel
-      this.rect(ctx, x + 3, y + 3, 4, 2, '#d97706');
-      this.rect(ctx, x + 7, y + 2, 3, 4, '#fbbf24');
-      if (frame % 2 === 0) {
-        this.rect(ctx, x + 10, y + 1, 3, 5, 'rgba(249,115,22,0.7)');
+      const recoilX = frame === 1 ? -2 : 0;
+      const wx = x + recoilX;
+      // Stock & Flared Brass Barrel
+      this.rect(ctx, wx - 1, y + 4, 4, 2, '#78350f');
+      this.rect(ctx, wx + 3, y + 3, 4, 2, '#d97706');
+      this.rect(ctx, wx + 7, y + 2, 3, 4, '#fbbf24');
+      if (frame === 1) {
+        this.rect(ctx, wx + 10, y, 6, 6, 'rgba(249,115,22,0.85)');
+        this.rect(ctx, wx + 12, y + 1, 4, 4, '#fde047');
       }
       return;
     }
     if (lower.includes('cannon') || lower.includes('field gun')) {
-      // Heavy Carriage Wheels
-      this.rect(ctx, x - 2, y + 5, 5, 5, '#451a03');
-      this.px(ctx, x, y + 7, '#d97706');
-      // Dark Steel/Bronze Barrel
+      const recoilX = frame === 1 ? -3 : 0;
+      const wx = x + recoilX;
+      // Heavy Carriage Wheels & Barrel
+      this.rect(ctx, wx - 2, y + 5, 5, 5, '#451a03');
+      this.px(ctx, wx, y + 7, '#d97706');
       const barrelColor = lower.includes('bronze') ? '#b45309' : '#334155';
-      this.rect(ctx, x - 1, y + 2, 9, 3, barrelColor);
-      this.rect(ctx, x + 8, y + 1, 2, 5, '#1e293b');
-      if (frame % 2 === 0) {
-        // Cannon Blast
-        this.rect(ctx, x + 10, y, 4, 6, '#ef4444');
-        this.rect(ctx, x + 12, y + 1, 3, 4, '#f59e0b');
+      this.rect(ctx, wx - 1, y + 2, 9, 3, barrelColor);
+      this.rect(ctx, wx + 8, y + 1, 2, 5, '#1e293b');
+      if (frame === 1) {
+        this.rect(ctx, wx + 10, y - 1, 6, 8, '#ef4444');
+        this.rect(ctx, wx + 13, y, 5, 6, '#f59e0b');
       }
       return;
     }
 
     // 2. PRIMITIVE WEAPONS (Stone Club, Sling)
     if (lower.includes('club')) {
-      // Heavy knobbly wooden handle & stone head
-      this.rect(ctx, x, y + 3, 2, 7, '#78350f');
-      this.rect(ctx, x - 2, y - 1, 5, 5, '#64748b');
-      this.rect(ctx, x - 1, y, 3, 3, '#94a3b8');
-      this.px(ctx, x - 2, y - 1, '#475569');
+      let clubY = y;
+      if (frame === 0) clubY = y - 3;
+      else if (frame === 1) clubY = y + 3;
+      else if (frame === 2) clubY = y + 4;
+      this.rect(ctx, x, clubY + 3, 2, 7, '#78350f');
+      this.rect(ctx, x - 2, clubY - 1, 5, 5, '#64748b');
+      this.rect(ctx, x - 1, clubY, 3, 3, '#94a3b8');
+      this.px(ctx, x - 2, clubY - 1, '#475569');
       return;
     }
     if (lower.includes('sling')) {
-      // Leather pouch and cord
+      const slingSpin = frame % 2 === 0 ? 0 : 2;
       this.rect(ctx, x, y + 2, 1, 6, '#78350f');
-      this.rect(ctx, x + 1, y + 7, 3, 3, '#b45309');
-      this.px(ctx, x + 2, y + 8, '#94a3b8'); // Sling stone
+      this.rect(ctx, x + 1, y + 5 + slingSpin, 3, 3, '#b45309');
+      this.px(ctx, x + 2, y + 6 + slingSpin, '#94a3b8');
       return;
     }
 
     // 3. LEGENDARY WEAPONS SPECIAL VISUAL EFFECTS
     if (lower.includes('sunfire')) {
-      // Flaming Golden Blade
-      this.rect(ctx, x, y + 3, 2, 8, '#f59e0b');
-      this.rect(ctx, x + 1, y - 1, 2, 9, '#fef08a');
-      this.rect(ctx, x, y + 7, 4, 1, '#d97706');
+      let slashX = x;
+      let slashY = y;
+      if (frame === 0) { slashX = x - 1; slashY = y - 2; }
+      else if (frame === 1) { slashX = x + 3; slashY = y + 1; }
+      else if (frame === 2) { slashX = x + 2; slashY = y + 3; }
+
+      this.rect(ctx, slashX, slashY + 3, 2, 8, '#f59e0b');
+      this.rect(ctx, slashX + 1, slashY - 1, 2, 9, '#fef08a');
+      this.rect(ctx, slashX, slashY + 7, 4, 1, '#d97706');
       // Fire aura particles
-      this.px(ctx, x + 2, y + 1 + (frame % 2), '#ef4444');
-      this.px(ctx, x + 3, y + 3, '#f97316');
-      this.px(ctx, x + 1, y - 2, '#ffffff');
+      this.px(ctx, slashX + 2, slashY + 1 + (frame % 2), '#ef4444');
+      this.px(ctx, slashX + 3, slashY + 3, '#f97316');
+      this.px(ctx, slashX + 1, slashY - 2, '#ffffff');
+
+      if (frame === 1) {
+        // Blazing slash trail
+        this.rect(ctx, slashX + 3, slashY, 6, 2, 'rgba(251, 191, 36, 0.7)');
+      }
       return;
     }
     if (lower.includes('aether')) {
-      // Luminescent Crystal Energy Bow
       this.rect(ctx, x, y - 1, 2, 11, '#0284c7');
       this.rect(ctx, x + 1, y, 1, 9, '#38bdf8');
-      this.rect(ctx, x + 2, y + 4, 7, 1, '#e0f2fe'); // Energy arrow
-      this.px(ctx, x + 8, y + 4, '#ffffff');
+      if (frame === 1 || frame === 2) {
+        // Energy arrow release
+        this.rect(ctx, x + 2, y + 4, 8, 1, '#e0f2fe');
+        this.px(ctx, x + 10, y + 4, '#ffffff');
+      }
       this.px(ctx, x, y - 2, '#7dd3fc');
       this.px(ctx, x, y + 10, '#7dd3fc');
       return;
     }
 
+    // 4. BOWS & CROSSBOWS
     if (category === 'ranged' || lower.includes('bow') || lower.includes('crossbow')) {
-      this.rect(ctx, x, y, 1, 10, '#78350f');
-      this.rect(ctx, x + 1, y + 1, 1, 2, '#d9f99d');
-      this.rect(ctx, x + 1, y + 7, 1, 2, '#d9f99d');
-      this.rect(ctx, x + 2, y + 4, 6 + (frame % 2), 1, blade);
-      this.px(ctx, x + 7 + (frame % 2), y + 3, accent);
+      if (frame === 0) {
+        // Nocking arrow
+        this.rect(ctx, x, y, 1, 10, '#78350f');
+        this.rect(ctx, x + 1, y + 1, 1, 2, '#d9f99d');
+        this.rect(ctx, x + 1, y + 7, 1, 2, '#d9f99d');
+        this.rect(ctx, x - 1, y + 4, 6, 1, blade);
+      } else if (frame === 1) {
+        // Full draw
+        this.rect(ctx, x + 1, y - 1, 1, 3, '#78350f');
+        this.rect(ctx, x, y + 2, 1, 6, '#78350f');
+        this.rect(ctx, x + 1, y + 8, 1, 3, '#78350f');
+        this.rect(ctx, x - 3, y + 4, 7, 1, blade);
+      } else if (frame === 2) {
+        // Snap release with arrow streak
+        this.rect(ctx, x, y, 1, 10, '#78350f');
+        this.rect(ctx, x + 3, y + 4, 7, 1, '#ffffff');
+        this.px(ctx, x + 9, y + 4, accent);
+      } else {
+        this.rect(ctx, x, y, 1, 10, '#78350f');
+      }
       return;
     }
-    if (category === 'siege' || lower.includes('catapult')) {
-      this.rect(ctx, x - 1, y + 4, 7, 2, '#78350f');
-      this.rect(ctx, x + 4, y, 2, 6, '#64748b');
-      this.rect(ctx, x + 5, y, 3, 2, blade);
-      return;
-    }
-    if (category === 'magic') {
-      this.rect(ctx, x, y, 1, 10, '#78350f');
-      this.rect(ctx, x - 1, y - 1, 3, 3, accent);
-      this.px(ctx, x, y - 2, '#ffffff');
-      return;
-    }
-    // Melee weapon: sword/halberd/hammer silhouette chosen from the item name.
-    if (lower.includes('hammer')) {
-      this.rect(ctx, x, y + 2, 1, 9, '#78350f');
-      this.rect(ctx, x - 2, y, 6, 3, accent);
-      return;
-    }
+
+    // 5. POLEARMS, HALBERDS & SPEARS
     if (lower.includes('halberd') || lower.includes('spear')) {
-      this.rect(ctx, x, y, 1, 12, '#78350f');
-      this.rect(ctx, x + 1, y, 4, 2, blade);
-      this.px(ctx, x + 4, y - 1, '#ffffff');
+      let reachX = x;
+      let reachY = y;
+      if (frame === 0) { reachX = x - 1; reachY = y + 1; }
+      else if (frame === 1) { reachX = x + 3; reachY = y; }
+      else if (frame === 2) { reachX = x + 4; reachY = y; }
+      else { reachX = x + 1; reachY = y + 1; }
+
+      this.rect(ctx, reachX, reachY, 1, 13, '#78350f');
+      this.rect(ctx, reachX + 1, reachY, 5, 2, blade);
+      this.px(ctx, reachX + 6, reachY - 1, '#ffffff');
+      if (frame === 1 || frame === 2) {
+        this.rect(ctx, reachX + 2, reachY, 4, 1, 'rgba(255,255,255,0.6)');
+      }
       return;
     }
-    this.rect(ctx, x, y + 2, 1, 9, '#78350f');
-    this.rect(ctx, x + 1, y, 2, 8, blade);
-    this.rect(ctx, x, y + 6, 4, 1, accent);
-    this.px(ctx, x + 2, y - 1, '#ffffff');
+
+    // 6. SWORDS & BLADES (4-Phase Diagonal Slash with Motion Blur Trail)
+    let slashX = x;
+    let slashY = y;
+    if (frame === 0) {
+      // Windup high
+      slashX = x - 1;
+      slashY = y - 3;
+    } else if (frame === 1) {
+      // Explosive downward slice
+      slashX = x + 3;
+      slashY = y + 1;
+    } else if (frame === 2) {
+      // Follow-through low
+      slashX = x + 2;
+      slashY = y + 4;
+    } else {
+      // Guard stance
+      slashX = x;
+      slashY = y;
+    }
+
+    // Hilt & Blade
+    this.rect(ctx, slashX, slashY + 3, 1, 8, '#78350f');
+    this.rect(ctx, slashX + 1, slashY + 1, 2, 7, blade);
+    this.rect(ctx, slashX, slashY + 6, 4, 1, accent);
+    this.px(ctx, slashX + 2, slashY, '#ffffff');
+
+    if (frame === 1) {
+      // Luminous blade slash trail
+      this.rect(ctx, slashX + 2, slashY - 1, 4, 2, 'rgba(255, 255, 255, 0.65)');
+    }
   }
+
 
   private static drawSheathedWeapon(
     ctx: CanvasRenderingContext2D,
@@ -771,43 +1518,53 @@ export class SpriteGenerator {
     this.rect(ctx, x + 5 + reach, y + 1, 1, 2, '#ffffff');
   }
 
-
   private static drawDeer(
     ctx: CanvasRenderingContext2D,
     direction: SpriteDirection,
     animation: EntitySpriteAnimation,
     frame: number
   ): void {
+    // Fleeing deer bound: body goes up and down
+    const bound = animation === 'flee' ? (frame % 2 === 0 ? -2 : 0) : 0;
+    // Walk step
     const step = animation === 'walk' || animation === 'flee' ? [-1, 0, 1, 0][frame] : 0;
-    const attack = animation === 'attack';
+    // Idle grazing: head goes down on frames 2/3
+    const graze = animation === 'idle' && frame > 1 ? 3 : 0;
+    
     if (direction === 'left' || direction === 'right') {
       ctx.save();
       if (direction === 'left') { ctx.translate(24, 0); ctx.scale(-1, 1); }
-      this.rect(ctx, 5, 10, 12, 6, '#d97706');
-      this.rect(ctx, 6, 11, 10, 3, '#f59e0b');
-      this.rect(ctx, 14 + (attack ? 1 : 0), 6, 6, 5, '#d97706');
-      this.rect(ctx, 15, 7, 4, 2, '#fbbf24');
-      this.px(ctx, 18, 8, '#18181b');
-      this.rect(ctx, 15, 3, 1, 4, '#92400e');
-      this.rect(ctx, 18, 3, 1, 4, '#92400e');
-      this.px(ctx, 14, 3, '#92400e'); this.px(ctx, 19, 3, '#92400e');
-      this.px(ctx, 6, 11, '#fde68a'); this.px(ctx, 9, 12, '#fde68a'); this.px(ctx, 12, 11, '#fde68a');
-      this.rect(ctx, 6 + Math.min(0, step), 16, 2, 6, '#92400e');
-      this.rect(ctx, 13 + Math.max(0, step), 16, 2, 6, '#92400e');
-      this.rect(ctx, 4, 9, 2, 2, '#fef3c7');
+      // Body
+      this.rect(ctx, 5, 10 + bound, 12, 6, '#d97706');
+      this.rect(ctx, 6, 11 + bound, 10, 3, '#f59e0b');
+      // Head and neck (lowers when grazing)
+      this.rect(ctx, 14, 6 + graze + bound, 6, 5, '#d97706');
+      this.rect(ctx, 15, 7 + graze + bound, 4, 2, '#fbbf24');
+      this.px(ctx, 18, 8 + graze + bound, '#18181b');
+      // Antlers
+      this.rect(ctx, 15, 3 + graze + bound, 1, 4, '#92400e');
+      this.rect(ctx, 18, 3 + graze + bound, 1, 4, '#92400e');
+      this.px(ctx, 14, 3 + graze + bound, '#92400e'); this.px(ctx, 19, 3 + graze + bound, '#92400e');
+      // Spots
+      this.px(ctx, 6, 11 + bound, '#fde68a'); this.px(ctx, 9, 12 + bound, '#fde68a'); this.px(ctx, 12, 11 + bound, '#fde68a');
+      // Legs
+      this.rect(ctx, 6 + Math.min(0, step), 16 + bound, 2, 6 - bound, '#92400e');
+      this.rect(ctx, 13 + Math.max(0, step), 16 + bound, 2, 6 - bound, '#92400e');
+      // Tail
+      this.rect(ctx, 4, 9 + bound, 2, 2, '#fef3c7');
       ctx.restore();
       return;
     }
 
-    this.rect(ctx, 7, 9, 10, 7, '#d97706');
-    this.rect(ctx, 8, 10, 8, 3, '#f59e0b');
-    this.rect(ctx, 8, 5, 8, 6, '#d97706');
-    this.rect(ctx, 7, 2, 1, 5, '#92400e');
-    this.rect(ctx, 16, 2, 1, 5, '#92400e');
-    this.px(ctx, 9, 7, '#18181b'); this.px(ctx, 14, 7, '#18181b');
-    this.px(ctx, 12, 9, '#78350f');
-    this.rect(ctx, 8 + Math.min(0, step), 16, 2, 6, '#92400e');
-    this.rect(ctx, 14 + Math.max(0, step), 16, 2, 6, '#92400e');
+    this.rect(ctx, 7, 9 + bound, 10, 7, '#d97706');
+    this.rect(ctx, 8, 10 + bound, 8, 3, '#f59e0b');
+    this.rect(ctx, 8, 5 + graze + bound, 8, 6, '#d97706');
+    this.rect(ctx, 7, 2 + graze + bound, 1, 5, '#92400e');
+    this.rect(ctx, 16, 2 + graze + bound, 1, 5, '#92400e');
+    this.px(ctx, 9, 7 + graze + bound, '#18181b'); this.px(ctx, 14, 7 + graze + bound, '#18181b');
+    this.px(ctx, 12, 9 + graze + bound, '#78350f');
+    this.rect(ctx, 8 + Math.min(0, step), 16 + bound, 2, 6 - bound, '#92400e');
+    this.rect(ctx, 14 + Math.max(0, step), 16 + bound, 2, 6 - bound, '#92400e');
   }
 
   private static drawWolf(
@@ -816,36 +1573,34 @@ export class SpriteGenerator {
     animation: EntitySpriteAnimation,
     frame: number
   ): void {
-    const step = animation === 'walk' || animation === 'flee' ? [-1, 0, 1, 0][frame] : 0;
-    const attack = animation === 'attack';
+    // Wolf stalks: lowers body when attacking or walking
+    const stalk = (animation === 'walk' || animation === 'attack') ? 2 : 0;
+    const lunge = animation === 'attack' ? (frame < 2 ? 3 : -1) : 0;
+    const step = animation === 'walk' || animation === 'flee' ? [-2, 0, 2, 0][frame] : 0;
+
     if (direction === 'left' || direction === 'right') {
       ctx.save();
       if (direction === 'left') { ctx.translate(24, 0); ctx.scale(-1, 1); }
-      this.rect(ctx, 4, 11, 12, 6, '#64748b');
-      this.rect(ctx, 5, 12, 10, 3, '#94a3b8');
-      this.rect(ctx, 14 + (attack ? 1 : 0), 7, 7, 5, '#64748b');
-      this.rect(ctx, 16, 5, 2, 3, '#475569');
-      this.rect(ctx, 19, 5, 1, 3, '#475569');
-      this.rect(ctx, 20, 9, 3, 2, '#475569');
-      this.px(ctx, 18, 8, '#ef4444');
-      this.px(ctx, 22, 10, '#0f172a');
-      if (attack) { this.px(ctx, 22, 12, '#f8fafc'); this.px(ctx, 21, 12, '#f8fafc'); }
-      this.rect(ctx, 2, 9, 3, 3, '#475569');
-      this.rect(ctx, 5 + Math.min(0, step), 17, 2, 5, '#334155');
-      this.rect(ctx, 13 + Math.max(0, step), 17, 2, 5, '#334155');
+      this.rect(ctx, 4, 11 + stalk, 14, 5, '#52525b');
+      this.rect(ctx, 5, 12 + stalk, 12, 3, '#71717a');
+      this.rect(ctx, 15 + lunge, 8 + stalk, 6, 5, '#52525b');
+      this.px(ctx, 19 + lunge, 9 + stalk, '#ef4444'); // glowing red eye
+      this.rect(ctx, 19 + lunge, 10 + stalk, 3, 2, '#3f3f46');
+      this.rect(ctx, 16 + lunge, 6 + stalk, 2, 2, '#52525b');
+      this.rect(ctx, 6 + Math.min(0, step), 16 + stalk, 2, 6 - stalk, '#27272a');
+      this.rect(ctx, 14 + Math.max(0, step) + lunge, 16 + stalk, 2, 6 - stalk, '#27272a');
+      this.rect(ctx, 2, 10 + stalk, 4, 2, '#3f3f46'); // tail
       ctx.restore();
       return;
     }
 
-    this.rect(ctx, 6, 10, 12, 7, '#64748b');
-    this.rect(ctx, 7, 11, 10, 3, '#94a3b8');
-    this.rect(ctx, 7, 5, 10, 7, '#64748b');
-    this.rect(ctx, 7, 3, 2, 3, '#475569');
-    this.rect(ctx, 15, 3, 2, 3, '#475569');
-    this.px(ctx, 9, 8, '#ef4444'); this.px(ctx, 14, 8, '#ef4444');
-    this.rect(ctx, 10, 10, 4, 2, '#475569');
-    this.rect(ctx, 7 + Math.min(0, step), 17, 2, 5, '#334155');
-    this.rect(ctx, 15 + Math.max(0, step), 17, 2, 5, '#334155');
+    this.rect(ctx, 6, 10 + stalk, 12, 6, '#52525b');
+    this.rect(ctx, 8, 6 + stalk, 8, 6, '#52525b');
+    this.rect(ctx, 7, 4 + stalk, 2, 2, '#52525b');
+    this.rect(ctx, 15, 4 + stalk, 2, 2, '#52525b');
+    this.px(ctx, 10, 8 + stalk, '#ef4444'); this.px(ctx, 13, 8 + stalk, '#ef4444');
+    this.rect(ctx, 8 + Math.min(0, step), 16 + stalk, 2, 6 - stalk, '#27272a');
+    this.rect(ctx, 14 + Math.max(0, step), 16 + stalk, 2, 6 - stalk, '#27272a');
   }
 
   private static drawBear(
@@ -854,36 +1609,41 @@ export class SpriteGenerator {
     animation: EntitySpriteAnimation,
     frame: number
   ): void {
-    const step = animation === 'walk' || animation === 'flee' ? [-1, 0, 1, 0][frame] : 0;
-    const attack = animation === 'attack';
+    const lumber = animation === 'walk' ? (frame % 2 === 0 ? 1 : -1) : 0;
+    // Rearing up on attack
+    const rear = animation === 'attack' ? -4 : 0;
+    
     if (direction === 'left' || direction === 'right') {
       ctx.save();
       if (direction === 'left') { ctx.translate(24, 0); ctx.scale(-1, 1); }
-      this.rect(ctx, 3, 9, 14, 9, '#78350f');
-      this.rect(ctx, 4, 10, 12, 6, '#92400e');
-      this.rect(ctx, 14 + (attack ? 1 : 0), 5, 8, 7, '#78350f');
-      this.rect(ctx, 15, 3, 3, 3, '#5a3207');
-      this.rect(ctx, 20, 4, 2, 3, '#5a3207');
-      this.rect(ctx, 18, 8, 4, 3, '#451a03');
-      this.px(ctx, 17, 7, '#fbbf24');
-      this.rect(ctx, 6, 13, 5, 3, '#d97706');
-      this.rect(ctx, 4 + Math.min(0, step), 18, 3, 4, '#451a03');
-      this.rect(ctx, 14 + Math.max(0, step), 18, 3, 4, '#451a03');
-      if (attack) { this.px(ctx, 22, 11, '#e2e8f0'); this.px(ctx, 21, 12, '#e2e8f0'); }
+      // Rearing rotates the whole body up
+      this.rect(ctx, 3, 8 + rear, 15, 10 - rear/2, '#451a03');
+      this.rect(ctx, 16, 6 + rear * 1.5, 7, 6, '#451a03');
+      this.px(ctx, 20, 7 + rear * 1.5, '#18181b');
+      this.rect(ctx, 17, 4 + rear * 1.5, 2, 2, '#78350f');
+      this.rect(ctx, 4 + lumber, 18, 3, 5, '#1c1917');
+      this.rect(ctx, 14 - lumber, 18, 3, 5, '#1c1917');
+      if (animation === 'attack') {
+        // Claws out
+        this.rect(ctx, 18, 12 + rear, 4, 1, '#cbd5e1');
+        this.rect(ctx, 18, 14 + rear, 4, 1, '#cbd5e1');
+      }
       ctx.restore();
       return;
     }
 
-    this.rect(ctx, 4, 9, 16, 10, '#78350f');
-    this.rect(ctx, 5, 10, 14, 7, '#92400e');
-    this.rect(ctx, 5, 4, 14, 8, '#78350f');
-    this.rect(ctx, 4, 2, 4, 3, '#5a3207');
-    this.rect(ctx, 16, 2, 4, 3, '#5a3207');
-    this.rect(ctx, 9, 8, 6, 3, '#451a03');
-    this.px(ctx, 8, 7, '#fbbf24'); this.px(ctx, 15, 7, '#fbbf24');
-    this.rect(ctx, 8, 12, 8, 4, '#d97706');
-    this.rect(ctx, 6 + Math.min(0, step), 19, 3, 3, '#451a03');
-    this.rect(ctx, 15 + Math.max(0, step), 19, 3, 3, '#451a03');
+    this.rect(ctx, 4, 8 + rear, 16, 12 - rear/2, '#451a03');
+    this.rect(ctx, 7, 5 + rear * 1.5, 10, 8, '#451a03');
+    this.rect(ctx, 6, 3 + rear * 1.5, 3, 3, '#78350f');
+    this.rect(ctx, 15, 3 + rear * 1.5, 3, 3, '#78350f');
+    this.px(ctx, 9, 8 + rear * 1.5, '#18181b'); this.px(ctx, 14, 8 + rear * 1.5, '#18181b');
+    this.rect(ctx, 6 + lumber, 20, 3, 4, '#1c1917');
+    this.rect(ctx, 15 - lumber, 20, 3, 4, '#1c1917');
+    
+    if (animation === 'attack') {
+      this.rect(ctx, 4, 12 + rear, 4, 2, '#cbd5e1');
+      this.rect(ctx, 16, 12 + rear, 4, 2, '#cbd5e1');
+    }
   }
 
   private static drawDragon(
@@ -892,47 +1652,56 @@ export class SpriteGenerator {
     animation: EntitySpriteAnimation,
     frame: number
   ): void {
-    const flap = frame % 2 === 0 ? -1 : 1;
-    const attack = animation === 'attack';
+    // Sine wave wing flapping: majestic deep flaps when walking/fleeing/attacking
+    const flap = Math.sin(frame * Math.PI) * 5;
+    
     if (direction === 'left' || direction === 'right') {
       ctx.save();
       if (direction === 'left') { ctx.translate(24, 0); ctx.scale(-1, 1); }
-      this.rect(ctx, 2, 6 + flap, 6, 7, '#7f1d1d');
-      this.rect(ctx, 4, 8 + flap, 5, 5, '#991b1b');
-      this.rect(ctx, 6, 10, 10, 7, '#b91c1c');
-      this.rect(ctx, 7, 11, 8, 4, '#ef4444');
-      this.rect(ctx, 15 + (attack ? 1 : 0), 6, 7, 6, '#dc2626');
-      this.rect(ctx, 16, 4, 2, 3, '#18181b');
-      this.rect(ctx, 20, 4, 2, 3, '#18181b');
-      this.px(ctx, 19, 8, '#fef08a');
-      this.rect(ctx, 21, 10, 3, 2, '#7f1d1d');
-      this.rect(ctx, 3, 14, 4, 3, '#7f1d1d');
-      this.rect(ctx, 8, 17, 2, 4, '#7f1d1d');
-      this.rect(ctx, 14, 17, 2, 4, '#7f1d1d');
-      this.px(ctx, 10, 12, '#fca5a5'); this.px(ctx, 13, 13, '#991b1b');
-      if (attack) {
-        this.rect(ctx, 22, 8, 2, 2, '#facc15');
-        this.rect(ctx, 23, 9, 1, 4, '#fb923c');
+      // Body & Tail
+      this.rect(ctx, 2, 10, 16, 6, '#b91c1c');
+      this.rect(ctx, 1, 11, 6, 2, '#ef4444');
+      // Neck & Head
+      this.rect(ctx, 15, 4, 4, 8, '#b91c1c');
+      this.rect(ctx, 17, 3, 6, 4, '#dc2626');
+      this.px(ctx, 20, 4, '#fef08a');
+      // Horns
+      this.rect(ctx, 16, 0, 2, 4, '#fef3c7');
+      // Wing
+      this.rect(ctx, 6, 2 + flap, 10, 8 - flap, '#991b1b');
+      this.rect(ctx, 8, 4 + flap, 6, 4, '#fca5a5');
+      // Legs
+      this.rect(ctx, 4, 16, 3, 6, '#7f1d1d');
+      this.rect(ctx, 13, 16, 3, 6, '#7f1d1d');
+      
+      // Fire breath
+      if (animation === 'attack') {
+        const fireReach = frame * 4;
+        this.rect(ctx, 23, 4, 4 + fireReach, 3, '#f97316');
+        this.rect(ctx, 24 + fireReach, 5, 3, 1, '#fde047');
       }
       ctx.restore();
       return;
     }
 
-    this.rect(ctx, 2, 6 + flap, 6, 8, '#7f1d1d');
-    this.rect(ctx, 16, 6 - flap, 6, 8, '#7f1d1d');
     this.rect(ctx, 6, 10, 12, 8, '#b91c1c');
-    this.rect(ctx, 8, 11, 8, 5, '#ef4444');
-    this.rect(ctx, 7, 5, 10, 7, '#dc2626');
-    this.rect(ctx, 7, 3, 2, 3, '#18181b');
-    this.rect(ctx, 15, 3, 2, 3, '#18181b');
-    this.px(ctx, 9, 8, '#fef08a'); this.px(ctx, 14, 8, '#fef08a');
-    this.rect(ctx, 10, 10, 4, 2, '#7f1d1d');
-    this.rect(ctx, 9, 18, 2, 4, '#7f1d1d');
-    this.rect(ctx, 14, 18, 2, 4, '#7f1d1d');
-    this.px(ctx, 11, 13, '#fca5a5'); this.px(ctx, 13, 14, '#991b1b');
-    if (direction === 'up') {
-      this.rect(ctx, 9, 5, 6, 4, '#991b1b');
-      this.rect(ctx, 10, 3, 4, 2, '#7f1d1d');
+    this.rect(ctx, 9, 3, 6, 8, '#b91c1c');
+    this.rect(ctx, 10, 5, 4, 2, '#dc2626');
+    this.px(ctx, 11, 4, '#fef08a'); this.px(ctx, 12, 4, '#fef08a');
+    this.rect(ctx, 8, 0, 2, 4, '#fef3c7');
+    this.rect(ctx, 14, 0, 2, 4, '#fef3c7');
+    // Wings
+    this.rect(ctx, 0, 2 + flap, 8, 10 - flap/2, '#991b1b');
+    this.rect(ctx, 16, 2 + flap, 8, 10 - flap/2, '#991b1b');
+    // Legs
+    this.rect(ctx, 6, 18, 3, 4, '#7f1d1d');
+    this.rect(ctx, 15, 18, 3, 4, '#7f1d1d');
+    
+    // Fire breath
+    if (animation === 'attack') {
+      const fireSpread = frame * 3;
+      this.rect(ctx, 10 - fireSpread, 7, 4 + fireSpread * 2, 6, '#f97316');
+      this.rect(ctx, 11 - fireSpread, 13, 2 + fireSpread * 2, 2, '#fde047');
     }
   }
 

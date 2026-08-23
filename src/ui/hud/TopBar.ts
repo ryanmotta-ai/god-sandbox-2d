@@ -33,7 +33,8 @@ const SPEEDS: { value: number; label: string; icon?: string; shortcut: string; d
   { value: 10, label: '10×', shortcut: '4', description: 'Dez horas por segundo.' },
   { value: 20, label: '20×', shortcut: '5', description: 'Vinte horas por segundo.' },
   { value: 30, label: '30×', shortcut: '6', description: 'Trinta horas por segundo. Velocidade hiper-acelerada!' },
-  { value: 60, label: '60×', shortcut: '7', description: 'Sessenta horas por segundo (60×). Velocidade ultra-acelerada!' }
+  { value: 60, label: '60×', shortcut: '7', description: 'Sessenta horas por segundo (60×). Velocidade ultra-acelerada!' },
+  { value: 80, label: '80×', shortcut: '8', description: 'Oitenta horas por segundo (80×). Velocidade hiper-sônica!' }
 ];
 
 const ERA_STYLE: Record<string, { color: string; icon: string }> = {
@@ -93,7 +94,16 @@ export class TopBar {
     this.clockEl = el('span', { class: 'ae-topbar-clock', text: '00:00' });
 
     return withTooltip(
-      el('div', { class: 'ae-topbar-time' }, [
+      el('div', {
+        class: 'ae-topbar-time',
+        style: 'cursor: pointer;',
+        on: {
+          click: () => {
+            sound.playClick();
+            this.ctx.screens.open('timeskip');
+          }
+        }
+      }, [
         icon('year', { size: 16, class: 'ae-topbar-time-icon' }),
         el('div', { class: 'ae-topbar-time-text' }, [this.dateEl, this.clockEl])
       ]),
@@ -103,6 +113,8 @@ export class TopBar {
           title: `Ano ${s.year}`,
           icon: 'year',
           description: 'Data e hora do mundo, segundo o calendário da simulação.',
+          footnote: 'Clique para abrir o Salto Temporal Divino',
+          shortcut: '0',
           rows: [
             { label: 'Mês', value: `${s.month}` },
             { label: 'Dia', value: `${s.day}` },
@@ -131,7 +143,27 @@ export class TopBar {
       return btn;
     });
 
-    return el('div', { class: 'ae-speed', attrs: { role: 'group', 'aria-label': 'Velocidade' } }, buttons);
+    const timeSkipBtn = withTooltip(
+      el('button', {
+        class: 'ae-speed-btn ae-speed-timeskip',
+        attrs: { type: 'button', 'aria-label': 'Salto Temporal' },
+        on: {
+          click: () => {
+            sound.playClick();
+            this.ctx.screens.open('timeskip');
+          }
+        }
+      }, [
+        icon('calendar', { size: 16 })
+      ]),
+      {
+        title: 'Salto Temporal Divino',
+        description: 'Avança anos e séculos rapidamente no mundo com simulação contínua e fidelidade total.',
+        shortcut: '0'
+      }
+    );
+
+    return el('div', { class: 'ae-speed', attrs: { role: 'group', 'aria-label': 'Velocidade' } }, [...buttons, timeSkipBtn]);
   }
 
   private buildStatus(): HTMLElement {

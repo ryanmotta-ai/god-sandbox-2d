@@ -27,6 +27,7 @@ export type ScreenId =
   | 'infrastructure'
   | 'city'
   | 'realm'
+  | 'timeskip'
   /** Development-only gallery of the design system. Reached from the debug panel. */
   | 'ui-kit';
 

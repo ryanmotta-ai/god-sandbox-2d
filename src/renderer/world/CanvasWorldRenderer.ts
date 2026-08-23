@@ -47,6 +47,10 @@ export class CanvasWorldRenderer implements WorldRenderer {
     this.telemetry.frameSubmissionMs = performance.now() - started;
   }
 
+  public renderHUDOverlay(...args: WorldRenderArguments): void {
+    this.renderer.renderHUDOverlay(...args);
+  }
+
   public toggleGrid(): boolean { return this.renderer.toggleGrid(); }
 
   public destroy(): void {

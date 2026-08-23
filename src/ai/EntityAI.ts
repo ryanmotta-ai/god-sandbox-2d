@@ -15,7 +15,7 @@ import { SimplePathfinder } from './Pathfinding';
 import { ParticleManager } from '../renderer/Particles';
 import { chronicle } from '../civ/Chronicle';
 import { sound } from '../core/SoundSynth';
-import { rng, nextId, hashString, hashToUnit } from '../core/Random';
+import { rng, nextId, hashString, hashToUnit, stableSlot, MARCH_SLOTS } from '../core/Random';
 import { WorldMarket } from '../civ/Economy';
 import { TradeNetwork } from '../civ/Trade';
 import { GoodId, MINEABLE_GOODS, QUARRY_GOODS } from '../civ/Goods';
@@ -28,6 +28,7 @@ import {
   DemographicsAccumulator, emptyDemographics, familyAdvantage, inheritFamilyMarks,
   inheritOrigin, pruneAncestors, rootedness, settleEstate, uproot, type Demographics
 } from '../civ/Generations';
+import { pickBestBlueprintForSite } from '../civ/CityBlueprints';
 import type { Profession } from '../entities/Needs';
 import {
   CultureRegistry, CultureCensus, assimilate, considerEmergence, inheritCulture
@@ -118,8 +119,28 @@ const HAND_GATHERABLE: GoodId[] = [...MINEABLE_GOODS, ...QUARRY_GOODS];
 const OVERCROWDING_LIMIT = 1.4;
 /** Grievance a distant realm needs before it will consider war. */
 const WAR_GRIEVANCE_BASE = -14;
-/** How much of that grievance a shared border excuses. */
-const WAR_GRIEVANCE_PROXIMITY = 12;
+/**
+ * How much of that grievance a shared border excuses.
+ *
+ * This number has to clear an equilibrium, not just look reasonable, and twelve
+ * did not.
+ *
+ * `tickDiplomacy` only pushes a relation down while it is *above* +5 (-0.75 a
+ * year) and only up while below -5 (+0.5 a year). So an ordinary pair of realms
+ * whose other pressures net out below three quarters of a point settles at
+ * exactly +5 and stays there for the life of the world — a measured run shows the
+ * closest pair of realms reading 5 at year 10 and 5 again at year 30. At twelve,
+ * two realms 21 tiles apart needed to reach 0 to consider war, and the restoring
+ * force defends everything under +5. Zero wars in a hundred and ten years.
+ *
+ * Thirty is the smallest value that puts the gate above that pinned +5 at a
+ * realistic border distance: neighbours sharing a fence open at +16, a pair 21
+ * tiles apart at +7, and a realm across the map still needs the real blood feud
+ * of -14 that the comment above always claimed. Crossing the gate is still only
+ * the price of admission — the roll after it is a few percent a year, weighted by
+ * government aggression, relative power and border ambition.
+ */
+const WAR_GRIEVANCE_PROXIMITY = 30;
 
 /**
  * SOC-V2 migration limits.
@@ -394,7 +415,7 @@ export class SimulationEngine {
           {
             const dmg = e.traits.has(TraitId.FLAMMABLE) ? 30 : 15;
             e.hp -= dmg * stride;
-            particles.spawnDamageNumber(e.x, e.y, dmg * stride);
+            particles.spawnDamageNumber(e.x, e.y, dmg * stride, 'critical');
             // AI: Flee from fire
             if (e.aiState !== 'flee') {
               e.aiState = 'flee';
@@ -1855,7 +1876,7 @@ if (e.kingdomId) {
                 (tx, ty, d, targetEnt) => {
                   if (targetEnt && targetEnt.hp > 0) {
                     targetEnt.hp -= d;
-                    particles.spawnDamageNumber(tx, ty, d);
+                    particles.spawnDamageNumber(tx, ty, d, d >= targetEnt.maxHp * 0.25 ? 'critical' : 'normal');
                     sound.playHit();
                     if (targetEnt.hp <= 0 && e.kingdomId && targetEnt.kingdomId) {
                       e.kills++;
@@ -1876,7 +1897,7 @@ if (e.kingdomId) {
               e.attackCooldown = ATTACK_COOLDOWN;
 
               particles.spawnProjectile(e.x, e.y, target.x, target.y, 'spear_thrust', dmg);
-              particles.spawnDamageNumber(target.x, target.y, dmg);
+              particles.spawnDamageNumber(target.x, target.y, dmg, dmg >= target.maxHp * 0.25 ? 'critical' : 'normal');
               sound.playHit();
 
               if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
@@ -1888,7 +1909,7 @@ if (e.kingdomId) {
               // Standard Melee Blow
               target.hp -= dmg;
               e.attackCooldown = ATTACK_COOLDOWN;
-              particles.spawnDamageNumber(target.x, target.y, dmg);
+              particles.spawnDamageNumber(target.x, target.y, dmg, dmg >= target.maxHp * 0.25 ? 'critical' : 'normal');
               sound.playHit();
 
               if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
@@ -2457,8 +2478,7 @@ if (e.kingdomId) {
       if (ourPush < SIEGE_GATE_PUSH) {
         e.showEmote('⚔️', 25);
         if (distanceToLine > SECTOR_RADIUS * 0.6) {
-          const pos = SimplePathfinder.getStepTowards(e.x, e.y, sector.x, sector.y, tileMap, speed * 2.5);
-          e.x = pos.x; e.y = pos.y;
+          this.marchStepToward(e, sector.x, sector.y, tileMap, speed * 2.5);
           return;
         }
         // On the line. Hold it, spread along it — a front is a line of men, not
@@ -2492,8 +2512,7 @@ if (e.kingdomId) {
 
     if (closestDist > SIEGE_RADIUS - 1.5) {
       // Still marching. Campaign pace, not patrol pace.
-      const pos = SimplePathfinder.getStepTowards(e.x, e.y, enemyCity.x, enemyCity.y, tileMap, speed * 2.5);
-      e.x = pos.x; e.y = pos.y;
+      this.marchStepToward(e, enemyCity.x, enemyCity.y, tileMap, speed * 2.5);
       return;
     }
 
@@ -2518,6 +2537,45 @@ if (e.kingdomId) {
         }
       }
     }
+  }
+
+  /**
+   * A soldier's place in the column.
+   *
+   * Every marching soldier used to be sent at the same single point — the sector
+   * centre or the enemy town centre — so an army crossing the map read as a crowd
+   * of individuals who happened to be walking the same way. Giving each of them a
+   * standing file and rank, measured off the axis they are advancing along, is
+   * what turns that crowd into something that looks like it was ordered to be
+   * there. The slot comes from the entity id, so a soldier keeps the same place in
+   * the line for their whole service and across a replay of the same seed.
+   *
+   * The offset fades out over the last dozen tiles, and the arrival test upstream
+   * still measures the true distance to the objective, so shaping the approach
+   * cannot stop an army from reaching it. Once it arrives, `doEncampAround` owns
+   * the spacing.
+   */
+  private marchStepToward(e: Entity, tx: number, ty: number, tileMap: TileMap, speed: number): void {
+    const dx = tx - e.x;
+    const dy = ty - e.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 0.001) return;
+
+    // Shared with the renderer, which puts the standard in slot 0 — the centre of
+    // the front rank, which is where a colour party actually walks.
+    const slot = stableSlot(e.id, MARCH_SLOTS);
+    const file = (slot % 5) - 2;          // five abreast, centred on the axis
+    const rank = Math.floor(slot / 5);    // and up to four ranks deep
+
+    // Close order: a file is a stride and a half apart, a rank a stride behind.
+    const spread = Math.min(1, dist / 12);
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const aimX = tx + (-uy * file * 1.5 - ux * rank * 1.1) * spread;
+    const aimY = ty + (ux * file * 1.5 - uy * rank * 1.1) * spread;
+
+    const pos = SimplePathfinder.getStepTowards(e.x, e.y, aimX, aimY, tileMap, speed);
+    e.x = pos.x; e.y = pos.y;
   }
 
   // ===================== HELPER CHECKS =====================
@@ -2609,6 +2667,7 @@ if (e.kingdomId) {
       const cityId = nextId('city');
       const cityName = `${e.name}ton`;
       const city = new City(cityId, cityName, e.species, tile.x, tile.y, e.name, this.currentYear);
+      city.blueprintId = pickBestBlueprintForSite(tileMap, tile.x, tile.y);
       city.population = 1;
       this.cities.set(cityId, city);
       this.citySpatialHash.insert(city);
@@ -2788,49 +2847,111 @@ if (e.kingdomId) {
   }
 
   /**
-   * Wartime conscription. A realm at war pulls able-bodied workers into any
-   * empty barracks post, up to a wartime levy of about one soldier per eight
-   * citizens. Food stays protected: while the city is short on food nobody is
-   * taken from the fields, and artisans/miners go before farmers.
+   * How many of a settlement's people are under arms, and who they are.
+   *
+   * One number per city, moved toward every year: the watch it keeps in peace,
+   * the levy it raises at war — about one citizen in eight, one in five once it
+   * has the institution to do it. Food stays protected in both directions: while
+   * the city is short on food nobody is taken from the fields, and
+   * artisans/miners go before farmers.
+   *
+   * This used to be a levy alone, and bounded by empty barracks posts — it
+   * returned immediately when there were none. That made the rule unreachable in
+   * both directions at once: a settlement with no barracks, which is every
+   * settlement for the seventy-odd years before a realm researches bronze
+   * working, raised nobody at all, and a settlement that had one could never
+   * exceed four soldiers per building however large it grew or however badly the
+   * war went. Arming somebody needs a spare pair of hands, not a building.
+   *
+   * The barracks still matters, and matters more than it did. A recruit who fits
+   * into a real post is a professional: fed there all year, counted as the city's
+   * standing garrison, and never stood down. Everyone above that number carries a
+   * spear on the settlement's word and goes back to work when the number falls.
    */
   private musterArmies(): void {
+    const atWar = new Set<string>();
     for (const kingdom of this.kingdoms.values()) {
-      if (this.diplomacy.getWarsFor(kingdom.id).length === 0) continue;
+      if (this.diplomacy.getWarsFor(kingdom.id).length > 0) atWar.add(kingdom.id);
+    }
+
+    // One pass over the entities, bucketed by settlement, instead of a filter of
+    // the whole world inside the per-city loop below.
+    const residents = new Map<string, Entity[]>();
+    for (const e of this.entities) {
+      if (e.hp <= 0 || !e.cityId || !SPECIES_DEFINITIONS[e.species].isHumanoid) continue;
+      const list = residents.get(e.cityId);
+      if (list) list.push(e);
+      else residents.set(e.cityId, [e]);
+    }
+
+    for (const kingdom of this.kingdoms.values()) {
+      const warring = atWar.has(kingdom.id);
+      /**
+       * Conscription.
+       *
+       * `conscription` is unlocked by gunpowder, described to the player, and
+       * was never read by anything — one of six technology features the tree
+       * granted and no rule consulted. The levée en masse is precisely what it
+       * should mean: a realm that has the institution can call up half again as
+       * many of its people, and can call up more of them at once.
+       */
+      const conscripted = kingdom.research.knowsFeature('conscription');
+
       for (const cityId of kingdom.cityIds) {
         const city = this.cities.get(cityId);
         if (!city) continue;
 
+        const here = residents.get(cityId) ?? [];
         const barracksList = [...city.buildings.values()].filter(b => b.type === 'barracks' && b.isOperational());
-        let openSlots = 0;
-        for (const b of barracksList) {
-          const cap = (b.definition.jobs ?? 0) * b.level;
-          openSlots += Math.max(0, cap - b.assignedWorkerIds.size);
-        }
-        if (openSlots <= 0) continue;
 
-        let soldiersNow = 0;
-        for (const e of this.entities) {
-          if (e.cityId === cityId && e.hp > 0 && e.profession === 'soldier') soldiersNow++;
+        // Professionals hold a real barracks post; the rest carry a spear because
+        // the settlement asked them to, and can be asked to stop.
+        const professionals: Entity[] = [];
+        const militia: Entity[] = [];
+        for (const e of here) {
+          if (e.profession !== 'soldier') continue;
+          (e.workplaceId ? professionals : militia).push(e);
         }
+
         /**
-         * Conscription.
+         * The watch every settlement keeps, barracks or no barracks.
          *
-         * `conscription` is unlocked by gunpowder, described to the player, and
-         * was never read by anything — one of six technology features the tree
-         * granted and no rule consulted. The levée en masse is precisely what it
-         * should mean: a realm that has the institution can call up half again as
-         * many of its people, and can reach into the barracks with more of them
-         * at once.
+         * A village in the stone age had no way to arm anybody at all: the
+         * barracks is the only building that produces the soldier profession and
+         * it arrives with bronze working, seventy-odd years in on a measured run.
+         * Until then a hundred percent of every population was peasants and
+         * woodcutters, wolves included. One or two spearmen is the smallest number
+         * that fixes that, and it is deliberately small: a soldier grows no food,
+         * and a founding party of eight that posts two guards starves. Hence the
+         * floor of twelve residents before the first one is spared.
          */
-        const conscripted = kingdom.research.knowsFeature('conscription');
+        const watch = city.population >= 24 ? 2 : city.population >= 12 ? 1 : 0;
         const levy = Math.max(2, Math.round(city.population * (conscripted ? 0.19 : 0.12)));
-        const need = Math.max(0, levy - soldiersNow);
+        // War raises the number; peace lets it fall back to the watch, or to the
+        // garrison the city actually built, whichever is larger.
+        const target = warring ? levy : Math.max(watch, professionals.length);
+
+        const strength = professionals.length + militia.length;
+
+        if (strength > target) {
+          // Stand the militia down, greenest first, so a settlement keeps the ones
+          // who have actually been in a fight. A professional is never let go.
+          militia.sort((a, b) => a.level - b.level || a.xp - b.xp);
+          for (const e of militia.slice(0, strength - target)) {
+            e.profession = 'none';
+            e.aiState = 'idle';
+            e.aiCooldown = 5;
+            this.assignProfession(e, city);
+          }
+          continue;
+        }
+
+        const need = target - strength;
         if (need <= 0) continue;
 
         const food = city.stock.get('food');
-        const civilians = this.entities.filter(e =>
-          e.cityId === cityId && e.hp > 0 && !e.isChild &&
-          e.profession !== 'soldier' && e.profession !== 'king'
+        const civilians = here.filter(e =>
+          !e.isChild && e.profession !== 'soldier' && e.profession !== 'king'
         );
         // Anyone without a job goes first — they were the one group the levy
         // used to skip, by excluding 'none' along with kings and serving
@@ -2846,17 +2967,21 @@ if (e.kingdomId) {
         const ordered = pool.sort((a, b) => (priority[a.profession] ?? 9) - (priority[b.profession] ?? 9));
 
         const perYear = conscripted ? 7 : 4;
-        for (let i = 0; i < Math.min(openSlots, need, perYear, ordered.length); i++) {
+        for (let i = 0; i < Math.min(need, perYear, ordered.length); i++) {
           const e = ordered[i];
-          const b = barracksList.find(bb => bb.assignedWorkerIds.size < (bb.definition.jobs ?? 0) * bb.level);
-          if (!b) break;
+          // A real post if one is free, the watch otherwise.
+          const post = barracksList.find(bb => bb.assignedWorkerIds.size < (bb.definition.jobs ?? 0) * bb.level) ?? null;
           if (e.workplaceId) city.buildings.get(e.workplaceId)?.assignedWorkerIds.delete(e.id);
           e.profession = 'soldier';
-          e.workplaceId = b.id;
-          b.assignedWorkerIds.add(e.id);
+          e.workplaceId = post?.id ?? null;
+          post?.assignedWorkerIds.add(e.id);
           e.aiState = 'idle';
           e.aiCooldown = 5;
-          chronicle.log(this.currentYear, 'society', `${e.fullName} foi convocado em ${city.name} para o serviço militar.`);
+          chronicle.log(this.currentYear, 'society', post
+            ? `${e.fullName} foi convocado em ${city.name} para o serviço militar.`
+            : warring
+              ? `${e.fullName} pegou em armas na milícia de ${city.name}.`
+              : `${e.fullName} assumiu a guarda de ${city.name}.`);
         }
       }
     }

@@ -51,6 +51,7 @@ import { InfrastructureScreen } from './ui/screens/InfrastructureScreen';
 import { UIKitScreen } from './ui/screens/UIKitScreen';
 import { CityScreen } from './ui/screens/CityScreen';
 import { RealmScreen } from './ui/screens/RealmScreen';
+import { TimeSkipScreen } from './ui/screens/TimeSkipScreen';
 import { SelectionManager } from './ui/hud/Selection';
 import { WorldSnapshotProvider } from './ui/core/WorldSnapshot';
 import { alerts } from './ui/core/Alerts';
@@ -115,7 +116,7 @@ class AethoriaGame implements GameContext {
   // ---- Runtime ----
   private state: AppState = 'menu';
   public simSpeed = 0;
-  private scheduler = new SimulationScheduler({ frameBudgetMs: 5, maxTicksPerFrame: 48, maxDebtTicks: 240 });
+  private scheduler = new SimulationScheduler({ frameBudgetMs: 8, maxTicksPerFrame: 96, maxDebtTicks: 360 });
   private selectedEntityIds = new Set<string>();
   public fps = 60;
   public activeFires = 0;
@@ -206,6 +207,7 @@ class AethoriaGame implements GameContext {
     this.screens.register(new InfrastructureScreen());
     this.screens.register(new CityScreen());
     this.screens.register(new RealmScreen());
+    this.screens.register(new TimeSkipScreen());
     // Development gallery for the UI kit. Not on any navigation path — opened
     // from the debug panel.
     this.screens.register(new UIKitScreen());
@@ -489,7 +491,7 @@ class AethoriaGame implements GameContext {
   }
 
   public stepSpeed(delta: number): void {
-    const speeds = [1, 2, 5, 10, 20, 30, 60];
+    const speeds = [1, 2, 5, 10, 20, 30, 60, 80];
     const current = this.simSpeed || this.speedBeforePause;
     let idx = speeds.indexOf(current);
     if (idx === -1) {
@@ -736,6 +738,8 @@ class AethoriaGame implements GameContext {
       case '5': this.setSpeed(20); return;
       case '6': this.setSpeed(30); return;
       case '7': this.setSpeed(60); return;
+      case '8': this.setSpeed(80); return;
+      case '0': this.screens.open('timeskip'); return;
       case '[': this.hud.toolbar.cycleBrushSize(-1); return;
       case ']': this.hud.toolbar.cycleBrushSize(1); return;
       case 'f': e.preventDefault(); this.hud.toolbar.focusSearch(); return;
@@ -797,7 +801,14 @@ class AethoriaGame implements GameContext {
       this.camera,
       // Terraforming needs the settlements and realms to be able to clear up
       // after itself: a building sunk into the sea has to leave its city's books.
-      { cities: this.sim.cities, kingdoms: this.sim.kingdoms }
+      {
+        cities: this.sim.cities,
+        kingdoms: this.sim.kingdoms,
+        diplomacy: this.sim.diplomacy,
+        currentYear: this.sim.currentYear,
+        toast: (msg, type) => this.toast(msg, type),
+        camera: this.camera
+      }
     );
   }
 

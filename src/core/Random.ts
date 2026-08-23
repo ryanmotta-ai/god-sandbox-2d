@@ -75,6 +75,31 @@ export function hashString(s: string): number {
 }
 
 /**
+ * A stable, non-negative bucket for one id — the same id always lands in the
+ * same one.
+ *
+ * Lives here rather than in either caller because two of them have to agree: the
+ * simulation reads it to decide where a soldier stands in a marching column, and
+ * the renderer reads it to decide which soldier carries the colours. Two private
+ * copies of the same hash would drift the first time one of them was tuned, and
+ * the standard would end up on someone marching in the third rank.
+ */
+export function stableSlot(id: string, buckets: number): number {
+  return Math.abs(hashString(id)) % Math.max(1, buckets);
+}
+
+/**
+ * Places in a marching column: five files abreast, four ranks deep.
+ *
+ * Sits beside `stableSlot` because it is the bucket count that function is called
+ * with, and because both of its callers live in different layers — the simulation
+ * walks a soldier to their file and rank, the renderer gives slot 0, the centre of
+ * the front rank, the colours to carry. Keeping it here is what stops the renderer
+ * from having to import the simulation to draw a flag.
+ */
+export const MARCH_SLOTS = 20;
+
+/**
  * Mixes one or more integers into a float in [0, 1). Same mixing core as
  * Mulberry32 above, but pure and stateless — so a stable seed (an entity id,
  * a route id) always maps to the same value instead of consuming the shared

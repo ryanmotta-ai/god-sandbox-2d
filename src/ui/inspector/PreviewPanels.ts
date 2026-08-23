@@ -17,11 +17,13 @@
 import { el, Child } from '../core/Dom';
 import {
   panel, section, statRow, rowList, statGrid, stat, progressBar, badge, badgeRow,
-  objectLink, icon, button, emptyState, formatFull, formatCompact
+  objectLink, icon, button, emptyState, formatFull, formatCompact, withTooltip
 } from '../kit';
 import { BUILDINGS } from '../../civ/Building';
 import { GOODS, type GoodId } from '../../civ/Goods';
 import { TERRAINS } from '../../world/Biomes';
+import { sound } from '../../core/SoundSynth';
+import { getCityBlueprint, ALL_BLUEPRINT_IDS } from '../../civ/CityBlueprints';
 import type { InspectorHost } from './Inspector';
 import type { City } from '../../civ/City';
 import type { Kingdom } from '../../civ/Kingdom';
@@ -66,6 +68,16 @@ export function buildCityPanel(city: City, host: InspectorHost): Child[] {
           title: 'Dossiê da cidade',
           description: 'População, mercado, indústria, logística e história em uma tela.'
         }
+      }),
+      button('+300 Comida', () => {
+        city.stock.add('food', 300);
+        city.famineYears = 0;
+        city.prosperity = Math.min(1, city.prosperity + 0.2);
+        host.ctx.toast(`🌾 Fartura Divina: +300 Comida adicionada a ${city.name}!`, 'info');
+        sound.playMagic();
+      }, {
+        variant: 'secondary', size: 'sm', icon: 'farm',
+        tooltip: { title: 'Fartura Divina', description: 'Adiciona +300 Comida instantaneamente ao armazém desta cidade.' }
       }),
       button('Centralizar', () => host.focusOn(city.x, city.y), {
         variant: 'ghost', size: 'sm', icon: 'map'
@@ -121,7 +133,37 @@ export function buildCityPanel(city: City, host: InspectorHost): Child[] {
             ])
           : statRow({ label: 'Reino', value: 'Independente', icon: 'kingdom' }),
         statRow({ label: 'Fundador', value: city.founderName, icon: 'citizen' }),
-        statRow({ label: 'Espécie', value: city.species, icon: 'population' })
+        statRow({ label: 'Espécie', value: city.species, icon: 'population' }),
+        (() => {
+          let bp = getCityBlueprint(city.blueprintId);
+          const badgeEl = badge(bp.name, { color: bp.accentColor, size: 'sm', variant: 'outline' });
+          return withTooltip(
+            el('div', {
+              class: 'ae-row',
+              style: 'cursor: pointer;',
+              on: {
+                click: () => {
+                  const allIds = ALL_BLUEPRINT_IDS;
+                  const nextIndex = (allIds.indexOf(city.blueprintId) + 1) % allIds.length;
+                  city.blueprintId = allIds[nextIndex];
+                  bp = getCityBlueprint(city.blueprintId);
+                  badgeEl.textContent = bp.name;
+                  badgeEl.style.color = bp.accentColor;
+                  host.ctx.toast(`Plano Diretor de ${city.name} alterado para [${bp.name}]!`, 'info');
+                  sound.playClick();
+                }
+              }
+            }, [
+              icon('city', { size: 16, class: 'ae-row-icon' }),
+              el('span', { class: 'ae-row-label', text: 'Plano Diretor Urbano' }),
+              badgeEl
+            ]),
+            {
+              title: `Plano Diretor: ${bp.name}`,
+              description: `${bp.subtitle}\n\n${bp.description}\n\n• Pavimentação: ${bp.pavingStyle}\n• Paisagismo: ${bp.foliagePattern}\n• Clique para alternar o estilo arquitetônico.`
+            }
+          );
+        })()
       ])
     ]),
 
@@ -258,6 +300,15 @@ export function buildKingdomPanel(kingdom: Kingdom, host: InspectorHost): Child[
           title: 'Dossiê do reino',
           description: 'Economia, sociedade, política, diplomacia, exército, infraestrutura e tecnologia em uma tela.'
         }
+      }),
+      button('+1.000 Ouro', () => {
+        kingdom.treasury.add('gold', 1000);
+        kingdom.economy.treasury += 1000;
+        host.ctx.toast(`💰 Chuva de Ouro: +1.000 Ouro adicionado ao tesouro de ${kingdom.name}!`, 'info');
+        sound.playMagic();
+      }, {
+        variant: 'secondary', size: 'sm', icon: 'coin',
+        tooltip: { title: 'Chuva de Ouro', description: 'Adiciona +1.000 Ouro instantaneamente ao tesouro deste reino.' }
       }),
       capital
         ? button('Capital', () => host.focusOn(capital.x, capital.y), {

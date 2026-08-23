@@ -130,19 +130,35 @@ export class ParticleManager {
     this.spawnParticle(x, y, '#a5f3fc', 0, 0, 0.4, 2);
   }
 
-  public spawnDamageNumber(x: number, y: number, damage: number): void {
+  public spawnDamageNumber(x: number, y: number, damage: number, style: 'normal' | 'critical' | 'heal' = 'normal'): void {
     const p = this.obtainParticle(x, y, true);
     if (!p) return;
     p.x = x;
     p.y = y;
-    p.vx = (Math.random() - 0.5) * 0.2;
-    p.vy = -0.8;
-    p.color = '#ef4444';
+    p.vx = 0;
+    p.vy = -1;
+    p.color = style === 'heal' ? '#10b981' : style === 'critical' ? '#ef4444' : '#fbbf24';
+    p.size = style === 'critical' ? 14 : 12;
+    p.alpha = 1;
+    p.life = 0;
+    p.maxLife = 0.8;
+    p.text = style === 'heal' ? `+${damage}` : `-${damage}`;
+    this.activeParticles.push(p);
+  }
+
+  public spawnHealNumber(x: number, y: number, amount: number): void {
+    const p = this.obtainParticle(x, y, true);
+    if (!p) return;
+    p.x = x;
+    p.y = y;
+    p.vx = 0;
+    p.vy = -1;
+    p.color = '#22c55e';
     p.size = 12;
     p.alpha = 1;
     p.life = 0;
     p.maxLife = 0.8;
-    p.text = `-${damage}`;
+    p.text = `+${amount}`;
     this.activeParticles.push(p);
   }
 
@@ -217,7 +233,12 @@ export class ParticleManager {
       p.life += dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      p.alpha = Math.max(0, 1 - p.life / p.maxLife);
+
+      if (p.text) {
+        p.alpha = Math.max(0, 1 - p.life / p.maxLife);
+      } else {
+        p.alpha = Math.max(0, 1 - p.life / p.maxLife);
+      }
 
       if (p.life >= p.maxLife) {
         this.activeParticles.splice(i, 1);
@@ -240,8 +261,13 @@ export class ParticleManager {
         proj.y = proj.targetY;
         this.triggerProjectileImpact(proj, i);
       } else {
+        // Ground position: linear interpolation along the start→target line
         proj.x = proj.startX + (proj.targetX - proj.startX) * proj.progress;
         proj.y = proj.startY + (proj.targetY - proj.startY) * proj.progress;
+
+        // Parabolic arc offset: sin(t*π) peaks at t=0.5, giving a smooth
+        // rise-and-fall trajectory. The renderer uses proj.arcHeight to
+        // recompute this offset for rendering the lifted sprite vs. ground shadow.
 
         // Particle trail
         if (proj.type === 'bullet') {
@@ -250,6 +276,51 @@ export class ParticleManager {
           this.spawnParticle(proj.x, proj.y, 'rgba(71, 85, 105, 0.7)', (Math.random() - 0.5) * 0.1, -0.2, 0.3, 3);
         }
       }
+    }
+  }
+
+  /**
+   * Spawn bright yellow-white sparks at a combat impact point.
+   * High initial velocity + short lifetime = sharp, snappy hit feedback.
+   */
+  public spawnImpactSparks(x: number, y: number, count: number = 5): void {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 3.0;
+      const color = Math.random() > 0.4 ? '#fde047' : '#ffffff';
+      this.spawnParticle(
+        x,
+        y,
+        color,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        0.15 + Math.random() * 0.2,
+        1.5 + Math.random() * 2
+      );
+    }
+  }
+
+  /**
+   * Spawn drifting grey smoke particles in a given direction.
+   * Used for gunpowder discharge — particles spread in the firing direction
+   * with lateral jitter and slow upward drift for a natural dissipation feel.
+   */
+  public spawnGunSmoke(x: number, y: number, dirX: number, dirY: number, count: number = 8): void {
+    for (let i = 0; i < count; i++) {
+      // Interpolate between dark (#94a3b8) and light (#e2e8f0) grey
+      const color = Math.random() > 0.5 ? '#94a3b8' : '#e2e8f0';
+      // Base drift in the firing direction + lateral jitter + upward float
+      const speed = 0.3 + Math.random() * 0.8;
+      const jitter = (Math.random() - 0.5) * 0.6;
+      this.spawnParticle(
+        x,
+        y,
+        color,
+        dirX * speed + jitter,
+        dirY * speed - 0.3 - Math.random() * 0.3,
+        0.4 + Math.random() * 0.5,
+        2.5 + Math.random() * 2
+      );
     }
   }
 }

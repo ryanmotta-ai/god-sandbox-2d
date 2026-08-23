@@ -107,7 +107,14 @@ const GROUPS: DockGroup[] = [
         label: layer.label, icon: layer.icon, description: layer.description,
         isActive: () => ctx.overlays.layers.has(layer.id),
         run: () => ctx.overlays.toggleLayer(layer.id)
-      }))
+      })),
+      {
+        label: 'Salto Temporal Divino',
+        icon: 'calendar',
+        description: 'Avança anos e séculos rapidamente mantendo toda a fidelidade da simulação.',
+        shortcut: '0',
+        run: () => ctx.screens.open('timeskip')
+      }
     ]
   },
   {

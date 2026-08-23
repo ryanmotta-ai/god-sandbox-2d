@@ -7,6 +7,7 @@ import { tileResourceToGood } from '../world/Tile';
 import { hashString, hashToUnit } from '../core/Random';
 import { outerFortification, pointInsideFortification, type FortificationLine } from './FortificationPlanner';
 import { districtAt } from './UrbanDistricts';
+import { getCityBlueprint } from './CityBlueprints';
 
 /**
  * Where a building goes.
@@ -84,51 +85,51 @@ const DEFAULT_PROFILE: UrbanProfile = {
 
 export const URBAN_PROFILES: Partial<Record<BuildingType, UrbanProfile>> = {
   // ---- Civic core: the silhouette a city is recognised by. Needs room. ----
-  town_center: { affinity: 'civic', prefersRoad: 0.9, centerPreference: 1.0, spacing: 1.6, densityTolerance: 0.7 },
-  palace: { affinity: 'civic', prefersRoad: 0.95, centerPreference: 0.92, spacing: 2.2, densityTolerance: 0.45 },
-  keep: { affinity: 'military', prefersRoad: 0.8, centerPreference: 0.8, spacing: 1.8, densityTolerance: 0.5 },
-  monument: { affinity: 'civic', prefersRoad: 0.85, centerPreference: 0.85, spacing: 2.4, densityTolerance: 0.4 },
-  great_library: { affinity: 'knowledge', prefersRoad: 0.85, centerPreference: 0.82, spacing: 2.0, densityTolerance: 0.5 },
-  colosseum: { affinity: 'civic', prefersRoad: 0.85, centerPreference: 0.75, spacing: 2.4, densityTolerance: 0.4 },
-  temple: { affinity: 'knowledge', prefersRoad: 0.7, centerPreference: 0.72, spacing: 1.5, densityTolerance: 0.6 },
-  library: { affinity: 'knowledge', prefersRoad: 0.75, centerPreference: 0.7, spacing: 1.2, densityTolerance: 0.65 },
-  academy: { affinity: 'knowledge', prefersRoad: 0.8, centerPreference: 0.72, spacing: 1.6, densityTolerance: 0.55 },
+  town_center: { affinity: 'civic', prefersRoad: 0.95, centerPreference: 1.0, spacing: 1.4, densityTolerance: 0.8 },
+  palace: { affinity: 'civic', prefersRoad: 0.95, centerPreference: 0.95, spacing: 1.8, densityTolerance: 0.6 },
+  keep: { affinity: 'military', prefersRoad: 0.85, centerPreference: 0.85, spacing: 1.6, densityTolerance: 0.6 },
+  monument: { affinity: 'civic', prefersRoad: 0.9, centerPreference: 0.9, spacing: 1.8, densityTolerance: 0.5 },
+  great_library: { affinity: 'knowledge', prefersRoad: 0.9, centerPreference: 0.88, spacing: 1.6, densityTolerance: 0.6 },
+  colosseum: { affinity: 'civic', prefersRoad: 0.9, centerPreference: 0.8, spacing: 2.0, densityTolerance: 0.5 },
+  temple: { affinity: 'knowledge', prefersRoad: 0.8, centerPreference: 0.8, spacing: 1.2, densityTolerance: 0.7 },
+  library: { affinity: 'knowledge', prefersRoad: 0.8, centerPreference: 0.75, spacing: 1.0, densityTolerance: 0.75 },
+  academy: { affinity: 'knowledge', prefersRoad: 0.85, centerPreference: 0.75, spacing: 1.4, densityTolerance: 0.65 },
 
-  // ---- Residential: clusters, wants streets, hates chimneys. ----
-  house: { affinity: 'residential', prefersRoad: 0.85, centerPreference: 0.55, spacing: 0.9, densityTolerance: 0.95 },
-  aqueduct: { affinity: 'residential', prefersRoad: 0.6, centerPreference: 0.6, spacing: 1.2, densityTolerance: 0.7 },
-  grand_aqueduct: { affinity: 'residential', prefersRoad: 0.65, centerPreference: 0.6, spacing: 1.8, densityTolerance: 0.55 },
-  granary: { affinity: 'residential', prefersRoad: 0.75, centerPreference: 0.55, spacing: 1.1, densityTolerance: 0.75 },
+  // ---- Residential: clusters tightly, wants streets, forms continuous terraces. ----
+  house: { affinity: 'residential', prefersRoad: 0.95, centerPreference: 0.65, spacing: 0.45, densityTolerance: 0.98 },
+  aqueduct: { affinity: 'residential', prefersRoad: 0.6, centerPreference: 0.6, spacing: 1.0, densityTolerance: 0.75 },
+  grand_aqueduct: { affinity: 'residential', prefersRoad: 0.65, centerPreference: 0.6, spacing: 1.4, densityTolerance: 0.65 },
+  granary: { affinity: 'residential', prefersRoad: 0.8, centerPreference: 0.5, spacing: 0.9, densityTolerance: 0.85 },
 
   // ---- Commerce: wants the busiest corner it can find. ----
-  market: { affinity: 'commercial', prefersRoad: 1.0, centerPreference: 0.85, spacing: 1.3, densityTolerance: 0.9 },
-  bank: { affinity: 'commercial', prefersRoad: 0.95, centerPreference: 0.85, spacing: 1.2, densityTolerance: 0.9 },
-  stock_exchange: { affinity: 'commercial', prefersRoad: 0.95, centerPreference: 0.88, spacing: 1.4, densityTolerance: 0.85 },
-  collective: { affinity: 'commercial', prefersRoad: 0.85, centerPreference: 0.6, spacing: 1.3, densityTolerance: 0.8 },
+  market: { affinity: 'commercial', prefersRoad: 1.0, centerPreference: 0.9, spacing: 1.0, densityTolerance: 0.95 },
+  bank: { affinity: 'commercial', prefersRoad: 0.95, centerPreference: 0.9, spacing: 1.0, densityTolerance: 0.95 },
+  stock_exchange: { affinity: 'commercial', prefersRoad: 0.95, centerPreference: 0.9, spacing: 1.2, densityTolerance: 0.9 },
+  collective: { affinity: 'commercial', prefersRoad: 0.85, centerPreference: 0.65, spacing: 1.0, densityTolerance: 0.85 },
 
   // ---- Logistics: the waterfront edge of trade. ----
-  harbor: { affinity: 'logistics', prefersRoad: 0.8, centerPreference: 0.35, spacing: 1.2, densityTolerance: 0.8 },
-  port: { affinity: 'logistics', prefersRoad: 0.85, centerPreference: 0.3, spacing: 1.6, densityTolerance: 0.75 },
+  harbor: { affinity: 'logistics', prefersRoad: 0.85, centerPreference: 0.35, spacing: 1.0, densityTolerance: 0.85 },
+  port: { affinity: 'logistics', prefersRoad: 0.9, centerPreference: 0.3, spacing: 1.4, densityTolerance: 0.8 },
 
   // ---- Industry: its own quarter, out toward the edge. ----
-  workshop: { affinity: 'industrial', prefersRoad: 0.75, centerPreference: 0.45, spacing: 1.1, densityTolerance: 0.85 },
-  smithy: { affinity: 'industrial', prefersRoad: 0.75, centerPreference: 0.4, spacing: 1.2, densityTolerance: 0.8 },
-  factory: { affinity: 'industrial', prefersRoad: 0.85, centerPreference: 0.2, spacing: 2.0, densityTolerance: 0.7 },
-  refinery: { affinity: 'industrial', prefersRoad: 0.85, centerPreference: 0.15, spacing: 2.2, densityTolerance: 0.65 },
+  workshop: { affinity: 'industrial', prefersRoad: 0.8, centerPreference: 0.45, spacing: 0.8, densityTolerance: 0.9 },
+  smithy: { affinity: 'industrial', prefersRoad: 0.8, centerPreference: 0.4, spacing: 0.9, densityTolerance: 0.85 },
+  factory: { affinity: 'industrial', prefersRoad: 0.9, centerPreference: 0.2, spacing: 1.6, densityTolerance: 0.75 },
+  refinery: { affinity: 'industrial', prefersRoad: 0.9, centerPreference: 0.15, spacing: 1.8, densityTolerance: 0.7 },
 
   // ---- Extraction: geology decides, urbanism only breaks ties. ----
-  mine: { affinity: 'extraction', prefersRoad: 0.15, centerPreference: 0.1, spacing: 1.2, densityTolerance: 0.7 },
-  quarry: { affinity: 'extraction', prefersRoad: 0.15, centerPreference: 0.1, spacing: 1.2, densityTolerance: 0.7 },
-  lumber_camp: { affinity: 'extraction', prefersRoad: 0.15, centerPreference: 0.1, spacing: 1.2, densityTolerance: 0.7 },
-  oil_well: { affinity: 'extraction', prefersRoad: 0.2, centerPreference: 0.1, spacing: 1.4, densityTolerance: 0.6 },
+  mine: { affinity: 'extraction', prefersRoad: 0.15, centerPreference: 0.05, spacing: 1.0, densityTolerance: 0.75 },
+  quarry: { affinity: 'extraction', prefersRoad: 0.15, centerPreference: 0.05, spacing: 1.0, densityTolerance: 0.75 },
+  lumber_camp: { affinity: 'extraction', prefersRoad: 0.15, centerPreference: 0.05, spacing: 1.0, densityTolerance: 0.75 },
+  oil_well: { affinity: 'extraction', prefersRoad: 0.2, centerPreference: 0.05, spacing: 1.2, densityTolerance: 0.7 },
 
-  // ---- Agriculture: the belt outside the town, wants space. ----
-  farm: { affinity: 'agricultural', prefersRoad: 0.3, centerPreference: 0.12, spacing: 1.3, densityTolerance: 0.45 },
-  pasture: { affinity: 'agricultural', prefersRoad: 0.25, centerPreference: 0.1, spacing: 1.5, densityTolerance: 0.4 },
+  // ---- Agriculture: the belt outside the town, forms outer farmland plots. ----
+  farm: { affinity: 'agricultural', prefersRoad: 0.2, centerPreference: 0.05, spacing: 0.75, densityTolerance: 0.85 },
+  pasture: { affinity: 'agricultural', prefersRoad: 0.15, centerPreference: 0.05, spacing: 0.75, densityTolerance: 0.85 },
 
   // ---- Military: on the roads, facing outward. ----
-  barracks: { affinity: 'military', prefersRoad: 0.8, centerPreference: 0.5, spacing: 1.4, densityTolerance: 0.7 },
-  wall: { affinity: 'military', prefersRoad: 0.2, centerPreference: 0.05, spacing: 0.6, densityTolerance: 1.0 }
+  barracks: { affinity: 'military', prefersRoad: 0.85, centerPreference: 0.5, spacing: 1.2, densityTolerance: 0.75 },
+  wall: { affinity: 'military', prefersRoad: 0.2, centerPreference: 0.05, spacing: 0.5, densityTolerance: 1.0 }
 };
 
 export function urbanProfile(type: BuildingType): UrbanProfile {
@@ -362,8 +363,20 @@ function plannedStreetAt(city: City, stage: UrbanGrowthStage, blockSize: number,
   const dx = x - Math.floor(city.x), dy = y - Math.floor(city.y);
   const distance = Math.hypot(dx, dy);
   if (distance > radius) return null;
-  // The two axes are the historical high streets. Secondary streets appear
-  // only as the settlement grows and use a stagger that avoids a sterile grid.
+
+  // Blueprint street lookup
+  if (city.blueprintId) {
+    const bp = getCityBlueprint(city.blueprintId);
+    const bpStreet = bp.streetMap.get(`${dx},${dy}`);
+    if (bpStreet) {
+      if (!bpStreet.minStage || stage === 'city' || stage === 'great_city' || (bpStreet.minStage === 'village' && stage !== 'camp')) {
+        return bpStreet.streetClass;
+      }
+    }
+    return null;
+  }
+
+  // The two axes are the historical high streets for non-blueprint cities.
   if (dx === 0 || dy === 0) return 'primary';
   if (stage === 'camp') return null;
   const irregularity = city.architecturalProfile?.urbanForm.irregularity ?? .35;
@@ -963,6 +976,22 @@ export class UrbanPlanner {
     const urbanFormScore = scoreUrbanForm(ctx, def.type, profile, tileMap, x, y);
     const historicalGrowthScore = scoreHistoricalGrowth(ctx, profile, x, y);
 
+    // Blueprint slot affinity bonus
+    let blueprintBonus = 0;
+    if (ctx.city.blueprintId) {
+      const bp = getCityBlueprint(ctx.city.blueprintId);
+      const dx = x - Math.floor(ctx.centerX);
+      const dy = y - Math.floor(ctx.centerY);
+      const slot = bp.slotMap.get(`${dx},${dy}`);
+      if (slot) {
+        if (slot.preferredBuildings?.includes(def.type)) {
+          blueprintBonus += 180 + slot.importance * 15;
+        } else if (slot.affinity === profile.affinity) {
+          blueprintBonus += 130 + slot.importance * 10;
+        }
+      }
+    }
+
     // A deterministic hair of noise so two equally-good tiles don't always
     // resolve the same way, without ever using Math.random.
     const jitter = (hashToUnit(hashString(ctx.city.id), x, y) - 0.5) * 4;
@@ -979,6 +1008,7 @@ export class UrbanPlanner {
       frontageScore +
       urbanFormScore +
       historicalGrowthScore +
+      blueprintBonus +
       jitter;
 
     return {

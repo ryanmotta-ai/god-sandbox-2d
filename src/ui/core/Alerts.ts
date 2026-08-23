@@ -562,6 +562,19 @@ export class AlertCenter {
       this.note(name ? `Aliança forjada: ${name}` : `${a?.name ?? 'Um reino'} e ${b?.name ?? 'outro'} se aliam`, 'diplomacy');
     });
 
+    // A pact breaking is at least as much news as a pact forming, and until now
+    // only one of the two could ever reach the player.
+    events.on('allianceLeft', (d: any) => {
+      const k = this.asKingdom(d?.kingdomId);
+      const name = d?.alliance?.name;
+      this.note(`${k?.name ?? 'Um reino'} abandonou ${name ? `a ${name}` : 'sua aliança'}`, 'diplomacy');
+    });
+
+    events.on('allianceDissolved', (d: any) => {
+      const name = d?.alliance?.name;
+      this.note(name ? `A ${name} foi dissolvida` : 'Uma aliança se desfez', 'diplomacy');
+    });
+
     events.on('techDiscovered', (d: any) => {
       const k = this.asKingdom(d?.kingdom);
       const tech = d?.tech?.name ?? d?.tech;

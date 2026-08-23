@@ -474,10 +474,10 @@ export class WarfareSystem {
       }
 
       const unassigned = liveSoldiers.filter(s => !this.getArmyForSoldier(s.id));
-      if (unassigned.length > 0) {
+      for (const s of unassigned) {
         let army = [...this.armies.values()].find(a => a.kingdomId === kingdom.id && !a.isMercenary && a.soldierIds.size < 20);
         if (!army) {
-          const city = world.cities.get(unassigned[0].cityId ?? '') ?? world.cities.get(kingdom.capitalCityId);
+          const city = world.cities.get(s.cityId ?? '') ?? world.cities.get(kingdom.capitalCityId);
           const armyCount = [...this.armies.values()].filter(a => a.kingdomId === kingdom.id).length + 1;
           const armyName = `${armyCount}º Regimento de ${city?.name ?? kingdom.name}`;
           const armyId = nextId('army');
@@ -502,10 +502,7 @@ export class WarfareSystem {
           this.armies.set(armyId, army);
           kingdom.armyIds.add(armyId);
         }
-
-        for (const s of unassigned) {
-          army.soldierIds.add(s.id);
-        }
+        army.soldierIds.add(s.id);
       }
 
       for (const armyId of kingdom.armyIds) {

@@ -4,6 +4,15 @@ import type { GoodId } from './Goods';
 
 export type DiplomaticStatus = 'neutral' | 'friendly' | 'hostile' | 'war' | 'alliance';
 
+/**
+ * The standing below which a realm stops behaving like an ally: it will not march
+ * in its bloc's defensive wars, and it walks out of the bloc entirely.
+ *
+ * Well below the +62 `CivilizationEngine` requires to form a pact, so the two
+ * thresholds cannot chase each other.
+ */
+const ALLIANCE_FLOOR = 20;
+
 export interface Alliance {
   id: string;
   name: string;
@@ -136,10 +145,27 @@ export class DiplomacyManager {
     });
   }
 
-  public declareWar(k1: string, k2: string, year: number, reason: string = 'Territorial Dispute', goal?: WarGoal): boolean {
+  /**
+   * `force` voids a standing truce instead of being refused by it.
+   *
+   * The player's own "declare war" button had no way to say this, so a truce
+   * signed by two realms silently refused a divine intervention — and the panel
+   * reported it as "these realms are already at war", which was not true and left
+   * nothing to do about it. Every other button on that panel forces its outcome;
+   * this one now can too. A war voids the truce it breaks, so the record goes.
+   */
+  public declareWar(
+    k1: string,
+    k2: string,
+    year: number,
+    reason: string = 'Territorial Dispute',
+    goal?: WarGoal,
+    force: boolean = false
+  ): boolean {
     if (k1 === k2) return false;
     const rebellion = /rebellion|secession|independence|revolta/i.test(reason);
-    if (!rebellion && this.hasTruce(k1, k2, year)) return false;
+    if (force) this.truces.delete(this.getPairKey(k1, k2));
+    else if (!rebellion && this.hasTruce(k1, k2, year)) return false;
     const key = this.getPairKey(k1, k2);
     if (!this.activeWars.has(key)) {
       const defaultGoal: WarGoal = goal ?? this.deriveDefaultWarGoal(k1, k2, reason);
@@ -207,6 +233,25 @@ export class DiplomacyManager {
     if (defenderAlliance) {
       for (const memberId of defenderAlliance.members) {
         if (memberId === defenderId || memberId === attackerId) continue;
+        /**
+         * A mutual defence pact still has two conditions, and the defensive
+         * call-up used to check neither while the offensive one below checked
+         * both.
+         *
+         * A signed truce is a signed truce. `settleWar` was fixed to give every
+         * ally dragged into a war its own truce with the other side — and then
+         * this loop ignored them, so the year after a peace the whole coalition
+         * was called straight back in against realms it had just come to terms
+         * with. That is the half of the post-peace-eternal-war fix that never
+         * landed.
+         *
+         * And a realm that has drifted into contempt for its protector does not
+         * march for it. Without that floor, the pact obliged a realm at -60 to
+         * bleed for its ally and be slammed to -80 against the attacker for the
+         * trouble — the ratchet that made a coalition permanent.
+         */
+        if (this.hasTruce(memberId, attackerId, year)) continue;
+        if (this.getRelation(memberId, defenderId) < ALLIANCE_FLOOR) continue;
         if (!war.defenderAllies.includes(memberId)) {
           war.defenderAllies.push(memberId);
           this.setRelation(memberId, attackerId, -80);
@@ -326,7 +371,11 @@ export class DiplomacyManager {
       alliance.members.add(k2);
     } else {
       alliance = {
-        id: `all_${Date.now()}`,
+        // `nextId`, not the wall clock. Two leagues founded in the same
+        // millisecond used to collide on one id, and a world replayed from the
+        // same seed produced different ones every run — which the war record two
+        // methods up already knew, and used `nextId('war')` for.
+        id: nextId('all'),
         name,
         members: new Set([k1, k2]),
         formedYear: year
@@ -356,6 +405,60 @@ export class DiplomacyManager {
     return null;
   }
 
+  /**
+   * An alliance its members no longer want ends.
+   *
+   * `CivilizationEngine` has always claimed this happens — "their pact is stable
+   * unless the negatives above pull it down (then it can dissolve)" — and clamps
+   * allied drift to its negative half on the strength of that claim. Nothing
+   * dissolved anything. A bloc formed at +62 kept every member for the rest of
+   * the world's life while their relations rotted toward -100, and the call-up
+   * below went on conscripting realms into wars for allies they had come to
+   * detest. That is the eternal-coalition trap, and it is why the same two
+   * realms could end up fighting the same war forever.
+   *
+   * A realm leaves when it stands below the floor with *most* of the bloc, which
+   * is a deliberately different test from the obvious one. Averaging the relations
+   * looks right and is wrong: in a league of three where one member has soured to
+   * -70, that single figure drags everyone else's average under the floor too, and
+   * the whole league dissolves instead of expelling the one realm that left it.
+   * Counting how many bloc-mates a realm has fallen out with keeps the asymmetry
+   * that matters — the realm that hates everyone goes, the realm with one bad
+   * neighbour and two good ones stays.
+   *
+   * The floor sits far below the +62 a pact needs to form, and that gap is the
+   * point: a treaty should be slow to make and slow to break, never flapping
+   * across the line on a point of drift.
+   */
+  public dissolveStrainedAlliances(year: number): void {
+    for (const alliance of [...this.alliances.values()]) {
+      const members = [...alliance.members];
+
+      // Every member is judged against the bloc as it stood when the pass began,
+      // so who leaves cannot depend on the order the set happens to iterate in.
+      const leaving = members.filter(member => {
+        const others = members.filter(m => m !== member);
+        if (others.length === 0) return true;
+        let fallenOut = 0;
+        for (const other of others) {
+          if (this.getRelation(member, other) < ALLIANCE_FLOOR) fallenOut++;
+        }
+        return fallenOut * 2 > others.length;
+      });
+
+      for (const member of leaving) {
+        alliance.members.delete(member);
+        events.emit('allianceLeft', { alliance, kingdomId: member, year });
+      }
+
+      // A pact of one is not a pact.
+      if (alliance.members.size < 2) {
+        this.alliances.delete(alliance.id);
+        events.emit('allianceDissolved', { alliance, year });
+      }
+    }
+  }
+
   /** Diplomacy tick - natural drift, war declarations, peace treaties */
   public tickDiplomacy(kingdomIds: string[], year: number): void {
     const ids = [...kingdomIds];
@@ -381,12 +484,30 @@ export class DiplomacyManager {
           continue;
         }
 
-        if (this.hasTruce(k1, k2, year)) continue;
+        // Not a test — `getTruce` prunes on read, so this *is* the yearly expiry
+        // sweep and the return value is deliberately thrown away. It used to be
+        // written as `if (hasTruce(...)) continue;` on the last line of the loop,
+        // which reads exactly like dead code you are welcome to delete.
+        this.hasTruce(k1, k2, year);
       }
     }
+
+    // Blocs are judged once a year, after the drift above has moved the relations
+    // the decision is made on.
+    this.dissolveStrainedAlliances(year);
   }
 
-  /** One of N stable pair buckets per simulation tick, eliminating O(R²) spikes. */
+  /**
+   * One of N stable pair buckets per simulation tick, eliminating O(R²) spikes.
+   *
+   * Nothing outside this file calls this. `tickDiplomacy` above is the live path —
+   * `EntityAI` drives it once a year — and this is a second copy of the same drift
+   * and peace rules that has never run. Left in place rather than deleted because
+   * it is somebody's unfinished work, but noted here for two reasons: the two
+   * copies will drift apart the first time one is tuned, and whoever wires this up
+   * has to call `dissolveStrainedAlliances` once a year themselves, because a bloc
+   * cannot be judged from inside a per-pair bucket.
+   */
   public tickDiplomacySlice(kingdomIds: string[], year: number, phase: number, buckets: number = 10): void {
     if (kingdomIds !== this.scheduledSource) {
       const sorted = [...kingdomIds].sort();

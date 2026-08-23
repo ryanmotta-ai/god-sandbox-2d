@@ -16,6 +16,9 @@ import type { Kingdom } from '../civ/Kingdom';
 import type { Tile } from '../world/Tile';
 import { TERRAINS } from '../world/Biomes';
 import { UrbanDistrictPlanner } from '../civ/UrbanDistricts';
+import type { DiplomacyManager } from '../civ/Diplomacy';
+import type { ToastType } from '../ui/components/Toasts';
+import { TECHNOLOGIES } from '../civ/TechTree';
 
 export const ALL_POWERS: PowerDefinition[] = [
   // TERRENO & ALTIMETRIA
@@ -51,7 +54,11 @@ export const ALL_POWERS: PowerDefinition[] = [
   { id: 'spawn_mammoth', name: 'Mamute Ancião', category: 'life', icon: 'lion', description: 'Gigante ancião da tundra gelada' },
   { id: 'spawn_dragon', name: 'Dragão Ancião', category: 'life', icon: 'dragon', description: 'Monstro Chefe lendário cuspidor de fogo' },
 
-  // MILAGRES DIVINOS
+  // MILAGRES DIVINOS & RECURSOS
+  { id: 'grant_food', name: 'Fartura Divina', category: 'divine', icon: 'farm', description: 'Abastece a cidade com +300 Comida e zera a fome' },
+  { id: 'grant_gold', name: 'Chuva de Ouro', category: 'divine', icon: 'coin', description: 'Concede +1.000 Ouro ao Tesouro Real do reino' },
+  { id: 'grant_materials', name: 'Dádiva de Materiais', category: 'divine', icon: 'crate', description: 'Entrega Madeira, Pedra, Ferro e Ferramentas à cidade' },
+  { id: 'grant_science', name: 'Iluminação Científica', category: 'divine', icon: 'flask', description: 'Concede +1.000 pontos de ciência e avança pesquisas' },
   { id: 'heal', name: 'Cura Divina', category: 'divine', icon: 'heart', description: 'Restaura a vida total das criaturas' },
   { id: 'bless', name: 'Bênção Celestial', category: 'divine', icon: 'sun', description: 'Concede a bênção divina (+25% HP máx)' },
   { id: 'curse', name: 'Maldição Sombria', category: 'divine', icon: 'moon', description: 'Amaldiçoa com fraqueza (-30% HP máx)' },
@@ -59,6 +66,13 @@ export const ALL_POWERS: PowerDefinition[] = [
   { id: 'peace_touch', name: 'Toque de Paz', category: 'divine', icon: 'handshake', description: 'Concede índole pacifista que evita combates' },
   { id: 'make_immortal', name: 'Imortalidade', category: 'divine', icon: 'crown', description: 'Concede vida eterna sem envelhecimento' },
   { id: 'add_giant', name: 'Força Titânica', category: 'divine', icon: 'shield', description: 'Transforma em gigante com super força física' },
+  { id: 'instant_build', name: 'Milagre Arquitetônico', category: 'divine', icon: 'building', description: 'Conclui obras e restaura 100% de HP em edifícios' },
+  { id: 'divine_fertility', name: 'Surto de Fertilidade', category: 'divine', icon: 'heart', description: 'Estimula novos nascimentos imediatos na cidade' },
+
+  // GEOPOLÍTICA & GUERRA
+  { id: 'incite_war', name: 'Incitar Guerra Divina', category: 'divine', icon: 'swords', description: '1º clique: Atacante · 2º clique: Alvo para declarar guerra' },
+  { id: 'force_peace', name: 'Paz Celestial', category: 'divine', icon: 'handshake', description: 'Encerra imediatamente todas as guerras ativas do reino' },
+  { id: 'force_alliance', name: 'Pacto Sagrado', category: 'divine', icon: 'crown', description: '1º clique: Reino A · 2º clique: Reino B para selar aliança eterna' },
 
   // DESASTRES & CATACLISMOS
   { id: 'lightning', name: 'Raio Divino', category: 'destruction', icon: 'lightning', description: 'Atinge o alvo com relâmpago de alta voltagem' },
@@ -77,6 +91,10 @@ export const ALL_POWERS: PowerDefinition[] = [
 export interface TerraformContext {
   cities: Map<string, City>;
   kingdoms: Map<string, Kingdom>;
+  diplomacy?: DiplomacyManager;
+  currentYear?: number;
+  toast?: (message: string, type?: ToastType) => void;
+  camera?: Camera;
 }
 
 /** How far a divine act is felt by the settlements that witness it. */
@@ -279,6 +297,8 @@ function spawnAcrossBrush(
 }
 
 export class PowerExecutor {
+  public static pendingBilateral: { powerId: string; sourceKingdomId: string } | null = null;
+
   public static executePower(
     powerId: string,
     tx: number,
@@ -454,7 +474,11 @@ export class PowerExecutor {
       case 'heal': {
         const targets = spatialHash.queryRadius(tx, ty, radius);
         for (const e of targets) {
+          const healed = e.maxHp - e.hp;
           e.hp = e.maxHp;
+          if (healed > 0) {
+            particles.spawnDamageNumber(e.x, e.y, Math.round(healed), 'heal');
+          }
           particles.spawnParticle(e.x, e.y, '#34d399', 0, -0.5, 0.5);
         }
         break;
@@ -495,6 +519,327 @@ export class PowerExecutor {
       case 'add_giant': {
         const targets = spatialHash.queryRadius(tx, ty, radius);
         for (const e of targets) e.addTrait(TraitId.GIANT);
+        break;
+      }
+
+      // NOVO: RECURSOS & ABUNDÂNCIA
+      case 'grant_food': {
+        let city = tile.cityId && terraform ? terraform.cities.get(tile.cityId) : null;
+        if (!city && terraform) {
+          let minDist = radius + 4;
+          for (const c of terraform.cities.values()) {
+            const dist = Math.hypot(c.x - tx, c.y - ty);
+            if (dist < minDist) { minDist = dist; city = c; }
+          }
+        }
+        if (city) {
+          sound.playMagic();
+          city.stock.add('food', 300);
+          city.famineYears = 0;
+          city.prosperity = Math.min(1, city.prosperity + 0.3);
+          for (let i = 0; i < 16; i++) {
+            particles.spawnParticle(city.x + rng.range(-2, 2), city.y + rng.range(-2, 2), '#22c55e', 0, -0.6, 0.6);
+          }
+          terraform?.toast?.(`🌾 Fartura Divina: +300 Comida abastecida em ${city.name}!`, 'info');
+        } else {
+          terraform?.toast?.('Clique sobre o território de uma cidade para conceder comida.', 'warning');
+        }
+        break;
+      }
+
+      case 'grant_gold': {
+        let city = tile.cityId && terraform ? terraform.cities.get(tile.cityId) : null;
+        let kingdom = tile.kingdomId && terraform ? terraform.kingdoms.get(tile.kingdomId) : null;
+        if (!kingdom && city?.kingdomId && terraform) kingdom = terraform.kingdoms.get(city.kingdomId) ?? null;
+        if (!kingdom && terraform) {
+          let minDist = radius + 5;
+          for (const k of terraform.kingdoms.values()) {
+            const cap = terraform.cities.get(k.capitalCityId);
+            if (cap) {
+              const dist = Math.hypot(cap.x - tx, cap.y - ty);
+              if (dist < minDist) { minDist = dist; kingdom = k; }
+            }
+          }
+        }
+        if (kingdom) {
+          sound.playMagic();
+          kingdom.treasury.add('gold', 1000);
+          kingdom.economy.treasury += 1000;
+          if (city) city.economicOutput += 200;
+          const px = city?.x ?? tx;
+          const py = city?.y ?? ty;
+          for (let i = 0; i < 18; i++) {
+            particles.spawnParticle(px + rng.range(-2, 2), py + rng.range(-2, 2), '#fbbf24', 0, -0.6, 0.6);
+          }
+          terraform?.toast?.(`💰 Chuva de Ouro: +1.000 Ouro concedido ao Tesouro de ${kingdom.name}!`, 'info');
+        } else {
+          terraform?.toast?.('Clique sobre um reino ou cidade para conceder ouro ao tesouro.', 'warning');
+        }
+        break;
+      }
+
+      case 'grant_materials': {
+        let city = tile.cityId && terraform ? terraform.cities.get(tile.cityId) : null;
+        if (!city && terraform) {
+          let minDist = radius + 4;
+          for (const c of terraform.cities.values()) {
+            const dist = Math.hypot(c.x - tx, c.y - ty);
+            if (dist < minDist) { minDist = dist; city = c; }
+          }
+        }
+        if (city) {
+          sound.playMagic();
+          city.stock.add('wood', 150);
+          city.stock.add('stone', 150);
+          city.stock.add('iron', 80);
+          city.stock.add('tools', 50);
+          for (let i = 0; i < 16; i++) {
+            particles.spawnParticle(city.x + rng.range(-2, 2), city.y + rng.range(-2, 2), '#94a3b8', 0, -0.6, 0.6);
+          }
+          terraform?.toast?.(`📦 Dádiva de Materiais: Madeira, Pedra, Ferro e Ferramentas entregues a ${city.name}!`, 'info');
+        } else {
+          terraform?.toast?.('Clique sobre uma cidade para conceder materiais de construção.', 'warning');
+        }
+        break;
+      }
+
+      case 'grant_science': {
+        let kingdom = tile.kingdomId && terraform ? terraform.kingdoms.get(tile.kingdomId) : null;
+        if (!kingdom && tile.cityId && terraform) {
+          const city = terraform.cities.get(tile.cityId);
+          if (city?.kingdomId) kingdom = terraform.kingdoms.get(city.kingdomId) ?? null;
+        }
+        if (kingdom) {
+          sound.playMagic();
+          kingdom.research.progress += 1000;
+          if (kingdom.research.current) {
+            const techDef = TECHNOLOGIES[kingdom.research.current];
+            const techId = kingdom.research.current;
+            kingdom.research.complete(techId);
+            terraform?.toast?.(`💡 Iluminação Científica: Tecnologia [${techDef?.name ?? techId}] descoberta em ${kingdom.name}!`, 'info');
+          } else {
+            const available = kingdom.research.availableTechs();
+            if (available.length > 0) {
+              kingdom.research.complete(available[0].id);
+              terraform?.toast?.(`💡 Iluminação Científica: [${available[0].name}] descoberta em ${kingdom.name}!`, 'info');
+            } else {
+              terraform?.toast?.(`💡 Iluminação Científica: +1.000 ciência concedida a ${kingdom.name}!`, 'info');
+            }
+          }
+          for (let i = 0; i < 18; i++) {
+            particles.spawnParticle(tx + rng.range(-2, 2), ty + rng.range(-2, 2), '#a855f7', 0, -0.7, 0.7);
+          }
+        } else {
+          terraform?.toast?.('Clique sobre o território de um reino para avançar suas pesquisas.', 'warning');
+        }
+        break;
+      }
+
+      case 'instant_build': {
+        let city = tile.cityId && terraform ? terraform.cities.get(tile.cityId) : null;
+        if (!city && terraform) {
+          let minDist = radius + 4;
+          for (const c of terraform.cities.values()) {
+            const dist = Math.hypot(c.x - tx, c.y - ty);
+            if (dist < minDist) { minDist = dist; city = c; }
+          }
+        }
+        if (city) {
+          sound.playMagic();
+          let repaired = 0;
+          for (const b of city.buildings.values()) {
+            b.hp = b.maxHp;
+            b.lifecycleState = 'normal';
+            b.lifecycleProgress = 1;
+            b.natureReclaim = 0;
+            repaired++;
+          }
+          city.prosperity = Math.min(1, city.prosperity + 0.2);
+          for (let i = 0; i < 16; i++) {
+            particles.spawnParticle(city.x + rng.range(-2, 2), city.y + rng.range(-2, 2), '#fbbf24', 0, -0.5, 0.5);
+          }
+          terraform?.toast?.(`🔨 Milagre Arquitetônico: ${repaired} edifícios concluídos e restaurados em ${city.name}!`, 'info');
+        } else {
+          terraform?.toast?.('Clique sobre uma cidade para concluir e reparar todas as construções.', 'warning');
+        }
+        break;
+      }
+
+      case 'divine_fertility': {
+        let city = tile.cityId && terraform ? terraform.cities.get(tile.cityId) : null;
+        if (!city && terraform) {
+          let minDist = radius + 4;
+          for (const c of terraform.cities.values()) {
+            const dist = Math.hypot(c.x - tx, c.y - ty);
+            if (dist < minDist) { minDist = dist; city = c; }
+          }
+        }
+        if (city) {
+          sound.playMagic();
+          const count = Math.min(12, Math.max(3, Math.floor(city.population * 0.25) || 4));
+          for (let i = 0; i < count; i++) {
+            spawnEntityFn(city.species ?? SpeciesType.HUMAN, city.x + rng.range(-1, 1), city.y + rng.range(-1, 1));
+          }
+          for (let i = 0; i < 16; i++) {
+            particles.spawnParticle(city.x + rng.range(-2, 2), city.y + rng.range(-2, 2), '#ec4899', 0, -0.7, 0.6);
+          }
+          terraform?.toast?.(`💖 Surto de Fertilidade: +${count} novos colonos nasceram em ${city.name}!`, 'info');
+        } else {
+          terraform?.toast?.('Clique sobre uma cidade para estimular nascimentos.', 'warning');
+        }
+        break;
+      }
+
+      // NOVO: GEOPOLÍTICA & DIPLOMACIA BILATERAL
+      case 'incite_war': {
+        if (!terraform?.diplomacy || !terraform.kingdoms) {
+          terraform?.toast?.('Diplomacia não disponível no momento.', 'warning');
+          break;
+        }
+        let kingdom = tile.kingdomId ? terraform.kingdoms.get(tile.kingdomId) : null;
+        if (!kingdom && tile.cityId) {
+          const city = terraform.cities.get(tile.cityId);
+          if (city?.kingdomId) kingdom = terraform.kingdoms.get(city.kingdomId) ?? null;
+        }
+
+        if (!kingdom) {
+          terraform.toast?.('Clique sobre o território de um reino para selecioná-lo.', 'warning');
+          break;
+        }
+
+        if (!PowerExecutor.pendingBilateral || PowerExecutor.pendingBilateral.powerId !== 'incite_war') {
+          PowerExecutor.pendingBilateral = { powerId: 'incite_war', sourceKingdomId: kingdom.id };
+          sound.playClick();
+          terraform.toast?.(`⚔️ 1/2: Atacante selecionado: [${kingdom.name}]. Agora clique no REINO ALVO para declarar guerra!`, 'info');
+          for (let i = 0; i < 14; i++) {
+            particles.spawnParticle(tx + rng.range(-2, 2), ty + rng.range(-2, 2), '#ef4444', 0, -0.6, 0.6);
+          }
+        } else {
+          const attackerId = PowerExecutor.pendingBilateral.sourceKingdomId;
+          const defenderId = kingdom.id;
+          PowerExecutor.pendingBilateral = null;
+
+          if (attackerId === defenderId) {
+            terraform.toast?.('Um reino não pode declarar guerra contra si mesmo. Seleção cancelada.', 'warning');
+            break;
+          }
+
+          const attacker = terraform.kingdoms.get(attackerId);
+          const defender = terraform.kingdoms.get(defenderId);
+          if (!attacker || !defender) break;
+
+          const year = terraform.currentYear ?? 1;
+          const success = terraform.diplomacy.declareWar(attacker.id, defender.id, year, 'Incitação Divina');
+          if (success) {
+            sound.playThunder();
+            terraform.camera?.triggerShake(10, 0.5);
+            terraform.toast?.(`🔥 GUERRA DECLARADA! [${attacker.name}] marchou contra [${defender.name}] por decreto divino!`, 'disaster');
+          } else {
+            terraform.toast?.(`[${attacker.name}] e [${defender.name}] já estão em guerra ou sob trégua inviolável.`, 'warning');
+          }
+        }
+        break;
+      }
+
+      case 'force_peace': {
+        if (!terraform?.diplomacy || !terraform.kingdoms) {
+          terraform?.toast?.('Diplomacia não disponível.', 'warning');
+          break;
+        }
+        let kingdom = tile.kingdomId ? terraform.kingdoms.get(tile.kingdomId) : null;
+        if (!kingdom && tile.cityId) {
+          const city = terraform.cities.get(tile.cityId);
+          if (city?.kingdomId) kingdom = terraform.kingdoms.get(city.kingdomId) ?? null;
+        }
+
+        if (!kingdom) {
+          terraform.toast?.('Clique sobre um reino envolvido em guerra para forçar a paz.', 'warning');
+          break;
+        }
+
+        const activeWars = Array.from(terraform.diplomacy.activeWars.values()).filter(
+          w => w.attacker === kingdom!.id || w.defender === kingdom!.id ||
+               w.attackerAllies.includes(kingdom!.id) || w.defenderAllies.includes(kingdom!.id)
+        );
+
+        if (activeWars.length === 0) {
+          terraform.toast?.(`O reino [${kingdom.name}] já está em paz com todos os vizinhos.`, 'info');
+          break;
+        }
+
+        sound.playMagic();
+        const year = terraform.currentYear ?? 1;
+        for (const war of activeWars) {
+          terraform.diplomacy.recordTruce(war.attacker, war.defender, year, 10, 'Paz Celestial Divina');
+          terraform.diplomacy.activeWars.delete(`${war.attacker < war.defender ? war.attacker : war.defender}:${war.attacker < war.defender ? war.defender : war.attacker}`);
+          terraform.diplomacy.setRelation(war.attacker, war.defender, 20);
+        }
+        for (const city of terraform.cities.values()) {
+          if (city.kingdomId === kingdom.id) {
+            city.besiegerId = null;
+            city.siegeState = null;
+            city.siegeProgress = 0;
+          }
+        }
+        for (let i = 0; i < 20; i++) {
+          particles.spawnParticle(tx + rng.range(-3, 3), ty + rng.range(-3, 3), '#38bdf8', 0, -0.6, 0.8);
+        }
+        terraform.toast?.(`🕊️ Paz Celestial: Todas as guerras de [${kingdom.name}] foram encerradas por intervenção divina!`, 'info');
+        break;
+      }
+
+      case 'force_alliance': {
+        if (!terraform?.diplomacy || !terraform.kingdoms) {
+          terraform?.toast?.('Diplomacia não disponível.', 'warning');
+          break;
+        }
+        let kingdom = tile.kingdomId ? terraform.kingdoms.get(tile.kingdomId) : null;
+        if (!kingdom && tile.cityId) {
+          const city = terraform.cities.get(tile.cityId);
+          if (city?.kingdomId) kingdom = terraform.kingdoms.get(city.kingdomId) ?? null;
+        }
+
+        if (!kingdom) {
+          terraform.toast?.('Clique sobre um reino para formar aliança.', 'warning');
+          break;
+        }
+
+        if (!PowerExecutor.pendingBilateral || PowerExecutor.pendingBilateral.powerId !== 'force_alliance') {
+          PowerExecutor.pendingBilateral = { powerId: 'force_alliance', sourceKingdomId: kingdom.id };
+          sound.playClick();
+          terraform.toast?.(`🤝 1/2: Primeiro aliado: [${kingdom.name}]. Agora clique no SEGUNDO REINO para selar o Pacto Sagrado!`, 'info');
+          for (let i = 0; i < 14; i++) {
+            particles.spawnParticle(tx + rng.range(-2, 2), ty + rng.range(-2, 2), '#f59e0b', 0, -0.6, 0.6);
+          }
+        } else {
+          const k1Id = PowerExecutor.pendingBilateral.sourceKingdomId;
+          const k2Id = kingdom.id;
+          PowerExecutor.pendingBilateral = null;
+
+          if (k1Id === k2Id) {
+            terraform.toast?.('Um reino não pode formar aliança consigo mesmo. Seleção cancelada.', 'warning');
+            break;
+          }
+
+          const k1 = terraform.kingdoms.get(k1Id);
+          const k2 = terraform.kingdoms.get(k2Id);
+          if (!k1 || !k2) break;
+
+          sound.playMagic();
+          terraform.diplomacy.setRelation(k1.id, k2.id, 100);
+          const allianceId = `alliance_${Date.now()}`;
+          terraform.diplomacy.alliances.set(allianceId, {
+            id: allianceId,
+            name: `Pacto Sagrado de ${k1.name.split(' ').pop()} e ${k2.name.split(' ').pop()}`,
+            members: new Set([k1.id, k2.id]),
+            formedYear: terraform.currentYear ?? 1
+          });
+
+          for (let i = 0; i < 20; i++) {
+            particles.spawnParticle(tx + rng.range(-2, 2), ty + rng.range(-2, 2), '#f59e0b', 0, -0.6, 0.7);
+          }
+          terraform.toast?.(`👑 Pacto Sagrado: Aliança eterna selada entre [${k1.name}] e [${k2.name}]!`, 'info');
+        }
         break;
       }
 

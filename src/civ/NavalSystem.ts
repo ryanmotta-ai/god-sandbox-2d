@@ -24,6 +24,8 @@ export interface ShipTierConfig {
   minEraOrder: number; // 0: Stone/Bronze, 1: Iron, 2: Classical/Industrial, 3: Modern
   color: string;
   description: string;
+  /** Wood required to build this vessel when launching a route. */
+  woodCost?: number;
 }
 
 /**
@@ -44,6 +46,7 @@ export const SHIP_TIERS: ShipTierConfig[] = [
     fuelPerTick: 0,
     minEraOrder: 0,
     color: '#b45309',
+    woodCost: 5,
     description: 'Embarcação costeira leve de madeira para pesca e trocas locais. Sem combustível.'
   },
   {
@@ -200,6 +203,17 @@ export class NavalSystem {
         const seaPath = SimplePathfinder.findPath(startPos.x, startPos.y, endPos.x, endPos.y, tileMap, 'sea', 3000, hashString(route.id));
 
         if (seaPath.length === 0) continue;
+
+        // Build cost verification: canoes and ships consume real timber from the departure port
+        const woodRequired = tierConfig.woodCost ?? (tierConfig.tier === 1 ? 5 : 0);
+        if (woodRequired > 0) {
+          if (fromCity.stock.get('wood') < woodRequired) {
+            continue; // Wait until settlement harvests enough wood to build the vessel
+          }
+          fromCity.stock.take('wood', woodRequired);
+          fromCity.ledger.recordConsumed('wood', woodRequired);
+        }
+
         ship = {
           id: route.id,
           routeId: route.id,

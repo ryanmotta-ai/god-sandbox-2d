@@ -26,6 +26,7 @@ import { CARAVAN_FRAMES, CARAVAN_PX, STRIDE_TILES, caravanSprite, type CaravanVi
 import type { SpatialHash } from '../core/SpatialHash';
 import { perfProfiler } from '../perf/PerformanceProfiler';
 import { BUILDING_DRAW_SCALE } from './CityVisualResolver';
+import { getCityBlueprint } from '../civ/CityBlueprints';
 
 /**
  * What per-frame work a water tile actually needs, one byte per tile.
@@ -405,83 +406,73 @@ export class PixelRenderer {
     height: number,
     tileSize: number
   ): void {
-    if (tileSize < 8 || city.buildings.size === 0) return;
+    if (tileSize < 5 || city.buildings.size === 0) return;
 
     const anchor = this.getCityAnchor(city);
     const center = camera.worldToScreen(anchor.x, anchor.y, width, height);
-    const score = this.cityTierScore(city);
-    const style = SPECIES_DEFINITIONS[city.species].urbanGridStyle ?? 'concentric_rings';
-    const pathColor = city.prosperity >= 0.66 ? 'rgba(203, 186, 129, 0.22)'
-      : city.prosperity <= 0.35 ? 'rgba(99, 74, 45, 0.18)'
-      : 'rgba(154, 132, 92, 0.18)';
-    const plazaColor = k ? `${k.color}22` : 'rgba(255,255,255,0.06)';
-    const radius = tileSize * (1.2 + score * 0.55 + Math.min(1.4, city.buildings.size * 0.035));
+    const bp = getCityBlueprint(city.blueprintId);
+    const prosperity = city.prosperity ?? 0.5;
 
-    // Urban core / district tint.
     this.ctx.save();
-    this.ctx.fillStyle = plazaColor;
-    this.ctx.beginPath();
-    this.ctx.ellipse(center.x + tileSize * 0.5, center.y + tileSize * 0.55, radius * 1.05, radius * 0.72, 0, 0, Math.PI * 2);
-    this.ctx.fill();
 
-    // Species-specific street grammar.
-    this.ctx.strokeStyle = pathColor;
-    this.ctx.lineWidth = Math.max(1, tileSize * 0.08);
-    if (style === 'concentric_rings') {
-      for (let r = 1; r <= Math.min(3, score); r++) {
-        this.ctx.beginPath();
-        this.ctx.ellipse(center.x + tileSize * 0.5, center.y + tileSize * 0.55, radius * (0.32 * r), radius * (0.22 * r), 0, 0, Math.PI * 2);
-        this.ctx.stroke();
-      }
-    } else if (style === 'organic_canopy') {
-      this.ctx.beginPath();
-      this.ctx.moveTo(center.x - radius * 0.55, center.y + radius * 0.1);
-      this.ctx.quadraticCurveTo(center.x - radius * 0.1, center.y - radius * 0.65, center.x + radius * 0.5, center.y - radius * 0.1);
-      this.ctx.quadraticCurveTo(center.x + radius * 0.75, center.y + radius * 0.15, center.x + radius * 0.2, center.y + radius * 0.5);
-      this.ctx.stroke();
-      this.ctx.beginPath();
-      this.ctx.moveTo(center.x - radius * 0.4, center.y + radius * 0.35);
-      this.ctx.quadraticCurveTo(center.x + radius * 0.05, center.y, center.x + radius * 0.65, center.y + radius * 0.25);
-      this.ctx.stroke();
-    } else if (style === 'orthogonal_citadel') {
-      for (let i = -1; i <= 1; i++) {
-        this.ctx.strokeRect(center.x - radius * 0.5 + i * tileSize * 1.1, center.y - radius * 0.32 + i * tileSize * 0.35, radius, radius * 0.48);
-      }
-    } else if (style === 'diagonal_chevron') {
-      for (let i = -1; i <= 1; i++) {
-        this.ctx.beginPath();
-        this.ctx.moveTo(center.x - radius * 0.75, center.y + i * tileSize * 0.9);
-        this.ctx.lineTo(center.x, center.y - radius * 0.36 + i * tileSize * 0.9);
-        this.ctx.lineTo(center.x + radius * 0.75, center.y + i * tileSize * 0.9);
-        this.ctx.stroke();
+    // 1. PRAÇA CENTRAL SÓLIDA E ELEGANTE (Town Square / Plaza Core)
+    const plazaRadius = 1;
+    const px0 = center.x - tileSize * plazaRadius;
+    const py0 = center.y - tileSize * plazaRadius;
+    const pSize = tileSize * (plazaRadius * 2 + 1);
+
+    // Cor base sólida e nobre da praça
+    const plazaPaveColor = bp.pavingStyle === 'marble' ? '#dfd6c4'
+      : bp.pavingStyle === 'cobblestone' ? '#8a94a0'
+      : bp.pavingStyle === 'timber' ? '#a57345'
+      : bp.pavingStyle === 'brick' ? '#9c4c28'
+      : '#93a088';
+    const plazaBorderColor = bp.pavingStyle === 'marble' ? '#bfae95'
+      : bp.pavingStyle === 'cobblestone' ? '#5a6470'
+      : bp.pavingStyle === 'timber' ? '#6b4522'
+      : bp.pavingStyle === 'brick' ? '#6e2a14'
+      : '#62705a';
+
+    this.ctx.fillStyle = plazaPaveColor;
+    this.ctx.fillRect(px0, py0, pSize, pSize);
+    this.ctx.strokeStyle = plazaBorderColor;
+    this.ctx.lineWidth = Math.max(1, tileSize * 0.06);
+    this.ctx.strokeRect(px0, py0, pSize, pSize);
+
+    // Ladrilhos discretos na praça
+    if (tileSize >= 10) {
+      this.ctx.fillStyle = plazaBorderColor;
+      for (let tx = 0; tx <= plazaRadius * 2; tx++) {
+        for (let ty = 0; ty <= plazaRadius * 2; ty++) {
+          const lX = px0 + tx * tileSize;
+          const lY = py0 + ty * tileSize;
+          this.ctx.strokeRect(lX + 1, lY + 1, tileSize - 2, tileSize - 2);
+        }
       }
     }
 
-    // Connect up to a handful of visible buildings to the core.
-    const visibleBuildings = Array.from(city.buildings.values()).slice(0, 10);
-    for (const b of visibleBuildings) {
-      const pos = camera.worldToScreen(b.x, b.y, width, height);
-      this.ctx.beginPath();
-      this.ctx.moveTo(center.x + tileSize * 0.5, center.y + tileSize * 0.6);
-      if (style === 'organic_canopy') {
-        this.ctx.quadraticCurveTo(
-          (center.x + pos.x) * 0.5 + Math.sin(b.x * 0.9 + b.y * 1.1) * tileSize * 0.8,
-          (center.y + pos.y) * 0.5 - tileSize * 0.5,
-          pos.x + tileSize * 0.5, pos.y + tileSize * 0.75
-        );
-      } else if (style === 'orthogonal_citadel') {
-        this.ctx.lineTo(pos.x + tileSize * 0.5, center.y + tileSize * 0.6);
-        this.ctx.lineTo(pos.x + tileSize * 0.5, pos.y + tileSize * 0.75);
-      } else if (style === 'diagonal_chevron') {
-        const midX = (center.x + pos.x) * 0.5;
-        const midY = (center.y + pos.y) * 0.5 - tileSize * 0.25;
-        this.ctx.lineTo(midX, midY);
-        this.ctx.lineTo(pos.x + tileSize * 0.5, pos.y + tileSize * 0.75);
-      } else {
-        this.ctx.lineTo(pos.x + tileSize * 0.5, pos.y + tileSize * 0.75);
-      }
-      this.ctx.stroke();
+    // 2. CAMPOS AGRÍCOLAS UNIFICADOS (Farmland Plots)
+    const buildings = Array.from(city.buildings.values());
+    const farmBuildings = buildings.filter(b => b.type === 'farm' || b.type === 'pasture');
+    for (const f of farmBuildings) {
+      const pos = camera.worldToScreen(f.x, f.y, width, height);
+      // Solo de terra arada fértil
+      this.ctx.fillStyle = '#5c3e21';
+      this.ctx.fillRect(pos.x, pos.y, tileSize, tileSize);
+
+      // Sulcos de cultivo dourados
+      this.ctx.fillStyle = '#c9933b';
+      const furrowH = Math.max(1, tileSize * 0.12);
+      this.ctx.fillRect(pos.x + 2, pos.y + tileSize * 0.25, tileSize - 4, furrowH);
+      this.ctx.fillRect(pos.x + 2, pos.y + tileSize * 0.50, tileSize - 4, furrowH);
+      this.ctx.fillRect(pos.x + 2, pos.y + tileSize * 0.75, tileSize - 4, furrowH);
+
+      // Cerquinha de madeira rústica nas bordas
+      this.ctx.strokeStyle = '#3d2511';
+      this.ctx.lineWidth = 1;
+      this.ctx.strokeRect(pos.x, pos.y, tileSize, tileSize);
     }
+
     this.ctx.restore();
   }
 
@@ -492,39 +483,46 @@ export class PixelRenderer {
     screenPos: { x: number; y: number },
     tileSize: number
   ): void {
-    if (tileSize < 7) return;
+    if (tileSize < 8) return;
+    if (b.type === 'farm' || b.type === 'pasture') return; // Fazendas já renderizadas com terra arada
+
     const category = this.buildingCategory(b.type);
+    const bp = getCityBlueprint(city.blueprintId);
     const prosperity = city.prosperity ?? 0.5;
-    const lotY = screenPos.y + tileSize * 0.66;
-    let base = prosperity > 0.7 ? 'rgba(175, 156, 117, 0.24)' : 'rgba(122, 98, 64, 0.16)';
-    if (category === 'industrial') base = 'rgba(82, 78, 74, 0.24)';
-    if (category === 'market') base = 'rgba(201, 164, 88, 0.18)';
-    if (category === 'military') base = 'rgba(92, 88, 102, 0.2)';
-    if (category === 'faith') base = 'rgba(116, 153, 198, 0.14)';
-    if (category === 'residential') base = prosperity > 0.7 ? 'rgba(88, 148, 103, 0.14)' : 'rgba(88, 107, 78, 0.1)';
-    if (category === 'utility') base = 'rgba(119, 123, 134, 0.16)';
-
-    this.ctx.fillStyle = base;
-    const lotW = category === 'industrial' || category === 'civic' ? tileSize * 1.15 : tileSize * 0.94;
+    const lotY = screenPos.y + tileSize * 0.72;
+    const lotH = Math.max(2, tileSize * 0.2);
+    const lotW = tileSize * 0.9;
     const offset = (tileSize - lotW) * 0.5;
-    this.ctx.fillRect(screenPos.x + offset, lotY, lotW, Math.max(2, tileSize * 0.22));
 
-    // A couple of tiny lot props so whole districts read differently.
+    // Alicerce sólido e discreto sob o edifício
+    this.ctx.fillStyle = category === 'civic' ? '#4b5563'
+      : category === 'market' ? '#785329'
+      : category === 'industrial' ? '#374151'
+      : '#524335';
+    this.ctx.fillRect(screenPos.x + offset, lotY, lotW, lotH);
+
+    // Decorative lot details & micro landscaping
     if (category === 'market') {
-      this.ctx.fillStyle = '#d6b15f';
+      this.ctx.fillStyle = '#f59e0b';
       this.ctx.fillRect(screenPos.x + tileSize * 0.12, lotY - 1, 2, 2);
-      this.ctx.fillRect(screenPos.x + tileSize * 0.72, lotY - 1, 2, 2);
+      this.ctx.fillRect(screenPos.x + tileSize * 0.76, lotY - 1, 2, 2);
     } else if (category === 'industrial') {
-      this.ctx.fillStyle = '#475569';
+      this.ctx.fillStyle = '#64748b';
       this.ctx.fillRect(screenPos.x + tileSize * 0.12, lotY - 1, 2, 2);
-      this.ctx.fillRect(screenPos.x + tileSize * 0.72, lotY - 1, 2, 2);
-    } else if (category === 'residential' && prosperity > 0.55) {
-      this.ctx.fillStyle = '#16a34a';
-      this.ctx.fillRect(screenPos.x + tileSize * 0.1, lotY + 1, 1, 1);
-      this.ctx.fillRect(screenPos.x + tileSize * 0.84, lotY + 1, 1, 1);
+      this.ctx.fillRect(screenPos.x + tileSize * 0.76, lotY - 1, 2, 2);
+    } else if (category === 'residential') {
+      // Tree / floral accents
+      if (bp.foliagePattern === 'cypress' || bp.foliagePattern === 'oak' || bp.foliagePattern === 'willow') {
+        this.ctx.fillStyle = '#16a34a';
+        this.ctx.fillRect(screenPos.x + tileSize * 0.08, lotY + 1, 2, 2);
+        if (prosperity > 0.6) {
+          this.ctx.fillStyle = '#22c55e';
+          this.ctx.fillRect(screenPos.x + tileSize * 0.82, lotY + 1, 2, 2);
+        }
+      }
     } else if (category === 'civic' && k) {
-      this.ctx.fillStyle = k.secondaryColor;
-      this.ctx.fillRect(screenPos.x + tileSize * 0.47, lotY - 1, 2, 2);
+      this.ctx.fillStyle = k.secondaryColor || '#fbbf24';
+      this.ctx.fillRect(screenPos.x + tileSize * 0.46, lotY - 1, 3, 2);
     }
   }
 
@@ -753,7 +751,8 @@ export class PixelRenderer {
     tileSize: number,
     direction: SpriteDirection,
     animation: EntitySpriteAnimation,
-    frame: number
+    frame: number,
+    particles?: any
   ): void {
     const fxColor = this.getSpeciesFxColor(e);
 
@@ -778,10 +777,22 @@ export class PixelRenderer {
       } else if (e.equipment.weapon?.category === 'ranged') {
         this.ctx.fillStyle = 'rgba(226, 232, 240, 0.7)';
         this.ctx.fillRect(fxX - dir.x * tileSize * 0.25, fxY - dir.y * tileSize * 0.25, slash * 2.4, Math.max(1, slash * 0.55));
+        
+        // Volumetric gun smoke for musket/cannon ranged units
+        if (frame === 0 && particles && (e.equipment.weapon?.name.includes('Musket') || e.equipment.weapon?.name.includes('Cannon'))) {
+          particles.spawnGunSmoke(e.x + dir.x, e.y + dir.y, dir.x, dir.y, 10);
+        }
       } else if (e.equipment.weapon?.category === 'heavy' || e.species === SpeciesType.BEAR) {
         this.ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
         this.ctx.fillRect(fxX - sideX * slash * 2, fxY - sideY * slash * 2, slash * 3, slash);
       }
+
+      // Metallic impact sparks for melee collisions
+      if (frame === 0 && particles && (e.equipment.weapon?.category === 'melee' || e.equipment.weapon?.category === 'heavy')) {
+        // We simulate a clash by spawning sparks roughly ahead of the attacker
+        particles.spawnImpactSparks(e.x + dir.x * 0.5, e.y + dir.y * 0.5, 4);
+      }
+
       return;
     }
 
@@ -799,14 +810,18 @@ export class PixelRenderer {
       const dir = this.getDirectionVector(direction);
       const sparkX = centerX + dir.x * tileSize * 0.42;
       const sparkY = centerY + dir.y * tileSize * 0.28 + tileSize * 0.18;
-      const dust = animation === 'build' ? '#d6b783' : (e.profession === 'miner' ? '#cbd5e1' : '#86efac');
+      const dust = animation === 'build' ? '#d6b783'
+        : e.profession === 'miner' ? '#cbd5e1'
+        : e.profession === 'woodcutter' ? '#d97706'
+        : e.profession === 'farmer' ? '#fef08a'
+        : '#86efac';
       this.ctx.fillStyle = withAlpha(dust, 0.38 + (frame % 2) * 0.18);
       this.ctx.fillRect(sparkX, sparkY, Math.max(1, tileSize * 0.12), Math.max(1, tileSize * 0.08));
       this.ctx.fillRect(sparkX - tileSize * 0.16, sparkY + tileSize * 0.10, Math.max(1, tileSize * 0.08), Math.max(1, tileSize * 0.06));
       return;
     }
 
-    if (animation === 'shoot' && tileSize > 7) {
+    if (animation === 'shoot' && tileSize > 7 && (frame === 1 || frame === 2)) {
       const dir = this.getDirectionVector(direction);
       const flight = tileSize * (0.46 + frame * 0.08);
       const ax = centerX + dir.x * flight;
@@ -1027,6 +1042,8 @@ export class PixelRenderer {
      * seeds the hash silently moved every tree on the map.
      */
     this.setHashBase(x, y);
+    // Don't draw wild trees/foliage on tiles occupied by buildings, roads or railways!
+    if (tile.buildingId || tile.roadLevelEffective > 0 || tile.railLevel > 0) return;
     const sway = Math.sin(this.animTimer * 2 + x * 0.5 + y * 0.3) * 1.5;
 
     if (tile.type === TerrainType.FOREST) {
@@ -1156,7 +1173,6 @@ export class PixelRenderer {
     this.waterMask[index] = mask;
   }
 
-
   private getOverlayTerrainColor(tile: Tile, overlayMode: OverlayMode): string | null {
     if (overlayMode === 'temperature') {
       const tNorm = clamp((tile.temperature + 20) / 70, 0, 1);
@@ -1226,6 +1242,13 @@ export class PixelRenderer {
   }
 
   /** Animated surface pass over the cached water/lava base. */
+  /**
+   * The moving part of a water or lava surface, drawn over the baked tile.
+   *
+   * Only what actually animates: the wave crests and the coastal foam pulse.
+   * This used to re-run the entire edge pass as well, repainting a fixed image
+   * that the bake underneath already contained.
+   */
   /**
    * The per-frame layer over a baked water or lava tile.
    *
@@ -2110,7 +2133,16 @@ export class PixelRenderer {
         const bob = (animation === 'walk' || animation === 'flee' || animation === 'carry')
           ? Math.sin((e.renderWalked / PixelRenderer.STRIDE_TILES) * Math.PI * 2 + safeHash) * 1.2 * bobScale
           : 0;
-        const breathe = animation === 'idle' ? Math.sin(this.animTimer * 2.2 + safeHash * 0.01) * 0.45 : 0;
+        // Dual-frequency breathing: primary chest rhythm at 2.4 Hz with a slower
+        // diaphragm undertone at 1.1 Hz for a more organic idle feel.
+        const breathe = animation === 'idle'
+          ? Math.sin(this.animTimer * 2.4 + safeHash * 0.01) * 0.5 + Math.sin(this.animTimer * 1.1 + safeHash * 0.03) * 0.2
+          : 0;
+        // The sprite subtly expands on each inhale (±0.8%) so the entity
+        // feels alive even at a glance.
+        const breatheScale = animation === 'idle'
+          ? 1.0 + Math.sin(this.animTimer * 2.4 + safeHash * 0.01) * 0.008
+          : 1.0;
         const entitySize = tileSize;
         const ageScale = e.lifeStage === 'infant' ? 0.52
           : e.lifeStage === 'child' ? 0.70
@@ -2120,10 +2152,13 @@ export class PixelRenderer {
           : e.species === SpeciesType.BEAR ? 1.22
           : e.species === SpeciesType.DEER || e.species === SpeciesType.WOLF ? 1.05
           : 1.12;
-        const spriteSize = entitySize * speciesScale * ageScale;
+        const spriteSize = entitySize * speciesScale * ageScale * breatheScale;
         const centerX = screenPos.x + entitySize / 2;
         const centerY = screenPos.y + entitySize * 0.55;
-        const spriteX = centerX - spriteSize / 2;
+        // Fleeing entities lean forward (shift toward travel direction) to
+        // convey urgency — a 1.5 px nudge in the sprite's facing direction.
+        const fleeLean = animation === 'flee' ? 1.5 : 0;
+        const spriteX = centerX - spriteSize / 2 + fleeLean;
         const spriteY = screenPos.y + entitySize * 0.98 - spriteSize + bob + breathe;
 
         // Great-person aura sits behind the body instead of washing over the sprite.
@@ -2147,7 +2182,7 @@ export class PixelRenderer {
         this.ctx.fill();
 
         if (animation === 'heal' || animation === 'flee' || animation === 'socialize') {
-          this.drawEntityActionEffects(e, centerX, centerY, entitySize, direction, animation, frame);
+          this.drawEntityActionEffects(e, centerX, centerY, entitySize, direction, animation, frame, particles);
         }
 
         const sprite = SpriteGenerator.getEntitySprite(e.species, direction, animation, frame, {
@@ -2158,13 +2193,18 @@ export class PixelRenderer {
           weaponName: e.equipment.weapon?.name,
           weaponCategory: e.equipment.weapon?.category,
           armorName: e.equipment.armor?.name,
+          // The realm's colour, worn on the helmet crest and flown from the
+          // standard. Without it every army in the world wore the same crimson
+          // plume and the only thing telling two of them apart at a glance was
+          // the one-pixel outline drawn below.
+          plumeColor: e.kingdomId ? kingdoms.get(e.kingdomId)?.color : undefined,
           isGreatPerson: e.isGreatPerson,
           greatPersonType: e.greatPersonType
         });
         this.ctx.drawImage(sprite, spriteX, spriteY, spriteSize, spriteSize);
 
         if (animation === 'attack' || animation === 'shoot' || animation === 'gather' || animation === 'build') {
-          this.drawEntityActionEffects(e, centerX, centerY, entitySize, direction, animation, frame);
+          this.drawEntityActionEffects(e, centerX, centerY, entitySize, direction, animation, frame, particles);
         }
 
         // Kingdom-colored outline for humanoid species
@@ -2228,14 +2268,23 @@ export class PixelRenderer {
         const screenPos = camera.worldToScreen(ship.x, ship.y, width, height);
         const shipSize = Math.max(16, tileSize * 1.3);
 
-        // Animated water wake behind ship
-        const wakeRadius = Math.max(4, tileSize * 0.45);
-        const wakeX = screenPos.x + (ship.direction > 0 ? -4 : shipSize + 4);
+        // Animated water wake behind ship: scales with speed/progress and leaves a bubbly trail
+        const wakeRadius = Math.max(4, tileSize * 0.45) * (0.8 + Math.sin(this.animTimer * 10) * 0.2);
+        const isFlipped = ship.direction < 0;
+        const wakeX = screenPos.x + (isFlipped ? shipSize + 4 : -4);
         const wakeY = screenPos.y + shipSize * 0.65;
-        this.ctx.fillStyle = 'rgba(56, 189, 248, 0.45)';
+        this.ctx.fillStyle = 'rgba(224, 242, 254, 0.45)'; // Lighter, foamier color
         this.ctx.beginPath();
-        this.ctx.arc(wakeX, wakeY, wakeRadius, 0, Math.PI * 2);
+        this.ctx.ellipse(wakeX, wakeY, wakeRadius * 1.5, wakeRadius, 0, 0, Math.PI * 2);
         this.ctx.fill();
+        this.ctx.beginPath();
+        this.ctx.ellipse(wakeX + (isFlipped ? 8 : -8), wakeY, wakeRadius * 0.8, wakeRadius * 0.5, 0, 0, Math.PI * 2);
+        this.ctx.fill();
+
+        // Buoyancy rocking: a soft pendulum rotation matching the ocean waves
+        // Different ships rock at different frequencies based on their tier/weight
+        const rockSpeed = 1.2 + (5 - ship.tier) * 0.4;
+        const rockAngle = Math.sin(this.animTimer * rockSpeed + ship.x) * (0.04 + (4 - ship.tier) * 0.01);
 
         // Pixel-Art Ship Sprite
         const spriteKey = `ship_tier_${ship.tier}`;
@@ -2244,19 +2293,25 @@ export class PixelRenderer {
           : SpriteGenerator.getSprite('ship_tier_1', () => {}, 64, 64);
 
         this.ctx.save();
-        if (ship.direction < 0) {
-          this.ctx.translate(screenPos.x + shipSize, screenPos.y);
-          this.ctx.scale(-1, 1);
-          this.ctx.drawImage(sprite, 0, 0, shipSize, shipSize);
-        } else {
-          this.ctx.drawImage(sprite, screenPos.x, screenPos.y, shipSize, shipSize);
+        this.ctx.translate(screenPos.x + (isFlipped ? shipSize : 0), screenPos.y);
+        if (isFlipped) this.ctx.scale(-1, 1);
+        
+        // Pivot around the water-line
+        this.ctx.translate(shipSize / 2, shipSize * 0.7);
+        this.ctx.rotate(rockAngle);
+        this.ctx.translate(-shipSize / 2, -shipSize * 0.7);
+
+        this.ctx.drawImage(sprite, 0, 0, shipSize, shipSize);
+
+        // Steam from tier 4 ships (Cruzador de Aço)
+        if (ship.tier === 4 && Math.random() > 0.6 && particles) {
+          particles.spawnGunSmoke(ship.x + (isFlipped ? 0.3 : -0.3), ship.y - 0.2, isFlipped ? 0.5 : -0.5, -0.5, 1);
         }
-        this.ctx.restore();
 
         // Kingdom Flag Banner on Mast
         if (tileSize > 6) {
-          const flagX = screenPos.x + shipSize * 0.45;
-          const flagY = screenPos.y - 4;
+          const flagX = shipSize * 0.45;
+          const flagY = -4;
           const flagWave = Math.sin(this.animTimer * 5 + ship.x) * 1.2;
           this.ctx.fillStyle = ship.kingdomColor ?? '#fbbf24';
           this.ctx.fillRect(flagX + flagWave, flagY, 9, 6);
@@ -2264,6 +2319,8 @@ export class PixelRenderer {
           this.ctx.lineWidth = 1;
           this.ctx.strokeRect(flagX + flagWave, flagY, 9, 6);
         }
+        
+        this.ctx.restore();
       }
     }
 
@@ -2376,20 +2433,21 @@ export class PixelRenderer {
         const labelX = screenPos.x + tileSize / 2;
         const labelY = screenPos.y + tileSize * 1.6;
 
+        const displayName = capital ? `👑 ${city.name}` : city.name;
         this.ctx.font = `600 ${fontSize}px 'Outfit', sans-serif`;
-        const labelW = this.ctx.measureText(city.name).width + 8;
+        const labelW = this.ctx.measureText(displayName).width + 8;
         const box = { x: labelX - labelW / 2, y: labelY - fontSize, w: labelW, h: fontSize * 2.1 };
         if (occupied.some(other => box.x < other.x + other.w && box.x + box.w > other.x && box.y < other.y + other.h && box.y + box.h > other.y)) continue;
         occupied.push(box);
         this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-        this.ctx.fillText(city.name, labelX + 1, labelY + 1);
+        this.ctx.fillText(displayName, labelX + 1, labelY + 1);
         this.ctx.fillStyle = k ? k.secondaryColor : '#e2e8f0';
-        this.ctx.fillText(city.name, labelX, labelY);
+        this.ctx.fillText(displayName, labelX, labelY);
 
-        // Population count under the name
+        // Population count with 👤 icon under the name
         this.ctx.font = `${Math.max(8, fontSize * 0.75)}px 'Outfit', sans-serif`;
-        this.ctx.fillStyle = 'rgba(226, 232, 240, 0.65)';
-        this.ctx.fillText(`${city.population}`, labelX, labelY + fontSize);
+        this.ctx.fillStyle = 'rgba(226, 232, 240, 0.75)';
+        this.ctx.fillText(`👤 ${city.population}`, labelX, labelY + fontSize);
       }
       this.ctx.textAlign = 'start';
     }
@@ -2402,7 +2460,6 @@ export class PixelRenderer {
 
         if (p.text) {
           this.ctx.font = 'bold 12px var(--font-mono)';
-          this.ctx.fillStyle = p.color;
           // Text shadow
           this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
           this.ctx.fillText(p.text, screenPos.x + 1, screenPos.y + 1);
@@ -2424,20 +2481,62 @@ export class PixelRenderer {
           const arcOffset = proj.arcHeight ? Math.sin(proj.progress * Math.PI) * proj.arcHeight : 0;
           const screenPos = camera.worldToScreen(proj.x, proj.y - arcOffset, width, height);
 
+          // Ground shadow for airborne projectiles: a small semi-transparent
+          // ellipse at the projectile's ground position (no arc offset).
+          // Alpha modulates with height — shadow darkens as the projectile
+          // descends, selling the parabolic arc.
+          if (arcOffset > 0 && proj.progress < 1) {
+            const groundPos = camera.worldToScreen(proj.x, proj.y, width, height);
+            const shadowAlpha = 0.18 + 0.10 * (1.0 - Math.sin(proj.progress * Math.PI));
+            this.ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
+            this.ctx.beginPath();
+            const shadowRx = Math.max(2, tileSize * 0.18);
+            const shadowRy = Math.max(1, tileSize * 0.07);
+            this.ctx.ellipse(groundPos.x, groundPos.y, shadowRx, shadowRy, 0, 0, Math.PI * 2);
+            this.ctx.fill();
+          }
+
           this.ctx.save();
-          const angle = Math.atan2(proj.targetY - proj.startY, proj.targetX - proj.startX);
+          // Angle from parabolic derivative: dzdt gives the instantaneous
+          // vertical velocity of the arc, tilting the projectile nose-up on
+          // ascent and nose-down on descent for a natural flight attitude.
+          const dx = proj.targetX - proj.startX;
+          const dy = proj.targetY - proj.startY;
+          const dist = Math.hypot(dx, dy) || 1;
+          const dzdt = Math.cos(proj.progress * Math.PI) * (proj.arcHeight ?? 0) * Math.PI;
+          const angle = Math.atan2(dy / dist - dzdt / dist, dx / dist);
 
           if (proj.type === 'arrow') {
+
             this.ctx.translate(screenPos.x, screenPos.y);
             this.ctx.rotate(angle);
+            // Arrow fletching feathers (feathers on tail)
+            this.ctx.fillStyle = '#e2e8f0';
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, 0);
+            this.ctx.lineTo(-4, -2.5);
+            this.ctx.lineTo(-2.5, 0);
+            this.ctx.fill();
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, 0);
+            this.ctx.lineTo(-4, 2.5);
+            this.ctx.lineTo(-2.5, 0);
+            this.ctx.fill();
+            // Arrow shaft
             this.ctx.strokeStyle = '#78350f';
             this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
             this.ctx.beginPath();
             this.ctx.moveTo(-6, 0);
             this.ctx.lineTo(6, 0);
             this.ctx.stroke();
-            this.ctx.fillStyle = '#e2e8f0';
-            this.ctx.fillRect(4, -1.5, 3, 3);
+            // Arrowhead
+            this.ctx.fillStyle = '#94a3b8';
+            this.ctx.beginPath();
+            this.ctx.moveTo(7, 0);
+            this.ctx.lineTo(3.5, -2);
+            this.ctx.lineTo(3.5, 2);
+            this.ctx.closePath();
+            this.ctx.fill();
           } else if (proj.type === 'bullet') {
             this.ctx.strokeStyle = '#fde047';
             this.ctx.lineWidth = Math.max(2, tileSize * 0.15);
@@ -2486,20 +2585,32 @@ export class PixelRenderer {
         const badgeX = screenCenter.x;
         const badgeY = screenCenter.y - tileSize * 2 + floatY;
 
-        // Measure text
+        // Measure text & build subtitle (Ruler + Military Power)
         const fontSize = Math.max(10, Math.min(14, tileSize * 0.7));
+        const subFontSize = Math.max(8, fontSize * 0.72);
         this.ctx.font = `bold ${fontSize}px 'Inter', sans-serif`;
         const textWidth = this.ctx.measureText(kingdom.name).width;
-        const badgeW = textWidth + 32;
-        const badgeH = fontSize + 12;
+
+        const ruler = kingdom.rulerId ? entities.find(e => e.id === kingdom.rulerId) : null;
+        const rulerName = ruler ? ruler.name : null;
+        const powerVal = Math.round(kingdom.militaryPower || 0);
+        const subtitle = rulerName ? `${kingdom.rulerTitle} ${rulerName} • ⚔${powerVal}` : `⚔${powerVal} Poder`;
+        this.ctx.font = `600 ${subFontSize}px 'Outfit', sans-serif`;
+        const subWidth = this.ctx.measureText(subtitle).width;
+
+        const iconSize = Math.max(12, fontSize);
+        const mainWidth = textWidth + iconSize + 14;
+        const totalContentWidth = Math.max(mainWidth, subWidth + 14);
+        const badgeW = totalContentWidth + 24;
+        const badgeH = fontSize + subFontSize + 14;
 
         // Badge background (glassmorphic pill)
         const rgb = this.hexToRgb(kingdom.color);
-        this.ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`;
+        this.ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.80)`;
         const bx = badgeX - badgeW / 2;
         const by = badgeY - badgeH / 2;
         this.ctx.beginPath();
-        this.ctx.roundRect(bx, by, badgeW, badgeH, badgeH / 2);
+        this.ctx.roundRect(bx, by, badgeW, badgeH, 7);
         this.ctx.fill();
 
         // Badge border glow
@@ -2509,14 +2620,19 @@ export class PixelRenderer {
 
         // Pixel-Art Emblem icon
         const emblemIcon = PixelIcons.getIcon(kingdom.emblem);
-        const iconSize = Math.max(12, fontSize);
-        this.ctx.drawImage(emblemIcon, bx + 5, badgeY - iconSize / 2, iconSize, iconSize);
+        const iconY = by + (fontSize + 6) / 2;
+        this.ctx.drawImage(emblemIcon, bx + 7, iconY - iconSize / 2, iconSize, iconSize);
 
         // Kingdom name text
         this.ctx.font = `bold ${fontSize}px 'Inter', sans-serif`;
         this.ctx.fillStyle = '#ffffff';
         this.ctx.textAlign = 'left';
-        this.ctx.fillText(kingdom.name, bx + iconSize + 10, badgeY + fontSize * 0.35);
+        this.ctx.fillText(kingdom.name, bx + iconSize + 12, by + fontSize * 0.9 + 2);
+
+        // Subtitle line: Ruler + Power
+        this.ctx.font = `500 ${subFontSize}px 'Outfit', sans-serif`;
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
+        this.ctx.fillText(subtitle, bx + 8, by + fontSize + subFontSize + 5);
         this.ctx.textAlign = 'start';
 
         // War indicator: crossed swords pixel icon if at war
@@ -2527,7 +2643,7 @@ export class PixelRenderer {
             const warPulse = Math.sin(this.animTimer * 5) * 0.3 + 0.7;
             this.ctx.globalAlpha = warPulse;
             const warIcon = PixelIcons.getIcon('swords');
-            this.ctx.drawImage(warIcon, bx + badgeW - iconSize - 4, badgeY - iconSize / 2, iconSize, iconSize);
+            this.ctx.drawImage(warIcon, bx + badgeW - iconSize - 4, iconY - iconSize / 2, iconSize, iconSize);
             this.ctx.globalAlpha = 1.0;
           }
         }
@@ -2581,6 +2697,420 @@ export class PixelRenderer {
     if (this.selection) this.drawSelectionMark(camera, width, height, tileSize);
 
     // ========== 8. BRUSH CURSOR ==========
+    if (this.options.showBrushCursor && brushX !== null && brushY !== null) {
+      const screenPos = camera.worldToScreen(brushX, brushY, width, height);
+      const brushRadiusPx = brushSize * tileSize;
+
+      this.ctx.beginPath();
+      this.ctx.arc(screenPos.x, screenPos.y, brushRadiusPx, 0, Math.PI * 2);
+      this.ctx.strokeStyle = '#fbbf24';
+      this.ctx.lineWidth = 2;
+      this.ctx.setLineDash([4, 4]);
+      this.ctx.stroke();
+      this.ctx.setLineDash([]);
+    }
+  }
+
+  /**
+   * Renders the transparent 2D HUD and Vector overlay layer over the WebGPU canvas.
+   * Provides 100% visual parity for city names, kingdom badges, projectiles, damage numbers,
+   * health bars, siege rings, brush cursor, and analytics.
+   */
+  public renderHUDOverlay(
+    camera: Camera,
+    tileMap: TileMap,
+    entities: Entity[],
+    cities: Map<string, City>,
+    kingdoms: Map<string, Kingdom>,
+    particles: ParticleManager,
+    overlayMode: OverlayMode,
+    currentEra: WorldEra,
+    brushX: number | null,
+    brushY: number | null,
+    brushSize: number,
+    ships?: Iterable<Ship>,
+    caravans?: Iterable<OverlandCaravan>,
+    railways?: { yearlyFreight: number },
+    warFocus?: WarOverlayFocus | null,
+    overlays?: OverlayManager,
+    mapIntel?: MapIntelligenceSnapshot | null,
+    entityIndex?: SpatialHash<Entity>
+  ): void {
+    const width = this.canvas.width;
+    const height = this.canvas.height;
+    this.ctx.clearRect(0, 0, width, height);
+
+    this.animTimer = (this.animTimer + 0.04) % 628.318;
+    const tileSize = camera.tileSize * camera.zoom;
+    const topLeft = camera.screenToWorld(0, 0, width, height);
+    const bottomRight = camera.screenToWorld(width, height, width, height);
+
+    const minX = Math.max(0, Math.floor(topLeft.x));
+    const maxX = Math.min(tileMap.width - 1, Math.ceil(bottomRight.x));
+    const minY = Math.max(0, Math.floor(topLeft.y));
+    const maxY = Math.min(tileMap.height - 1, Math.ceil(bottomRight.y));
+    const baseSX = width / 2 + camera.frameShakeX - camera.x * camera.zoom;
+    const baseSY = height / 2 + camera.frameShakeY - camera.y * camera.zoom;
+    const visibleEntities = entityIndex
+      ? entityIndex.queryRect(minX - 2, minY - 2, maxX + 2, maxY + 2, this.visibleEntityScratch)
+      : entities;
+
+    // 1. COMBINABLE WORLD-INTELLIGENCE LAYERS
+    if (overlays) {
+      this.drawInfrastructureIntelligence(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, overlays, mapIntel);
+      if (overlays.layers.has('trade') && mapIntel) this.drawTradeOverlay(camera, width, height, tileSize, mapIntel);
+      if (overlays.layers.has('armies')) this.drawArmyOverlay(camera, width, height, tileSize, tileSize < 4 ? entities : visibleEntities, kingdoms);
+    }
+
+    // 2. HEALTH BARS FOR DAMAGED ENTITIES
+    if (this.options.showHealthBars && tileSize >= 5) {
+      for (const e of visibleEntities) {
+        if (e.hp < e.maxHp && e.hp > 0) {
+          const screenPos = camera.worldToScreen(e.x, e.y, width, height);
+          const entitySize = tileSize;
+          const ageScale = e.lifeStage === 'infant' ? 0.52 : e.lifeStage === 'child' ? 0.70 : e.lifeStage === 'adolescent' ? 0.86 : 1.0;
+          const speciesScale = e.species === 'dragon' ? 1.55 : e.species === 'mammoth' ? 1.50 : e.species === 'bear' ? 1.28 : e.species === 'boar' ? 1.10 : e.species === 'eagle' ? 1.15 : 1.05;
+          const spriteSize = entitySize * speciesScale * ageScale;
+          const spriteY = screenPos.y + entitySize * 0.98 - spriteSize;
+
+          const barW = tileSize;
+          const barH = Math.max(2, tileSize * 0.12);
+          const hpRatio = Math.max(0, e.hp / e.maxHp);
+          const barX = screenPos.x;
+          const barY = spriteY - 4;
+
+          this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          this.ctx.fillRect(barX - 0.5, barY - 0.5, barW + 1, barH + 1);
+          const hpColor = hpRatio > 0.5 ? '#10b981' : (hpRatio > 0.2 ? '#f59e0b' : '#ef4444');
+          this.ctx.fillStyle = hpColor;
+          this.ctx.fillRect(barX, barY, barW * hpRatio, barH);
+        }
+      }
+    }
+
+    // 2b. HEALTH BARS FOR DAMAGED BUILDINGS
+    if (this.options.showHealthBars && tileSize > 8) {
+      for (const city of cities.values()) {
+        for (const b of city.buildings.values()) {
+          if (b.x < minX || b.x > maxX || b.y < minY || b.y > maxY) continue;
+          const hpRatio = b.maxHp > 0 ? b.hp / b.maxHp : 1;
+          if (hpRatio >= 0.9) continue;
+          const screenPos = camera.worldToScreen(b.x, b.y, width, height);
+          const barW = tileSize * 0.82;
+          const barX = screenPos.x + (tileSize - barW) * 0.5;
+          const barY = screenPos.y - tileSize * 0.28;
+          this.ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+          this.ctx.fillRect(barX, barY, barW, 3);
+          this.ctx.fillStyle = hpRatio > 0.55 ? '#f59e0b' : '#ef4444';
+          this.ctx.fillRect(barX + 1, barY + 1, Math.max(0, (barW - 2) * hpRatio), 1);
+        }
+      }
+    }
+
+    // 3. SIEGE RINGS
+    if (tileSize >= 5) {
+      for (const city of cities.values()) {
+        if (!city.besiegerId) continue;
+        if (city.x < minX - 8 || city.x > maxX + 8 || city.y < minY - 8 || city.y > maxY + 8) continue;
+
+        const screenPos = camera.worldToScreen(city.x, city.y, width, height);
+        const centerX = screenPos.x + tileSize / 2;
+        const centerY = screenPos.y + tileSize / 2;
+        const radius = 7 * tileSize;
+        const pulse = 0.45 + Math.sin(this.animTimer * 4) * 0.2;
+
+        this.ctx.strokeStyle = `rgba(239, 68, 68, ${pulse})`;
+        this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
+        this.ctx.setLineDash([tileSize * 0.5, tileSize * 0.4]);
+        this.ctx.beginPath();
+        this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+
+        if (city.siegeProgress > 0) {
+          this.ctx.strokeStyle = 'rgba(248, 113, 113, 0.95)';
+          this.ctx.lineWidth = Math.max(2, tileSize * 0.2);
+          this.ctx.beginPath();
+          this.ctx.arc(centerX, centerY, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, city.siegeProgress));
+          this.ctx.stroke();
+        }
+      }
+    }
+
+    // 4. CITY NAME LABELS
+    if (this.options.showCityNames && (overlays?.layers.has('city-labels') ?? true) && tileSize > 2.4) {
+      const occupied: Array<{ x: number; y: number; w: number; h: number }> = [];
+      this.ctx.textAlign = 'center';
+      for (const city of cities.values()) {
+        if (city.x < minX || city.x > maxX || city.y < minY || city.y > maxY) continue;
+        const realm = city.kingdomId ? kingdoms.get(city.kingdomId) : null;
+        const capital = realm?.capitalCityId === city.id;
+        if (tileSize < 4 && !capital && city.population < 35) continue;
+        if (tileSize < 6 && !capital && city.population < 12) continue;
+        const screenPos = camera.worldToScreen(city.x, city.y, width, height);
+        const k = realm;
+        const fontSize = Math.max(9, Math.min(13, tileSize * 0.6));
+
+        const labelX = screenPos.x + tileSize / 2;
+        const labelY = screenPos.y + tileSize * 1.6;
+
+        const displayName = capital ? `👑 ${city.name}` : city.name;
+        this.ctx.font = `600 ${fontSize}px 'Outfit', sans-serif`;
+        const labelW = this.ctx.measureText(displayName).width + 8;
+        const box = { x: labelX - labelW / 2, y: labelY - fontSize, w: labelW, h: fontSize * 2.1 };
+        if (occupied.some(other => box.x < other.x + other.w && box.x + box.w > other.x && box.y < other.y + other.h && box.y + box.h > other.y)) continue;
+        occupied.push(box);
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        this.ctx.fillText(displayName, labelX + 1, labelY + 1);
+        this.ctx.fillStyle = k ? k.secondaryColor : '#e2e8f0';
+        this.ctx.fillText(displayName, labelX, labelY);
+
+        // Population count with 👤 icon under the name
+        this.ctx.font = `${Math.max(8, fontSize * 0.75)}px 'Outfit', sans-serif`;
+        this.ctx.fillStyle = 'rgba(226, 232, 240, 0.75)';
+        this.ctx.fillText(`👤 ${city.population}`, labelX, labelY + fontSize);
+      }
+      this.ctx.textAlign = 'start';
+    }
+
+    // 5. PARTICLES & DAMAGE NUMBERS
+    if (this.options.showParticles) {
+      for (const p of particles.activeParticles) {
+        if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) {
+          const screenPos = camera.worldToScreen(p.x, p.y, width, height);
+          this.ctx.globalAlpha = p.alpha;
+
+          if (p.text) {
+            this.ctx.font = 'bold 12px var(--font-mono)';
+            this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            this.ctx.fillText(p.text, screenPos.x + 1, screenPos.y + 1);
+            this.ctx.fillStyle = p.color;
+            this.ctx.fillText(p.text, screenPos.x, screenPos.y);
+          } else {
+            this.ctx.fillStyle = p.color;
+            this.ctx.fillRect(screenPos.x, screenPos.y, p.size, p.size);
+          }
+
+          this.ctx.globalAlpha = 1.0;
+        }
+      }
+    }
+
+    // 6. FLYING PROJECTILES (Arrows, Bullets, Cannonballs, Spears)
+    if (this.options.showParticles && particles.activeProjectiles) {
+      for (const proj of particles.activeProjectiles) {
+        if (proj.x >= minX - 2 && proj.x <= maxX + 2 && proj.y >= minY - 2 && proj.y <= maxY + 2) {
+          const arcOffset = proj.arcHeight ? Math.sin(proj.progress * Math.PI) * proj.arcHeight : 0;
+          const screenPos = camera.worldToScreen(proj.x, proj.y - arcOffset, width, height);
+
+          // Ground shadow for airborne projectiles: a small semi-transparent
+          // ellipse at the projectile's ground position (no arc offset)
+          if (arcOffset > 0 && proj.progress < 1) {
+            const groundPos = camera.worldToScreen(proj.x, proj.y, width, height);
+            this.ctx.save();
+            this.ctx.globalAlpha = 0.3;
+            this.ctx.fillStyle = '#000000';
+            this.ctx.beginPath();
+            this.ctx.ellipse(groundPos.x, groundPos.y, 3, 1.5, 0, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.restore();
+          }
+
+          this.ctx.save();
+          // Angle from parabolic derivative: dzdt gives the instantaneous
+          // vertical velocity of the arc, tilting the projectile nose-up on
+          // ascent and nose-down on descent for a natural flight attitude.
+          const dx = proj.targetX - proj.startX;
+          const dy = proj.targetY - proj.startY;
+          const dist = Math.hypot(dx, dy) || 1;
+          const dzdt = Math.cos(proj.progress * Math.PI) * (proj.arcHeight ?? 0) * Math.PI;
+          const angle = Math.atan2(dy / dist - dzdt / dist, dx / dist);
+
+          if (proj.type === 'arrow') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+
+            // Arrow fletching feathers (feathers on tail)
+            this.ctx.fillStyle = '#e2e8f0';
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, 0);
+            this.ctx.lineTo(-4, -2.5);
+            this.ctx.lineTo(-2.5, 0);
+            this.ctx.fill();
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, 0);
+            this.ctx.lineTo(-4, 2.5);
+            this.ctx.lineTo(-2.5, 0);
+            this.ctx.fill();
+            // Arrow shaft
+            this.ctx.strokeStyle = '#78350f';
+            this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, 0);
+            this.ctx.lineTo(6, 0);
+            this.ctx.stroke();
+            // Arrowhead
+            this.ctx.fillStyle = '#94a3b8';
+            this.ctx.beginPath();
+            this.ctx.moveTo(7, 0);
+            this.ctx.lineTo(3.5, -2);
+            this.ctx.lineTo(3.5, 2);
+            this.ctx.closePath();
+            this.ctx.fill();
+          } else if (proj.type === 'bullet') {
+            this.ctx.strokeStyle = '#fde047';
+            this.ctx.lineWidth = Math.max(2, tileSize * 0.15);
+            this.ctx.beginPath();
+            this.ctx.moveTo(screenPos.x - Math.cos(angle) * 8, screenPos.y - Math.sin(angle) * 8);
+            this.ctx.lineTo(screenPos.x, screenPos.y);
+            this.ctx.stroke();
+          } else if (proj.type === 'cannonball') {
+            const r = Math.max(3, tileSize * 0.25);
+            this.ctx.fillStyle = '#1e293b';
+            this.ctx.beginPath();
+            this.ctx.arc(screenPos.x, screenPos.y, r, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.strokeStyle = '#475569';
+            this.ctx.stroke();
+          } else if (proj.type === 'spear_thrust') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            this.ctx.fillStyle = '#cbd5e1';
+            this.ctx.fillRect(-2, -1.5, 8, 3);
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.fillRect(4, -1, 3, 2);
+          } else {
+            this.ctx.fillStyle = proj.color;
+            this.ctx.fillRect(screenPos.x - 2, screenPos.y - 2, 4, 4);
+          }
+
+          this.ctx.restore();
+        }
+      }
+    }
+
+    // 7. FLOATING KINGDOM BADGES (WorldBox-style)
+    if (this.options.showKingdomBadges && tileSize > 3) {
+      for (const kingdom of kingdoms.values()) {
+        if (kingdom.cityIds.size === 0) continue;
+
+        const center = kingdom.cachedCenter;
+        if (center.x < minX || center.x > maxX || center.y < minY || center.y > maxY) continue;
+
+        const screenCenter = camera.worldToScreen(center.x, center.y, width, height);
+        const floatY = Math.sin(this.animTimer * 1.5 + center.x * 0.1) * 3;
+        const badgeX = screenCenter.x;
+        const badgeY = screenCenter.y - tileSize * 2 + floatY;
+
+        // Measure text & build subtitle (Ruler + Military Power)
+        const fontSize = Math.max(10, Math.min(14, tileSize * 0.7));
+        const subFontSize = Math.max(8, fontSize * 0.72);
+        this.ctx.font = `bold ${fontSize}px 'Inter', sans-serif`;
+        const textWidth = this.ctx.measureText(kingdom.name).width;
+
+        const ruler = kingdom.rulerId ? entities.find(e => e.id === kingdom.rulerId) : null;
+        const rulerName = ruler ? ruler.name : null;
+        const powerVal = Math.round(kingdom.militaryPower || 0);
+        const subtitle = rulerName ? `${kingdom.rulerTitle} ${rulerName} • ⚔${powerVal}` : `⚔${powerVal} Poder`;
+        this.ctx.font = `600 ${subFontSize}px 'Outfit', sans-serif`;
+        const subWidth = this.ctx.measureText(subtitle).width;
+
+        const iconSize = Math.max(12, fontSize);
+        const mainWidth = textWidth + iconSize + 14;
+        const totalContentWidth = Math.max(mainWidth, subWidth + 14);
+        const badgeW = totalContentWidth + 24;
+        const badgeH = fontSize + subFontSize + 14;
+
+        const rgb = this.hexToRgb(kingdom.color);
+        this.ctx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.80)`;
+        const bx = badgeX - badgeW / 2;
+        const by = badgeY - badgeH / 2;
+        this.ctx.beginPath();
+        this.ctx.roundRect(bx, by, badgeW, badgeH, 7);
+        this.ctx.fill();
+
+        this.ctx.strokeStyle = `rgba(${Math.min(255, rgb.r + 60)}, ${Math.min(255, rgb.g + 60)}, ${Math.min(255, rgb.b + 60)}, 0.6)`;
+        this.ctx.lineWidth = 1.5;
+        this.ctx.stroke();
+
+        const emblemIcon = PixelIcons.getIcon(kingdom.emblem);
+        const iconY = by + (fontSize + 6) / 2;
+        this.ctx.drawImage(emblemIcon, bx + 7, iconY - iconSize / 2, iconSize, iconSize);
+
+        this.ctx.font = `bold ${fontSize}px 'Inter', sans-serif`;
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.textAlign = 'left';
+        this.ctx.fillText(kingdom.name, bx + iconSize + 12, by + fontSize * 0.9 + 2);
+
+        // Subtitle line: Ruler + Power
+        this.ctx.font = `500 ${subFontSize}px 'Outfit', sans-serif`;
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.82)';
+        this.ctx.fillText(subtitle, bx + 8, by + fontSize + subFontSize + 5);
+        this.ctx.textAlign = 'start';
+
+        if (this.diplomacy) {
+          const wars = this.diplomacy.getWarsFor(kingdom.id);
+          if (wars.length > 0) {
+            const warPulse = Math.sin(this.animTimer * 5) * 0.3 + 0.7;
+            this.ctx.globalAlpha = warPulse;
+            const warIcon = PixelIcons.getIcon('swords');
+            this.ctx.drawImage(warIcon, bx + badgeW - iconSize - 4, iconY - iconSize / 2, iconSize, iconSize);
+            this.ctx.globalAlpha = 1.0;
+          }
+        }
+
+        this.ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.25)`;
+        this.ctx.lineWidth = 1;
+        this.ctx.setLineDash([2, 3]);
+        this.ctx.beginPath();
+        this.ctx.moveTo(badgeX, by + badgeH);
+        this.ctx.lineTo(screenCenter.x, screenCenter.y);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]);
+      }
+    }
+
+    // 8. ERA VIGNETTE
+    if (currentEra === WorldEra.AGE_OF_ASHES) {
+      this.ctx.fillStyle = 'rgba(239, 68, 68, 0.06)';
+      this.ctx.fillRect(0, 0, width, height);
+    } else if (currentEra === WorldEra.FROZEN_AGE) {
+      this.ctx.fillStyle = 'rgba(56, 189, 248, 0.08)';
+      this.ctx.fillRect(0, 0, width, height);
+    } else if (currentEra === WorldEra.DARK_AGE) {
+      this.ctx.fillStyle = 'rgba(88, 28, 135, 0.1)';
+      this.ctx.fillRect(0, 0, width, height);
+    }
+
+    // 9. COORDINATE GRID
+    if (this.options.showGrid && tileSize >= 6) {
+      this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+      this.ctx.lineWidth = 1;
+      this.ctx.beginPath();
+      for (let x = minX; x <= maxX + 1; x++) {
+        const sx = Math.round(camera.worldToScreen(x, minY, width, height).x) + 0.5;
+        this.ctx.moveTo(sx, camera.worldToScreen(x, minY, width, height).y);
+        this.ctx.lineTo(sx, camera.worldToScreen(x, maxY + 1, width, height).y);
+      }
+      for (let y = minY; y <= maxY + 1; y++) {
+        const sy = Math.round(camera.worldToScreen(minX, y, width, height).y) + 0.5;
+        this.ctx.moveTo(camera.worldToScreen(minX, y, width, height).x, sy);
+        this.ctx.lineTo(camera.worldToScreen(maxX + 1, y, width, height).x, sy);
+      }
+      this.ctx.stroke();
+    }
+
+    // 10. WAR FOCUS
+    if (overlayMode === 'war' && warFocus) {
+      this.drawWarFocus(camera, width, height, tileSize, entities, cities, kingdoms, warFocus);
+    }
+
+    // 11. SELECTION MARK
+    if (this.selection) {
+      this.drawSelectionMark(camera, width, height, tileSize);
+    }
+
+    // 12. BRUSH CURSOR
     if (this.options.showBrushCursor && brushX !== null && brushY !== null) {
       const screenPos = camera.worldToScreen(brushX, brushY, width, height);
       const brushRadiusPx = brushSize * tileSize;
@@ -3743,8 +4273,8 @@ export class PixelRenderer {
 
     if (nodes.length === 0) return;
 
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
 
     // Lowest grade first, so where a track meets a highway the highway carries
     // through the junction and the track ends against it — the way a minor

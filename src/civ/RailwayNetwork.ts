@@ -265,11 +265,76 @@ export class RailwayNetwork {
 
   // ============================ AI CONSTRUCTION ============================
 
+  // ============================ AI CONSTRUCTION ============================
+
   /**
-   * An industrial realm links its coal to its steel. A kingdom with steam_power
-   * that has a coal mine in one city and a smithy in another surveys a corridor
-   * (reusing the trade pathfinder) and lays track along it over the years,
-   * paying steel and wood out of the mining city's stockpile.
+   * Immediately connects all cities belonging to the same kingdom with railways.
+   */
+  public connectKingdomNetwork(kingdom: Kingdom, world: RailwayWorld, instant: boolean = true): void {
+    const cities = [...kingdom.cityIds].map(id => world.cities.get(id)).filter((c): c is City => !!c);
+    if (cities.length < 2) return;
+
+    const capital = world.cities.get(kingdom.capitalCityId) ?? cities[0];
+    const connectedCities = new Set<string>([capital.id]);
+    let segmentsLaid = 0;
+
+    // Minimum Spanning Tree across kingdom cities
+    while (connectedCities.size < cities.length) {
+      let bestFrom: City | null = null;
+      let bestTo: City | null = null;
+      let bestDistance = Infinity;
+
+      for (const fromId of connectedCities) {
+        const fromCity = world.cities.get(fromId);
+        if (!fromCity) continue;
+
+        for (const candidate of cities) {
+          if (connectedCities.has(candidate.id)) continue;
+          const dist = Math.hypot(fromCity.x - candidate.x, fromCity.y - candidate.y);
+          if (dist < bestDistance) {
+            bestDistance = dist;
+            bestFrom = fromCity;
+            bestTo = candidate;
+          }
+        }
+      }
+
+      if (!bestFrom || !bestTo) break;
+
+      const path = SimplePathfinder.findPath(bestFrom.x, bestFrom.y, bestTo.x, bestTo.y, world.tileMap, 'land');
+      if (path && path.length >= 2) {
+        for (const step of path) {
+          if (this.layTrack(world.tileMap, step.x, step.y, kingdom.id)) {
+            segmentsLaid++;
+          }
+        }
+        connectedCities.add(bestTo.id);
+      } else {
+        // Direct jump if path blocked
+        connectedCities.add(bestTo.id);
+      }
+    }
+
+    if (segmentsLaid > 0) {
+      this.ensureTopology(world.tileMap);
+      chronicle.log(
+        world.year,
+        'economy',
+        `A Grande Malha Ferroviária de ${kingdom.name} conectou todas as suas províncias sobre trilhos de aço!`,
+        {
+          title: `Rede Ferroviária Imperial de ${kingdom.name}`,
+          importance: 'major',
+          scope: 'kingdom',
+          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
+          tags: ['railway', 'industry', 'infrastructure'],
+          consequences: [`Todas as ${cities.length} cidades de ${kingdom.name} agora estão unidas por ferrovias.`]
+        }
+      );
+    }
+  }
+
+  /**
+   * An industrial realm links all its cities with railways.
    */
   public tickConstruction(world: RailwayWorld): void {
     for (const kingdom of world.kingdoms.values()) {
@@ -279,45 +344,67 @@ export class RailwayNetwork {
       const cities = [...kingdom.cityIds].map(id => world.cities.get(id)).filter((c): c is City => !!c);
       if (cities.length < 2) continue;
 
-      const producer = cities.find(c =>
-        c.stock.get('coal') >= SURPLUS_FLOOR &&
-        [...c.buildings.values()].some(b => b.type === 'mine' && b.extractedGood === 'coal' && b.staffing > 0)
-      );
-      const consumer = cities.find(c => c.hasBuilding('smithy'));
-      if (!producer || !consumer || producer.id === consumer.id) continue;
+      // Check if all cities in kingdom are already interconnected
+      let allConnected = true;
+      const capital = world.cities.get(kingdom.capitalCityId) ?? cities[0];
+      for (const c of cities) {
+        if (c.id !== capital.id && !this.connected(world.tileMap, capital, c)) {
+          allConnected = false;
+          break;
+        }
+      }
 
-      const connected = this.connected(world.tileMap, producer, consumer);
-      if (connected) {
+      if (allConnected) {
         this.constructions.delete(kingdom.id);
         continue;
       }
 
+      // Find the best pair to build next (unconnected city to closest connected city)
       let plan = this.constructions.get(kingdom.id);
-      if (!plan || plan.from !== producer.id || plan.to !== consumer.id) {
-        const path = SimplePathfinder.findPath(producer.x, producer.y, consumer.x, consumer.y, world.tileMap, 'land');
-        if (!path || path.length < 2) continue;
-        plan = { from: producer.id, to: consumer.id, path, cursor: 0 };
-        this.constructions.set(kingdom.id, plan);
+      if (!plan) {
+        let bestFrom: City | null = null;
+        let bestTo: City | null = null;
+        let bestDistance = Infinity;
+
+        for (const from of cities) {
+          for (const to of cities) {
+            if (from.id === to.id) continue;
+            if (this.connected(world.tileMap, from, to)) continue;
+            const dist = Math.hypot(from.x - to.x, from.y - to.y);
+            if (dist < bestDistance) {
+              bestDistance = dist;
+              bestFrom = from;
+              bestTo = to;
+            }
+          }
+        }
+
+        if (bestFrom && bestTo) {
+          const path = SimplePathfinder.findPath(bestFrom.x, bestFrom.y, bestTo.x, bestTo.y, world.tileMap, 'land');
+          if (path && path.length >= 2) {
+            plan = { from: bestFrom.id, to: bestTo.id, path, cursor: 0 };
+            this.constructions.set(kingdom.id, plan);
+          }
+        }
       }
 
+      if (!plan) continue;
+
+      const fromCity = world.cities.get(plan.from);
+      const toCity = world.cities.get(plan.to);
+      const yard = (toCity && toCity.stock.get('wood') >= SEGMENT_WOOD) ? toCity : fromCity;
+
       let laid = 0;
-      while (plan.cursor < plan.path.length && laid < LAY_PER_YEAR) {
+      const batchSpeed = 16; // Accelerated construction for intercity networks
+      while (plan.cursor < plan.path.length && laid < batchSpeed) {
         const step = plan.path[plan.cursor];
         plan.cursor++;
-        // Whichever end of the line actually holds the steel pays for the track.
-        // This used to bill the coal mine for both materials — and a mining town
-        // does not forge steel, the city at the other end with the smithy does.
-        // So the check failed on the first segment and no realm ever laid track.
-        const yard = consumer.stock.get('steel') >= SEGMENT_STEEL ? consumer : producer;
-        if (yard.stock.get('steel') < SEGMENT_STEEL || yard.stock.get('wood') < SEGMENT_WOOD) break;
-        // Over water or an already-laid stretch the segment is skipped at no cost.
+
         if (!this.layTrack(world.tileMap, step.x, step.y, kingdom.id)) continue;
-        yard.stock.take('steel', SEGMENT_STEEL);
-        yard.stock.take('wood', SEGMENT_WOOD);
-        const geared = yard.stock.take('machinery', SEGMENT_MACHINERY);
-        if (geared > 0) yard.ledger.recordConsumed('machinery', geared);
-        yard.ledger.recordConsumed('steel', SEGMENT_STEEL);
-        yard.ledger.recordConsumed('wood', SEGMENT_WOOD);
+        if (yard) {
+          yard.stock.take('wood', SEGMENT_WOOD * 0.5);
+          yard.stock.take('steel', SEGMENT_STEEL * 0.5);
+        }
         laid++;
       }
       this.yearlyConstructed += laid;
@@ -325,23 +412,25 @@ export class RailwayNetwork {
       if (plan.cursor >= plan.path.length) {
         this.constructions.delete(kingdom.id);
         this.linesBuilt++;
-        chronicle.log(
-          world.year,
-          'economy',
-          `${kingdom.name} opened a railway line between ${producer.name} and ${consumer.name}, carrying coal to its forges.`,
-          {
-            title: `Railway: ${producer.name}–${consumer.name}`,
-            importance: 'major',
-            scope: 'kingdom',
-            refs: [
-              { kind: 'city', id: producer.id, name: producer.name },
-              { kind: 'city', id: consumer.id, name: consumer.name },
-              { kind: 'kingdom', id: kingdom.id, name: kingdom.name }
-            ],
-            tags: ['railway', 'industry'],
-            consequences: [`Coal now travels by rail between ${producer.name} and ${consumer.name}.`]
-          }
-        );
+        if (fromCity && toCity) {
+          chronicle.log(
+            world.year,
+            'economy',
+            `${kingdom.name} inaugurou a linha férrea ligando ${fromCity.name} a ${toCity.name}!`,
+            {
+              title: `Ferrovia: ${fromCity.name}–${toCity.name}`,
+              importance: 'major',
+              scope: 'kingdom',
+              refs: [
+                { kind: 'city', id: fromCity.id, name: fromCity.name },
+                { kind: 'city', id: toCity.id, name: toCity.name },
+                { kind: 'kingdom', id: kingdom.id, name: kingdom.name }
+              ],
+              tags: ['railway', 'infrastructure'],
+              consequences: [`Transporte rápido e comércio por ferrovia estabelecido entre ${fromCity.name} e ${toCity.name}.`]
+            }
+          );
+        }
       }
     }
   }

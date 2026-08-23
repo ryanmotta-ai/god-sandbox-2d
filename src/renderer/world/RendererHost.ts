@@ -81,7 +81,12 @@ export class RendererHost implements WorldRenderer {
   public render(...args: WorldRenderArguments): void {
     if (this.destroyed) return;
     try {
-      this.activeRenderer.render(...args);
+      if (this.activeRenderer.kind === 'webgpu' && this.gpuRenderer) {
+        this.gpuRenderer.render(...args);
+        this.canvasRenderer.renderHUDOverlay(...args);
+      } else {
+        this.activeRenderer.render(...args);
+      }
     } catch (error) {
       if (this.activeRenderer.kind === 'webgpu') this.activateCanvasFallback(error);
       else throw error;
@@ -121,8 +126,19 @@ export class RendererHost implements WorldRenderer {
       zIndex: '1',
       visibility: 'hidden'
     });
-    this.canvas.parentElement?.insertBefore(gpuCanvas, this.canvas.nextSibling);
+    this.canvas.parentElement?.insertBefore(gpuCanvas, this.canvas);
     this.gpuCanvas = gpuCanvas;
+
+    // Canvas 2D sits above WebGPU as a transparent HUD/Vector overlay layer
+    Object.assign(this.canvas.style, {
+      position: 'absolute',
+      inset: '0',
+      width: '100%',
+      height: '100%',
+      display: 'block',
+      zIndex: '2',
+      background: 'transparent'
+    });
 
     try {
       const renderer = await WebGPUWorldRenderer.create(gpuCanvas, {
@@ -148,7 +164,7 @@ export class RendererHost implements WorldRenderer {
       this.activeRenderer = renderer;
       gpuCanvas.style.visibility = 'visible';
       document.documentElement.dataset.worldRenderer = 'webgpu';
-      console.info('[RENDER-V1D] WebGPU primary renderer active');
+      console.info('[RENDER-V1D] WebGPU primary renderer active with Canvas 2D HUD overlay');
       this.publishTelemetry();
     } catch (error) {
       console.warn('[RENDER-V1D] WebGPU initialization failed; Canvas remains active.', error);
@@ -167,6 +183,15 @@ export class RendererHost implements WorldRenderer {
     this.canvasRenderer.telemetry.active = true;
     this.canvasRenderer.telemetry.status = 'fallback';
     this.canvasRenderer.telemetry.message = message;
+    Object.assign(this.canvas.style, {
+      position: 'absolute',
+      inset: '0',
+      width: '100%',
+      height: '100%',
+      display: 'block',
+      zIndex: '1',
+      background: ''
+    });
     document.documentElement.dataset.worldRenderer = 'canvas-fallback';
     console.warn('[RENDER-V1D] Canvas fallback active:', message);
     this.publishTelemetry();

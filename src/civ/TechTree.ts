@@ -934,6 +934,24 @@ export class ResearchState {
     }
   }
 
+  /** Completes all technologies belonging to a specific era. */
+  public completeEra(era: TechEra): void {
+    for (const tech of Object.values(TECHNOLOGIES)) {
+      if (tech.era === era && !this.forbidden.has(tech.id)) {
+        this.complete(tech.id);
+      }
+    }
+  }
+
+  /** Completes every non-forbidden technology in the entire tree. */
+  public completeAll(): void {
+    for (const tech of Object.values(TECHNOLOGIES)) {
+      if (!this.forbidden.has(tech.id)) {
+        this.complete(tech.id);
+      }
+    }
+  }
+
   public serialize(): any {
     return {
       known: Array.from(this.known),

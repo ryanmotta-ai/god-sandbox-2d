@@ -1064,6 +1064,15 @@
   color: var(--ae-accent-bright);
 }
 .ae-speed-label { line-height: 1; }
+.ae-speed-timeskip {
+  margin-left: var(--ae-space-1);
+  border-left: 1px solid var(--ae-border-inset);
+  padding-left: var(--ae-space-2);
+}
+.ae-speed-timeskip:hover {
+  background: var(--ae-accent-fill);
+  color: var(--ae-accent-bright);
+}
 
 /* World status */
 .ae-world-status {

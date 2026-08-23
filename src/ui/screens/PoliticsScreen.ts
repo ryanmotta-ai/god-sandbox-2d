@@ -517,10 +517,12 @@ export abstract class PoliticsCommandScreen implements Screen, PoliticsScreenHos
       ]),
       el('div', { class: 'ae-pol-divine-actions' }, [
         act('Declarar guerra', other => {
-          if (!sim.diplomacy.declareWar(self, other, sim.currentYear, 'Provocação divina')) {
+          // Forced: a truce between two mortals does not overrule the player, and
+          // the only honest reason left to refuse is a war already under way.
+          if (!sim.diplomacy.declareWar(self, other, sim.currentYear, 'Provocação divina', undefined, true)) {
             this.ctx.toast('Estes reinos já estão em guerra', 'warning');
           }
-        }, 'danger', 'war', 'Abre uma guerra entre os dois reinos, agora.'),
+        }, 'danger', 'war', 'Abre uma guerra entre os dois reinos, agora. Rompe trégua se houver.'),
         act('Forçar paz', other => {
           if (sim.diplomacy.isAtWar(self, other)) sim.diplomacy.endWar(self, other, sim.currentYear);
           else this.ctx.toast('Estes reinos não estão em guerra', 'warning');

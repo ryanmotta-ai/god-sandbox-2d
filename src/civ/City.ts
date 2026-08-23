@@ -143,6 +143,9 @@ export class City {
   };
 
   public tier: SettlementTier = 'camp';
+  /** Urban Blueprint ID that guides street layout and building placement */
+  public blueprintId: string = 'imperial_grid';
+  public blueprintRotation: number = 0;
   /**
    * Highest building-slot budget this settlement has ever earned. A famine or
    * war can drop population (and therefore `tier`) below what it once was, but
@@ -379,7 +382,7 @@ export class City {
         continue;
       }
       if (!b.isOperational()) continue;
-      const def = b.definition.defense;
+      const def = b.definition?.defense;
       if (def) multiplier *= 1 + (def - 1) * (1 + (b.level - 1) * 0.4);
     }
     // Old saves may contain free-standing wall buildings. Keep their value but
@@ -625,6 +628,8 @@ export class City {
       fortificationLines: this.fortificationLines,
       urbanDistricts: this.urbanDistricts,
       urbanSpecialization: this.urbanSpecialization,
+      blueprintId: this.blueprintId,
+      blueprintRotation: this.blueprintRotation,
       peakPopulation: this.peakPopulation,
       urbanCrisisYears: this.urbanCrisisYears,
       urbanLifecycleChronicle: this.urbanLifecycleChronicle
@@ -637,6 +642,8 @@ export class City {
     city.population = data.population ?? 0;
     city.mayorId = data.mayorId ?? null;
     city.tier = data.tier ?? 'camp';
+    city.blueprintId = data.blueprintId ?? 'imperial_grid';
+    city.blueprintRotation = data.blueprintRotation ?? 0;
     // Older saves predate this field: fall back to the current tier's slots so
     // an old save doesn't retroactively invent a lower cap than it was playing
     // with (see `peakBuildingSlots` field comment for why this must never drop).

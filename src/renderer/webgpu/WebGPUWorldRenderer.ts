@@ -283,6 +283,7 @@ export class WebGPUWorldRenderer implements WorldRenderer {
     await this.createPipelineResources();
     const validationError = await this.device.popErrorScope();
     if (validationError) throw validationError;
+    this.recreateDepthTexture();
 
     this.device.addEventListener('uncapturederror', event => {
       console.error('[RENDER-V1D] Uncaptured WebGPU error:', event.error);

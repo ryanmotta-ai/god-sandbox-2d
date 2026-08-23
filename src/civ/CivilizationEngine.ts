@@ -37,6 +37,7 @@ import { buildingArchitecturalStamp, refreshArchitecturalProfile } from './Archi
 import { FortificationPlanner } from './FortificationPlanner';
 import { UrbanDistrictPlanner, urbanContextAt } from './UrbanDistricts';
 import { UrbanLifecycleManager, type UrbanLifecycleResult } from './UrbanLifecycle';
+import { pickBestBlueprintForSite } from './CityBlueprints';
 
 /**
  * The yearly heartbeat of civilization.
@@ -385,6 +386,24 @@ export class CivilizationEngine {
     let labourRemaining = labourPool.length;
     let workerCursor = 0;
 
+    /**
+     * Re-derive who works where before staffing anything.
+     *
+     * `assignedWorkerIds` has two writers — this yearly pass and the per-tick
+     * `assignProfession` — and only the second one ever wrote to it, so every post
+     * the annual engine filled read as empty to both of them and to every panel
+     * that shows "workers 0/4". `workplaceId` on the citizen is the fact that was
+     * always true, and is already what `SaveSystem` rebuilds the books from on
+     * load; doing the same here once a year makes the pass below idempotent
+     * instead of accumulating a fresh year of hires on top of the old ones.
+     */
+    for (const building of allBuildings) building.assignedWorkerIds.clear();
+    for (const resident of this.entitiesByCity.get(city.id) ?? []) {
+      if (resident.hp <= 0 || !resident.workplaceId) continue;
+      city.buildings.get(resident.workplaceId)?.assignedWorkerIds.add(resident.id);
+    }
+    const poolIds = new Set(labourPool.map(e => e.id));
+
     // Assign labour to buildings instead of applying one blanket staffing ratio to
     // every workplace. Famine hits luxuries before farms; a small town can operate
     // one mine properly instead of operating ten buildings at 25% forever.
@@ -394,16 +413,28 @@ export class CivilizationEngine {
         building.staffing = 1;
         continue;
       }
-      const assigned = Math.min(jobs, labourRemaining);
-      building.staffing = jobs <= 0 ? 1 : assigned / jobs;
-      labourRemaining -= assigned;
+      /**
+       * A post held by someone who is no longer in the civilian pool is filled,
+       * not vacant. Enlisting is one-way — a soldier leaves the labour force for
+       * good — so the barracks used to draw four fresh recruits every single year
+       * on top of the ones it already had, with nothing to stop it: a measured 36%
+       * of a town under arms against a target of 5%, and the town starved for it.
+       * Everyone else stays in the pool and is simply redistributed, so for them
+       * this is zero and the year behaves exactly as before.
+       */
+      let garrisoned = 0;
+      for (const id of building.assignedWorkerIds) if (!poolIds.has(id)) garrisoned++;
+
+      const hiring = Math.min(Math.max(0, jobs - garrisoned), labourRemaining);
+      building.staffing = Math.min(jobs, garrisoned + hiring) / jobs;
+      labourRemaining -= hiring;
 
       // Bridge the annual economy to the visible entity layer. EntityAI still owns
       // per-tick movement, but idle workers now receive a real workplace/profession
       // and an existing gather state that the renderer already understands.
-      const workers = labourPool.slice(workerCursor, workerCursor + assigned);
-      workerCursor += assigned;
-      for (const worker of workers) this.assignVisibleWorker(worker, building);
+      const workers = labourPool.slice(workerCursor, workerCursor + hiring);
+      workerCursor += hiring;
+      for (const worker of workers) this.assignVisibleWorker(worker, building, city);
     }
 
     let output = 0;
@@ -605,7 +636,7 @@ export class CivilizationEngine {
     return stored;
   }
 
-  private assignVisibleWorker(worker: Entity, building: Building): void {
+  private assignVisibleWorker(worker: Entity, building: Building, city: City): void {
     // Do not override urgent states. EntityAI remains the authority on combat,
     // fleeing, healing and active construction.
     // Foraging is interruptible: it is what people do when they have no job, and
@@ -621,6 +652,8 @@ export class CivilizationEngine {
     if (!interruptible.includes(worker.aiState)) return;
 
     const type = building.type;
+    /** Cleared when the building is not one this pass knows how to staff. */
+    let hired = true;
     if (type === 'farm' || type === 'pasture') {
       worker.profession = 'farmer';
       worker.aiState = 'gather_food';
@@ -637,15 +670,33 @@ export class CivilizationEngine {
       // soldiers, and the wartime levy below had no barracks veterans to build
       // a regiment around.
       worker.profession = 'soldier';
-      worker.workplaceId = building.id;
       worker.aiState = 'idle';
     } else if (type === 'workshop' || type === 'smithy' || type === 'factory' || type === 'refinery') {
       worker.profession = 'builder';
       // `craft` is a purely visual workplace state, so it can be set safely here.
       // `build` is deliberately avoided: that one reads as erecting a structure.
-      worker.workplaceId = building.id;
       worker.aiState = 'craft';
+    } else {
+      hired = false;
     }
+
+    if (hired) {
+      /**
+       * One workplace, one set of books — the same two lines `assignProfession`
+       * has always run for the per-tick path. Without them the hire existed only
+       * on the citizen, and the building it happened at never heard about it: a
+       * garrison read as empty to the standing-army rule that keeps filling it,
+       * to the wartime levy that checks for open posts, and to every panel that
+       * counts staff. The gather states read `workplaceId` too, so a farmer now
+       * works the farm they were hired at instead of the nearest patch of ground.
+       */
+      if (worker.workplaceId && worker.workplaceId !== building.id) {
+        city.buildings.get(worker.workplaceId)?.assignedWorkerIds.delete(worker.id);
+      }
+      worker.workplaceId = building.id;
+      building.assignedWorkerIds.add(worker.id);
+    }
+
     worker.targetX = building.x + 0.5;
     worker.targetY = building.y + 0.5;
   }
@@ -1293,18 +1344,19 @@ export class CivilizationEngine {
 
         // High streets first, and inner work before outer, so the centre is
         // laid out before the edges rather than a ring appearing in a field.
-        const score = (lot.plannedStreet === 'primary' ? 60 : 0) - Math.hypot(lot.x - city.x, lot.y - city.y);
+        const score = (lot.plannedStreet === 'primary' ? 80 : 20) - Math.hypot(lot.x - city.x, lot.y - city.y) * 2;
         if (!best || score > best.score) best = { x: lot.x, y: lot.y, streetClass: lot.plannedStreet, fromX, fromY, score };
       }
 
       if (!best) return;
 
-      const survey = surveyRoad(map, best.fromX, best.fromY, best.x, best.y, level, 200);
-      if (survey.path.length === 0) return;
-      // Out of materials this year is not a failure, only a delay: the same
-      // tile is still the best candidate next year.
-      if (layRoad(city, map, survey, level).tilesLaid === 0) return;
-      UrbanPlanner.recordStreetPath(city, map, survey.path, best.streetClass);
+      const survey = {
+        path: [{ x: best.x, y: best.y, fromX: best.fromX, fromY: best.fromY, bridge: false }],
+        cost: 1,
+        materials: { wood: 0.5, stone: 0.5 }
+      };
+      if (layRoad(city, map, survey as any, level).tilesLaid === 0) return;
+      UrbanPlanner.recordStreetPath(city, map, [{ x: best.x, y: best.y }], best.streetClass);
       paved.add(`${best.x},${best.y}`);
     }
   }
@@ -1936,6 +1988,9 @@ export class CivilizationEngine {
 
     // Discovery.
     kingdom.research.complete(tech.id);
+    if (tech.id === 'steam_power' || tech.id === 'industrialization') {
+      world.sim?.railways.connectKingdomNetwork(kingdom, world, true);
+    }
     events.emit('techDiscovered', { kingdom, tech, year: world.year });
     chronicle.log(
       world.year,
@@ -1992,6 +2047,31 @@ export class CivilizationEngine {
     const hungry = [...kingdom.cityIds].some(id => (world.cities.get(id)?.famineYears ?? 0) > 0);
     const warlike = kingdom.culture.militarism > 0.6;
 
+    /**
+     * How much a realm wants to arm, and it is not only war that makes it want to.
+     *
+     * `atWar` used to be the sole gate on every military weighting below, which
+     * meant a realm at peace assigned a military technology no value whatsoever.
+     * That is the wrong shape for this tree: the barracks — the only building that
+     * produces a soldier — sits behind bronze working, and research takes decades,
+     * so a realm that may only value arms once the fighting starts is a realm that
+     * begins arming forty years after it needed to. A hostile border and a martial
+     * culture are exactly the two things that make a people prepare in advance,
+     * and they are both already measured. War still counts for more than either.
+     */
+    const martial = atWar
+      ? 1
+      : Math.min(0.8, kingdom.externalThreat * 0.6 + kingdom.culture.militarism * 0.5);
+
+    /**
+     * A realm that cannot arm anyone at all.
+     *
+     * This is a categorical gap, not a preference — the same kind as having burned
+     * through the founding stone and holding no quarry, and it gets the same kind
+     * of nudge: enough to unblock, scaled by how much the realm has to fear.
+     */
+    const defenceless = !kingdom.research.unlockedBuildings().has('barracks');
+
     // A realm that has burned through its founding stone deposit needs mining to
     // unlock the quarry — without it, half the build tree is permanently barred
     // and settlements fill up on wood-only houses. Treat stone scarcity like
@@ -2043,7 +2123,7 @@ export class CivilizationEngine {
 
       const mods = tech.unlocks.modifiers;
       if (mods) {
-        if (atWar && mods.military) score += (mods.military - 1) * (warlike ? 22 : 14);
+        if (mods.military) score += (mods.military - 1) * martial * (warlike ? 22 : 14);
         if (hungry && mods.growth) score += (mods.growth - 1) * 25;
         if (poor && mods.trade) score += (mods.trade - 1) * 16;
         if (mods.research) score += (mods.research - 1) * 12;
@@ -2064,6 +2144,13 @@ export class CivilizationEngine {
       if (stoneStarved) {
         if (tech.id === 'mining') score += 28;
         if (tech.id === 'masonry') score += 14;
+      }
+
+      // Whatever opens the barracks, while the realm has no way to house a
+      // professional soldier. Written against the unlock rather than against
+      // `bronze_working` by name, so the rule survives the building moving.
+      if (defenceless && tech.unlocks.buildings?.includes('barracks')) {
+        score += 10 + martial * 26;
       }
 
       // Coastal realms chase the sea and the technologies needed to reach it.
@@ -4269,6 +4356,7 @@ export class CivilizationEngine {
     const expeditionCost = Math.min(80, metropole.economy.treasury * 0.16);
     metropole.economy.treasury -= expeditionCost;
     const capital = new City(nextId('city'), this.generateSettlementName(parent, world), parent.species, site.x, site.y, parent.founderName, world.year);
+    capital.blueprintId = pickBestBlueprintForSite(world.tileMap, site.x, site.y, metropole);
     const colony = new Kingdom(nextId('king'), this.generateColonialName(metropole, capital.name, world), parent.species, metropole.color, capital.id, world.year);
     colony.establishColony(metropole.id, site.access);
     colony.government = metropole.government;
@@ -4466,6 +4554,7 @@ export class CivilizationEngine {
         city.founderName,
         world.year
       );
+      colony.blueprintId = pickBestBlueprintForSite(world.tileMap, site.x, site.y, kingdom);
       colony.kingdomId = kingdom.id;
       colony.parentCityId = city.id;
       colony.population = settlers;
