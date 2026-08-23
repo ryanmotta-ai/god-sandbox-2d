@@ -1293,9 +1293,7 @@ export class SimulationEngine {
         }
         // Set tiles on fire
         tileMap.applyBrush(Math.floor(bestTarget.x), Math.floor(bestTarget.y), 2, t => {
-          if (t.type !== TerrainType.DEEP_OCEAN && t.type !== TerrainType.SHALLOW_WATER) {
-            t.isOnFire = true;
-          }
+          tileMap.igniteTile(t);
         });
         particles.spawnExplosion(bestTarget.x, bestTarget.y, '#f59e0b', 30);
         e.attackCooldown = ATTACK_COOLDOWN + 5;

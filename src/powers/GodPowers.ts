@@ -11,6 +11,11 @@ import { sound } from '../core/SoundSynth';
 import { rng } from '../core/Random';
 import { SimplePathfinder } from '../ai/Pathfinding';
 import { Camera } from '../renderer/Camera';
+import type { City } from '../civ/City';
+import type { Kingdom } from '../civ/Kingdom';
+import type { Tile } from '../world/Tile';
+import { TERRAINS } from '../world/Biomes';
+import { UrbanDistrictPlanner } from '../civ/UrbanDistricts';
 
 export const ALL_POWERS: PowerDefinition[] = [
   // TERRENO & ALTIMETRIA
@@ -63,6 +68,177 @@ export const ALL_POWERS: PowerDefinition[] = [
   { id: 'plague', name: 'Praga Contagiosa', category: 'destruction', icon: 'warning', description: 'Dispersa peste epidêmica entre a população' }
 ];
 
+/**
+ * What terraforming has to reach beyond the tile grid to leave a coherent world.
+ *
+ * Optional throughout: the powers still work without it, they simply cannot clean
+ * up after themselves, which is the state the whole sanitation pass exists to fix.
+ */
+export interface TerraformContext {
+  cities: Map<string, City>;
+  kingdoms: Map<string, Kingdom>;
+}
+
+/** Terrain a person, a building, a road or a tree cannot be on. */
+function isDrowned(type: TerrainType): boolean {
+  return TERRAINS[type].isWater || type === TerrainType.LAVA;
+}
+
+/**
+ * Reconciles a tile that has just stopped being habitable ground.
+ *
+ * Sinking land used to be a repaint. `remove_land` set the terrain to deep ocean
+ * and nulled `buildingId` — and that was all. The building itself stayed in its
+ * settlement's map, so it kept its workers, kept producing, kept paying and kept
+ * counting toward the city's housing, thirty metres under the sea. The territory
+ * claim, the roads, the railway, the forest and the ore all stayed too: realms
+ * administered stretches of open ocean, caravans routed over drowned highways,
+ * and lumber camps felled a submarine forest. `shallow_water` did not even clear
+ * the building link.
+ *
+ * Everything that cannot exist underwater is therefore removed here, at the tile,
+ * including the people standing on it — a god who sinks the ground someone is on
+ * has drowned them, and that should be a consequence rather than a rendering
+ * artefact.
+ */
+function submergeTile(
+  tile: Tile,
+  tileMap: TileMap,
+  entities: Entity[],
+  spatialHash: SpatialHash<Entity>,
+  ctx?: TerraformContext
+): void {
+  // The building is demolished, not merely unlinked from the ground.
+  if (tile.buildingId && ctx) {
+    const owner = tile.cityId
+      ? ctx.cities.get(tile.cityId) ?? null
+      : [...ctx.cities.values()].find(city => city.buildings.has(tile.buildingId!)) ?? null;
+    if (owner) {
+      const building = owner.buildings.get(tile.buildingId);
+      if (building) {
+        for (const workerId of building.assignedWorkerIds) owner.unassignWorker(workerId);
+        for (const residentId of building.residentIds) {
+          const resident = entities.find(e => e.id === residentId);
+          if (resident) { resident.homeBuildingId = null; resident.homeX = null; resident.homeY = null; }
+        }
+      }
+      owner.removeBuilding(tile.buildingId);
+      UrbanDistrictPlanner.markDirty(owner, tileMap, tile.x, tile.y);
+    }
+  }
+  tile.buildingId = null;
+
+  // Nobody administers a seabed. The claim is dropped on both sides of the ledger.
+  if (tile.cityId) ctx?.cities.get(tile.cityId)?.territory.delete(`${tile.x},${tile.y}`);
+  tile.cityId = null;
+  tile.kingdomId = null;
+
+  // Roads and rail do not cross open water without a bridge, and no bridge
+  // survived what just happened here.
+  tile.roadLevel = 0;
+  tile.roadTraffic = 0;
+  tile.roadDamage = 0;
+  tile.railLevel = 0;
+  tile.railDamage = 0;
+  tile.railOwnerId = null;
+  tile.bridgeName = null;
+
+  // A drowned forest is not a forest, and a flooded seam is not a mine.
+  tile.resourceType = null;
+  tile.resourceAmount = 0;
+  tile.resourceMax = 0;
+
+  // Nothing burns under water.
+  tile.isOnFire = false;
+  tile.fireTimer = 0;
+
+  // And whoever was standing here is in the sea.
+  for (const victim of spatialHash.queryRadius(tile.x + 0.5, tile.y + 0.5, 0.75)) {
+    if (victim.hp <= 0) continue;
+    if (Math.floor(victim.x) !== tile.x || Math.floor(victim.y) !== tile.y) continue;
+    victim.hp = 0;
+  }
+
+  tileMap.markTerrainChanged(tile.x, tile.y);
+}
+
+/**
+ * Keeps a tile's terrain honest about its own altitude.
+ *
+ * `raise_land` and `lower_land` moved `height` and nothing else, which produced
+ * mountains made of deep ocean and trenches of dry soil sitting at sea level —
+ * terrain whose type said one thing and whose elevation said the opposite, which
+ * every consumer downstream (pathfinding, deposits, settlement siting, the
+ * renderer) then disagreed about.
+ */
+function reconcileHeight(
+  tile: Tile,
+  tileMap: TileMap,
+  entities: Entity[],
+  spatialHash: SpatialHash<Entity>,
+  ctx?: TerraformContext
+): void {
+  const wasLand = !isDrowned(tile.type);
+
+  if (tile.height < 0.16) {
+    tile.type = TerrainType.DEEP_OCEAN;
+  } else if (tile.height < 0.3) {
+    tile.type = TerrainType.SHALLOW_WATER;
+  } else if (tile.height > 0.85) {
+    tile.type = TerrainType.MOUNTAIN;
+  } else if (isDrowned(tile.type) && tile.type !== TerrainType.LAVA) {
+    // Ground lifted out of the water comes up as bare soil, not as sea.
+    tile.type = TerrainType.SOIL;
+  }
+
+  if (wasLand && isDrowned(tile.type)) {
+    submergeTile(tile, tileMap, entities, spatialHash, ctx);
+  } else {
+    tileMap.markTerrainChanged(tile.x, tile.y);
+  }
+}
+
+/**
+ * Scatters a spawn across the brush instead of dropping one creature at its centre.
+ *
+ * Every spawn power ignored `radius` completely: it found the single nearest land
+ * tile and placed exactly one animal there, so the brush-size control did nothing
+ * at all for half the palette, and populating a region meant clicking a hundred
+ * times. The count scales with the painted area, and a herd is spread over it
+ * rather than stacked on one square.
+ */
+function spawnAcrossBrush(
+  species: SpeciesType,
+  tx: number,
+  ty: number,
+  radius: number,
+  tileMap: TileMap,
+  spawnEntityFn: (species: SpeciesType, x: number, y: number) => Entity
+): void {
+  /**
+   * Density by what the creature is.
+   *
+   * Herds and settlers fill the ground they are painted on; apex animals do not.
+   * A wide brush of dragons at herd density would put fifty of them on one
+   * valley, which is not a spawn, it is an extinction event.
+   */
+  const tilesPerHead =
+    species === SpeciesType.DRAGON ? 90 :
+    species === SpeciesType.BEAR || species === SpeciesType.MAMMOTH ? 30 :
+    species === SpeciesType.WOLF ? 12 :
+    4;
+  const count = Math.max(1, Math.min(60, Math.round((Math.PI * radius * radius) / tilesPerHead)));
+  for (let i = 0; i < count; i++) {
+    const angle = rng.range(0, Math.PI * 2);
+    // sqrt keeps the scatter even across the disc instead of clumping at the centre.
+    const distance = Math.sqrt(rng.range(0, 1)) * radius;
+    const px = Math.round(tx + Math.cos(angle) * distance);
+    const py = Math.round(ty + Math.sin(angle) * distance);
+    const safe = SimplePathfinder.findNearestLand(px, py, tileMap);
+    if (safe) spawnEntityFn(species, safe.x, safe.y);
+  }
+}
+
 export class PowerExecutor {
   public static executePower(
     powerId: string,
@@ -74,7 +250,8 @@ export class PowerExecutor {
     entities: Entity[],
     spawnEntityFn: (species: SpeciesType, x: number, y: number) => Entity,
     particles: ParticleManager,
-    camera?: Camera
+    camera?: Camera,
+    terraform?: TerraformContext
   ): void {
     const tile = tileMap.getTile(tx, ty);
     if (!tile) return;
@@ -87,25 +264,52 @@ export class PowerExecutor {
         tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SOIL; t.height = 0.5; });
         break;
       case 'remove_land':
-        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.DEEP_OCEAN; t.height = 0.1; t.buildingId = null; });
+        tileMap.applyBrush(tx, ty, radius, t => {
+          t.type = TerrainType.DEEP_OCEAN;
+          t.height = 0.1;
+          submergeTile(t, tileMap, entities, spatialHash, terraform);
+        });
         break;
       case 'raise_land':
-        tileMap.applyBrush(tx, ty, radius, t => { t.height = Math.min(1, t.height + 0.2); });
+        tileMap.applyBrush(tx, ty, radius, t => {
+          t.height = Math.min(1, t.height + 0.2);
+          reconcileHeight(t, tileMap, entities, spatialHash, terraform);
+        });
         break;
       case 'lower_land':
-        tileMap.applyBrush(tx, ty, radius, t => { t.height = Math.max(0, t.height - 0.2); });
+        tileMap.applyBrush(tx, ty, radius, t => {
+          t.height = Math.max(0, t.height - 0.2);
+          reconcileHeight(t, tileMap, entities, spatialHash, terraform);
+        });
         break;
       case 'mountains':
-        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.MOUNTAIN; t.height = 0.9; });
+        tileMap.applyBrush(tx, ty, radius, t => {
+          // A mountain is not a building site either: raising one over a town
+          // buries it exactly as surely as sinking the ground under it.
+          t.type = TerrainType.MOUNTAIN;
+          t.height = 0.9;
+          if (t.buildingId) submergeTile(t, tileMap, entities, spatialHash, terraform);
+          t.type = TerrainType.MOUNTAIN;
+        });
         break;
       case 'shallow_water':
-        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SHALLOW_WATER; t.height = 0.3; });
+        tileMap.applyBrush(tx, ty, radius, t => {
+          t.type = TerrainType.SHALLOW_WATER;
+          t.height = 0.3;
+          submergeTile(t, tileMap, entities, spatialHash, terraform);
+        });
         break;
       case 'biome_sand':
         tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.SAND; t.height = 0.45; });
         break;
       case 'lava':
-        tileMap.applyBrush(tx, ty, radius, t => { t.type = TerrainType.LAVA; t.height = 0.8; t.isOnFire = true; });
+        tileMap.applyBrush(tx, ty, radius, t => {
+          t.type = TerrainType.LAVA;
+          t.height = 0.8;
+          submergeTile(t, tileMap, entities, spatialHash, terraform);
+          t.type = TerrainType.LAVA;
+          t.isOnFire = true;
+        });
         break;
       case 'build_road':
         tileMap.applyBrush(tx, ty, radius, t => {
@@ -174,43 +378,35 @@ export class PowerExecutor {
       case 'spawn_sylvanii':
       case 'spawn_stonekin':
       case 'spawn_emberkin': {
-        const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
-        if (safe) spawnEntityFn(SpeciesType.HUMAN, safe.x, safe.y);
+        spawnAcrossBrush(SpeciesType.HUMAN, tx, ty, radius, tileMap, spawnEntityFn);
         break;
       }
       case 'spawn_deer': {
-        const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
-        if (safe) spawnEntityFn(SpeciesType.DEER, safe.x, safe.y);
+        spawnAcrossBrush(SpeciesType.DEER, tx, ty, radius, tileMap, spawnEntityFn);
         break;
       }
       case 'spawn_wolf': {
-        const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
-        if (safe) spawnEntityFn(SpeciesType.WOLF, safe.x, safe.y);
+        spawnAcrossBrush(SpeciesType.WOLF, tx, ty, radius, tileMap, spawnEntityFn);
         break;
       }
       case 'spawn_bear': {
-        const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
-        if (safe) spawnEntityFn(SpeciesType.BEAR, safe.x, safe.y);
+        spawnAcrossBrush(SpeciesType.BEAR, tx, ty, radius, tileMap, spawnEntityFn);
         break;
       }
       case 'spawn_dragon': {
-        const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
-        if (safe) spawnEntityFn(SpeciesType.DRAGON, safe.x, safe.y);
+        spawnAcrossBrush(SpeciesType.DRAGON, tx, ty, radius, tileMap, spawnEntityFn);
         break;
       }
       case 'spawn_boar': {
-        const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
-        if (safe) spawnEntityFn(SpeciesType.BOAR, safe.x, safe.y);
+        spawnAcrossBrush(SpeciesType.BOAR, tx, ty, radius, tileMap, spawnEntityFn);
         break;
       }
       case 'spawn_eagle': {
-        const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
-        if (safe) spawnEntityFn(SpeciesType.EAGLE, safe.x, safe.y);
+        spawnAcrossBrush(SpeciesType.EAGLE, tx, ty, radius, tileMap, spawnEntityFn);
         break;
       }
       case 'spawn_mammoth': {
-        const safe = SimplePathfinder.findNearestLand(tx, ty, tileMap);
-        if (safe) spawnEntityFn(SpeciesType.MAMMOTH, safe.x, safe.y);
+        spawnAcrossBrush(SpeciesType.MAMMOTH, tx, ty, radius, tileMap, spawnEntityFn);
         break;
       }
 
@@ -265,7 +461,7 @@ export class PowerExecutor {
       // DESTRUCTION & DISASTERS
       case 'lightning': DisasterSystem.triggerLightning(tx, ty, tileMap, spatialHash, particles, camera); break;
       case 'wildfire':
-        tileMap.applyBrush(tx, ty, radius, t => { t.isOnFire = true; });
+        tileMap.applyBrush(tx, ty, radius, t => { tileMap.igniteTile(t); });
         break;
       case 'earthquake': DisasterSystem.triggerEarthquake(tx, ty, tileMap, spatialHash, particles, camera); break;
       case 'meteorite': DisasterSystem.triggerMeteorite(tx, ty, tileMap, spatialHash, particles, camera); break;

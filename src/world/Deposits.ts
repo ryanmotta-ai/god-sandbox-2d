@@ -353,6 +353,8 @@ export function generateDeposits(grid: Tile[][], width: number, height: number, 
   ];
   for (const spec of strategic) placeClusteredResource(grid, width, height, rng, spec, faciesGrid);
 
+  endowEveryLandmass(grid, width, height, rng);
+
   const summary: DepositSummary = { tiles: {}, amount: {} };
   for (let x = 0; x < width; x++) {
     for (let y = 0; y < height; y++) {
@@ -364,4 +366,83 @@ export function generateDeposits(grid: Tile[][], width: number, height: number, 
     }
   }
   return summary;
+}
+
+/** The bare minimum an island needs before a town on it can build anything. */
+const LANDMASS_ESSENTIALS: GoodId[] = ['stone', 'copper', 'iron'];
+/** Land tiles an island needs before it is worth endowing rather than leaving bare. */
+const HABITABLE_LANDMASS = 24;
+
+/**
+ * Guarantees every habitable island the minerals a settlement cannot start without.
+ *
+ * Metal clusters are keyed to highland ground and then drawn from one global pool
+ * of eligible tiles, which is fine on a continent and ruinous on an archipelago:
+ * the one raised island holds every highland tile on the map, so it took every
+ * copper, iron, coal, tin, gold and gem cluster in the world. Every outer island
+ * — all of them described by the blueprint as habitable — came up with no stone
+ * and no metal whatsoever, so a settlement founded there could never build past a
+ * wooden hut, and the archipelago preset was unplayable as anything but the
+ * central island.
+ *
+ * Islands are treated as the geological provinces they are: each one that is big
+ * enough to hold a town gets a modest seam of whatever it is missing, placed on
+ * its highest and rockiest ground. Deliberately small — an outer island should
+ * be able to develop, not rival the mainland.
+ */
+function endowEveryLandmass(grid: Tile[][], width: number, height: number, rng: RandomService): void {
+  const seen = new Uint8Array(width * height);
+
+  for (let sx = 0; sx < width; sx++) {
+    for (let sy = 0; sy < height; sy++) {
+      if (seen[sx * height + sy]) continue;
+      if (!isLand(grid[sx][sy])) { seen[sx * height + sy] = 1; continue; }
+
+      // Flood-fill this island.
+      const landmass: Tile[] = [];
+      const stack: Array<[number, number]> = [[sx, sy]];
+      seen[sx * height + sy] = 1;
+      const held = new Set<GoodId>();
+
+      while (stack.length > 0) {
+        const [x, y] = stack.pop()!;
+        const tile = grid[x][y];
+        landmass.push(tile);
+        if (tile.resourceType) held.add(tile.resourceType);
+
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const key = nx * height + ny;
+          if (seen[key]) continue;
+          seen[key] = 1;
+          if (isLand(grid[nx][ny])) stack.push([nx, ny]);
+        }
+      }
+
+      if (landmass.length < HABITABLE_LANDMASS) continue;
+
+      // Highest ground first: a seam belongs in the island's hills, not its beach.
+      const bedrock = landmass
+        .filter(tile => !tile.buildingId && !tile.cityId)
+        .sort((a, b) => b.height - a.height);
+      if (bedrock.length === 0) continue;
+
+      for (const good of LANDMASS_ESSENTIALS) {
+        if (held.has(good)) continue;
+        // Small islands get one seam; larger ones get a proportionate few.
+        const seams = Math.max(1, Math.min(4, Math.round(landmass.length / 90)));
+        for (let seam = 0; seam < seams; seam++) {
+          // Spread the seams down the island's height ranking so they do not all
+          // land on the single highest tile.
+          const slot = Math.min(bedrock.length - 1, Math.floor(bedrock.length * (seam / Math.max(1, seams)) * 0.4));
+          const host = bedrock[slot];
+          if (!host || host.resourceType) continue;
+          const max = good === 'stone' ? rng.range(55, 120) : rng.range(40, 90);
+          setResource(host, good, max * rng.range(0.7, 1), max);
+        }
+      }
+    }
+  }
 }

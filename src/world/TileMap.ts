@@ -196,12 +196,33 @@ export class TileMap {
     return cost;
   }
 
-  public ignite(x: number, y: number): void {
+  /**
+   * Sets a tile alight, if a tile like that can be alight at all.
+   *
+   * Lightning, meteorites, wildfire brushes and burning raids all used to assign
+   * `isOnFire = true` directly, with no check on what they were setting fire to.
+   * The open ocean burned. A strike in a bay left a patch of sea blazing for ten
+   * ticks, damaging any harbour on it, because nothing in the fire tick ever
+   * asked whether the ground underneath could hold a flame — only *spreading*
+   * fire consulted flammability.
+   *
+   * Returns whether anything actually caught.
+   */
+  public ignite(x: number, y: number): boolean {
     const tile = this.getTile(x, y);
-    if (!tile) return;
+    if (!tile) return false;
+    return this.igniteTile(tile);
+  }
+
+  /** Same guard, for callers already holding the tile. */
+  public igniteTile(tile: Tile): boolean {
+    // Water does not burn. Lava is already burning by definition.
+    if (TERRAINS[tile.type].isWater) return false;
+    if (tile.type !== TerrainType.LAVA && TERRAINS[tile.type].flammability <= 0 && !tile.buildingId) return false;
     tile.isOnFire = true;
     tile.fireTimer = 0;
     this.activeFireTiles.add(tile.x * this.height + tile.y);
+    return true;
   }
 
   public rebuildDerivedIndexes(): void {
@@ -374,6 +395,16 @@ export class TileMap {
             }
           }
 
+          // Molten rock is not a fire that burns out. Lava used to be put through
+          // the same ten-tick timer as a burning thicket, so a volcanic field or
+          // a meteorite crater went cold and inert within seconds of appearing
+          // and then sat there as permanently harmless scenery.
+          if (tile.type === TerrainType.LAVA) {
+            tile.fireTimer = 0;
+            nextActive.add(key);
+            continue;
+          }
+
           // Burn out tile after 10 ticks into non-flammable Soil (Firebreak)
           if (tile.fireTimer >= 10) {
             tile.isOnFire = false;
@@ -507,10 +538,66 @@ export class TileMap {
 
     for (const tile of convertQueue) {
       tile.type = TerrainType.SHALLOW_WATER;
+      // Water puts fire out. Flooding used to change only the terrain type, so a
+      // burning forest that the sea rolled over went on burning under it: the
+      // fire tick kept `isOnFire`, kept damaging the building on the tile, and
+      // kept spreading — an inextinguishable fire on the ocean floor. Rain
+      // already did this; a flood has far better reason to.
+      tile.isOnFire = false;
+      tile.fireTimer = 0;
       this.markRenderDirty(tile.x, tile.y);
     }
-    this.fluidDirty = convertQueue.length > 0;
-    if (convertQueue.length > 0) this.terrainVersion++;
+
+    const quenched = this.quenchLava();
+    this.fluidDirty = convertQueue.length > 0 || quenched > 0;
+    if (convertQueue.length + quenched > 0) this.terrainVersion++;
+  }
+
+  /**
+   * Lava that touches water turns to rock.
+   *
+   * There was no physics between the two at all: molten rock could sit against
+   * the open sea forever and neither changed. Lava now chills into mountain
+   * stone wherever it meets water — which is how a coastline is actually built,
+   * and it gives the lava power a real geological use rather than only a
+   * destructive one. The water it quenched against is boiled off to shallows, so
+   * the new land reads as a shelf rather than a wall in the deep.
+   */
+  private quenchLava(): number {
+    const g = this.grid;
+    const w = this.width;
+    const h = this.height;
+    const cooled: Tile[] = [];
+
+    for (const key of this.activeFireTiles) {
+      const x = Math.floor(key / h);
+      const y = key % h;
+      const tile = g[x]?.[y];
+      if (!tile || tile.type !== TerrainType.LAVA) continue;
+
+      const touchesWater =
+        (x > 0 && TERRAINS[g[x - 1][y].type].isWater) ||
+        (x < w - 1 && TERRAINS[g[x + 1][y].type].isWater) ||
+        (y > 0 && TERRAINS[g[x][y - 1].type].isWater) ||
+        (y < h - 1 && TERRAINS[g[x][y + 1].type].isWater);
+      if (touchesWater) cooled.push(tile);
+    }
+
+    for (const tile of cooled) {
+      tile.type = TerrainType.MOUNTAIN;
+      tile.height = Math.max(tile.height, 0.86);
+      tile.isOnFire = false;
+      tile.fireTimer = 0;
+      this.activeFireTiles.delete(tile.x * h + tile.y);
+      // New rock carries the stone it is made of.
+      if (!tile.resourceType) {
+        tile.resourceType = 'stone';
+        tile.resourceMax = 90;
+        tile.resourceAmount = 90;
+      }
+      this.markTerrainChanged(tile.x, tile.y);
+    }
+    return cooled.length;
   }
 
   public serialize(): any {

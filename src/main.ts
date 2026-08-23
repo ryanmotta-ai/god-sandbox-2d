@@ -794,7 +794,10 @@ class AethoriaGame implements GameContext {
       this.sim.entities,
       (species, x, y) => this.sim.spawnEntity(species, x, y),
       this.particles,
-      this.camera
+      this.camera,
+      // Terraforming needs the settlements and realms to be able to clear up
+      // after itself: a building sunk into the sea has to leave its city's books.
+      { cities: this.sim.cities, kingdoms: this.sim.kingdoms }
     );
   }
 
@@ -968,7 +971,7 @@ class AethoriaGame implements GameContext {
       DisasterSystem.triggerLightning(spot.x, spot.y, this.tileMap, this.sim.spatialHash, this.particles, this.camera, NATURAL_DISASTER_SEVERITY);
       this.toast('Lightning splits the sky', 'disaster');
     } else if (roll < 0.8) {
-      this.tileMap.applyBrush(spot.x, spot.y, 2, t => { t.isOnFire = true; });
+      this.tileMap.applyBrush(spot.x, spot.y, 2, t => { this.tileMap.igniteTile(t); });
       this.toast('A wildfire has broken out', 'disaster');
       chronicle.log(this.sim.currentYear, 'disaster', 'A wildfire swept across the land.');
     } else {

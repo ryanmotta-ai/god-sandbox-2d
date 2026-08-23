@@ -24,7 +24,9 @@ export class DisasterSystem {
     if (camera) camera.triggerShake(10, 0.25);
 
     tileMap.applyBrush(x, y, 1.5, tile => {
-      tile.isOnFire = true;
+      // Lightning over open water flashes and is gone. It used to leave the sea
+      // itself alight.
+      tileMap.igniteTile(tile);
       if (tile.buildingId) tileMap.recordBuildingDamage(tile, .72 * severity, 'disaster');
     });
 
@@ -52,7 +54,7 @@ export class DisasterSystem {
         if (tile.buildingId) tileMap.recordBuildingDamage(tile, 1.25, 'disaster');
       } else if (dist < 3) {
         tile.type = TerrainType.SOIL;
-        tile.isOnFire = true;
+        tileMap.igniteTile(tile);
         if (tile.buildingId) tileMap.recordBuildingDamage(tile, .55, 'disaster');
       }
       tile.resourceType = null;
