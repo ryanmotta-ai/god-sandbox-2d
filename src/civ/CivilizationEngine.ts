@@ -12,6 +12,7 @@ import { TradeNetwork, transportCostPerUnit } from './Trade';
 import { DiplomacyManager, type PeaceSettlement } from './Diplomacy';
 import { culturalAffinity, rememberCulture, updateCulture } from './Culture';
 import { updateSociety } from './Society';
+import { ERA_CLIMATE, WorldEra } from '../world/WeatherEras';
 import { activeLawDefinitions, aggregateLawEffects, chooseLawReform, enactLaw, resetLawDefaults, updateLawMomentum } from './Laws';
 import { GreatPersonManager } from './GreatPersons';
 import { chronicle } from './Chronicle';
@@ -50,6 +51,11 @@ import { UrbanLifecycleManager, type UrbanLifecycleResult } from './UrbanLifecyc
 
 export interface CivWorld {
   year: number;
+  /**
+   * The climatic era in force. Optional so headless harnesses and older callers
+   * still work — absent means a neutral climate.
+   */
+  era?: WorldEra;
   cities: Map<string, City>;
   kingdoms: Map<string, Kingdom>;
   entities: Entity[];
@@ -215,6 +221,9 @@ export class CivilizationEngine {
     // Books close after trade has run, so a year's imports and exports land in
     // the same record as the production and consumption they paid for.
     for (const city of world.cities.values()) city.ledger.rollOver();
+    // Clearing settles before regrowth, so a stand felled this year becomes open
+    // ground now and has to be re-seeded from a surviving neighbour later.
+    world.tileMap.settleDeforestation();
     world.tileMap.regrowResources();
 
     // Road decay: unused roads lose traffic and degrade yearly
@@ -257,7 +266,17 @@ export class CivilizationEngine {
         kingdom.society.factions.workers.radicalization * kingdom.society.factions.workers.influence * 0.18
       : 1;
 
-    const productionMult = techMods.production * (gov?.production ?? 1) * productionCulture * productionSociety * (1 + (lawEffects?.production ?? 0));
+    /**
+     * The climate the settlement is actually farming in.
+     *
+     * Five named climatic eras existed with a fifty-year cycle, an `eraChanged`
+     * event, a renderer tint and a chronicle line — and no effect on anything a
+     * settlement produced. A realm farmed the Glacial Age exactly as productively
+     * as the Age of Abundance. Now a cold century is a hard century.
+     */
+    const climate = ERA_CLIMATE[world.era ?? WorldEra.GOLDEN_AGE];
+    const productionMult = techMods.production * (gov?.production ?? 1) * productionCulture
+      * productionSociety * (1 + (lawEffects?.production ?? 0)) * climate.production;
     const researchMult = techMods.research * (gov?.research ?? 1) * researchCulture * (1 + (lawEffects?.research ?? 0));
 
     // The phase timeline is tiny and durable; detailed lots/blocks remain the
@@ -279,7 +298,7 @@ export class CivilizationEngine {
     if (lifecycle.vacatedBuildingIds.length > 0) this.releaseInactiveBuildingAssignments(city, lifecycle);
     // The Grand Aqueduct's irrigation: the other half of the "+50% capacity and
     // harvest" its own description has always promised the player.
-    this.produceGoods(city, world, productionMult * city.wonderHarvestBonus());
+    this.produceGoods(city, world, productionMult * city.wonderHarvestBonus(), climate.food);
     this.consumeGoods(city, world);
     this.runConstruction(city, world, kingdom);
     this.repairCityInfrastructure(city, world);
@@ -313,7 +332,7 @@ export class CivilizationEngine {
   }
 
   /** Buildings turn real labour, deposits and recipe inputs into goods. */
-  private produceGoods(city: City, world: CivWorld, multiplier: number): void {
+  private produceGoods(city: City, world: CivWorld, multiplier: number, foodClimate: number = 1): void {
     const kingdom = city.kingdomId ? world.kingdoms.get(city.kingdomId) ?? null : null;
 
     // A city's economic workforce is made from real adult humanoid entities. Combat
@@ -393,6 +412,9 @@ export class CivilizationEngine {
       }
 
       let scale = building.outputMultiplier() * multiplier;
+      // A hard winter takes the harvest before it takes the forge: farms and
+      // pastures carry the climate factor on top of the general one.
+      if (def.category === 'food') scale *= foodClimate;
       if (kingdom) {
         // A realm that prizes making things over trading for them works its
         // extraction sites harder. Culture, not blood, is what varies now.
@@ -479,7 +501,7 @@ export class CivilizationEngine {
     // that regrow slowly. That gives a pre-agricultural settlement a genuine but
     // hard Malthusian ceiling — enough to survive and eventually discover
     // agriculture, never enough to become a city without farmland.
-    const foraged = this.forageWildFood(city, world);
+    const foraged = this.forageWildFood(city, world, foodClimate);
     output += foraged * world.market.price('food');
 
     // Timber cut by hand. A settlement with no lumber camp still needs wood for
@@ -539,9 +561,9 @@ export class CivilizationEngine {
   }
 
   /** Draws wild food from the settlement's own territory. Returns units stored. */
-  private forageWildFood(city: City, world: CivWorld): number {
+  private forageWildFood(city: City, world: CivWorld, foodClimate: number = 1): number {
     const byHand = this.citizensGatheringByHand(city, world, 'gather_food');
-    let effort = Math.max(0, city.population - byHand) * FORAGE_PER_CITIZEN;
+    let effort = Math.max(0, city.population - byHand) * FORAGE_PER_CITIZEN * foodClimate;
     if (effort <= 0) return 0;
 
     let gathered = 0;

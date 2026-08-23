@@ -1,6 +1,37 @@
 import { el } from '../core/Dom';
 import type { Screen } from '../core/ScreenManager';
 import type { GameContext } from '../core/GameContext';
+import type { BuildingType } from '../../civ/Building';
+
+/** The four Great Wonders, as they actually stand in the world right now. */
+const WONDERS: { type: BuildingType; icon: string; name: string }[] = [
+  { type: 'monument' as BuildingType, icon: '🗿', name: 'Estátua do Fundador' },
+  { type: 'great_library' as BuildingType, icon: '📚', name: 'Grande Biblioteca' },
+  { type: 'grand_aqueduct' as BuildingType, icon: '🌊', name: 'Grande Aqueduto' },
+  { type: 'colosseum' as BuildingType, icon: '🏛️', name: 'Grande Coliseu' }
+];
+
+function wonderStatuses(ctx: GameContext): { icon: string; name: string; status: string; built: boolean }[] {
+  return WONDERS.map(wonder => {
+    let standing = 0;
+    let building = 0;
+    let ruined = 0;
+    for (const city of ctx.sim.cities.values()) {
+      for (const b of city.buildings.values()) {
+        if (b.type !== wonder.type) continue;
+        if (b.lifecycleState === 'ruin') ruined++;
+        else if (b.isOperational()) standing++;
+        else building++;
+      }
+    }
+    const status = standing > 0
+      ? standing > 1 ? `${standing} construídas` : 'Construído'
+      : building > 0 ? 'Em Obras'
+      : ruined > 0 ? 'Em Ruínas'
+      : 'Não construído';
+    return { icon: wonder.icon, name: wonder.name, status, built: standing > 0 };
+  });
+}
 
 export class DynastyScreen implements Screen {
   public readonly id = 'dynasty' as const;
@@ -10,7 +41,12 @@ export class DynastyScreen implements Screen {
   public build(ctx: GameContext): HTMLElement {
     const kingdoms = Array.from(ctx.sim.kingdoms.values());
     const greatPersons = ctx.sim.entities.filter(e => e.isGreatPerson);
-    const totalWonders = Math.max(1, greatPersons.length);
+    // Wonders standing, counted from the world. This used to be
+    // `max(1, greatPersons.length)` — the number of Great People, floored at one,
+    // reported to the player as a count of structures. A realm with six great
+    // citizens and no wonders was told it had six.
+    const wonders = wonderStatuses(ctx);
+    const totalWonders = wonders.filter(w => w.built).length;
 
     return el('div', { class: 'screen-container glass-panel dynasty-gameawards-container' }, [
       // Top Bar & Title Header
@@ -89,7 +125,20 @@ export class DynastyScreen implements Screen {
                       class: 'btn-inspect-dynasty-tree',
                       style: 'grid-column: span 3; margin-top: 6px; padding: 4px 8px; background: rgba(168,85,247,0.2); border: 1px solid #a855f7; color: #e9d5ff; border-radius: 6px; cursor: pointer; font-size: 11px;',
                       text: '🌳 Ver Árvore Genealógica Imperial',
-                      on: { click: () => { ctx.screens.closeAll(); (ctx as any).hud?.inspector?.inspectEntity(ruler); } }
+                      on: {
+                        click: () => {
+                          // `inspector.inspectEntity` does not exist and never
+                          // did — `?.` guards a nullish inspector, not a missing
+                          // method, so every click on this button threw
+                          // "inspectEntity is not a function" and the family tree
+                          // was unreachable from the dynasty screen. Selecting the
+                          // sovereign and focusing the camera is what the rest of
+                          // the UI does, and what the inspector actually reacts to.
+                          ctx.screens.closeAll();
+                          ctx.selection.select({ kind: 'citizen', id: ruler.id });
+                          ctx.focusOn(ruler.x, ruler.y);
+                        }
+                      }
                     })
                   ]) : el('p', { class: 'desc-text-sm', text: 'O conselho de nobres está em busca de um herdeiro legítimo.' })
                 ]);
@@ -132,14 +181,21 @@ export class DynastyScreen implements Screen {
             el('hr', { class: 'hero-divider' }),
 
             // WONDERS & MONUMENTS GALLERY
+            //
+            // Read from the world. These four chips used to be static DOM with
+            // hardcoded statuses — "Construído", "Em Obras", "Planejado" — so the
+            // screen reported the same four wonders in the same three states in
+            // every game ever played, whether or not a single one existed. A
+            // player who had just finished the Great Library was told it was
+            // still under construction.
             el('div', { class: 'wonders-gallery-box' }, [
               el('h4', { text: '🗿 Maravilhas & Monumentos Históricos' }),
-              el('div', { class: 'wonders-chips-grid' }, [
-                el('div', { class: 'wonder-chip' }, [el('span', { text: '🗿 Estátua do Fundador' }), el('strong', { text: 'Construído' })]),
-                el('div', { class: 'wonder-chip' }, [el('span', { text: '📚 Grande Biblioteca' }), el('strong', { text: 'Em Obras' })]),
-                el('div', { class: 'wonder-chip' }, [el('span', { text: '🌊 Aqueduto Imperial' }), el('strong', { text: 'Planejado' })]),
-                el('div', { class: 'wonder-chip' }, [el('span', { text: '🏛️ Coliseu de Heróis' }), el('strong', { text: 'Planejado' })])
-              ])
+              el('div', { class: 'wonders-chips-grid' }, wonders.map(w =>
+                el('div', { class: 'wonder-chip' }, [
+                  el('span', { text: `${w.icon} ${w.name}` }),
+                  el('strong', { class: w.built ? 'highlight-green' : undefined, text: w.status })
+                ])
+              ))
             ])
           ])
         ])

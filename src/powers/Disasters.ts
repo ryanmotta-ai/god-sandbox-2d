@@ -7,6 +7,7 @@ import { sound } from '../core/SoundSynth';
 import { ParticleManager } from '../renderer/Particles';
 
 import { Camera } from '../renderer/Camera';
+import { events } from '../core/EventBus';
 
 export class DisasterSystem {
   /**
@@ -104,11 +105,25 @@ export class DisasterSystem {
     sound.playMagic();
     const targets = spatialHash.queryRadius(x, y, 4);
     let infected = 0;
+    const struck = new Set<string>();
     for (const e of targets) {
       if (!e.traits.has(TraitId.CURSED)) {
         e.addTrait(TraitId.CURSED);
         infected++;
+        if (e.cityId) struck.add(e.cityId);
       }
+    }
+    /**
+     * Epidemics were the one disaster that never told anybody.
+     *
+     * A plague marked citizens and returned a count that nothing read. There was
+     * no event, so no alert, no chronicle line and no channel in the notification
+     * system at all — a player could infect a quarter of a province and the
+     * interface would report absolutely nothing. Every other disaster in the file
+     * at least shakes the camera.
+     */
+    if (infected > 0) {
+      events.emit('plagueOutbreak', { x, y, infected, cityIds: [...struck] });
     }
     return infected;
   }

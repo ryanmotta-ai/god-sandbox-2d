@@ -442,6 +442,37 @@ export class TileMap {
   }
 
   /**
+   * A forest that has been felled stops being a forest.
+   *
+   * Wood extraction drove `resourceAmount` to zero and left the tile's *type* as
+   * FOREST forever, so a province logged bare for two centuries still rendered as
+   * old-growth woodland, still counted as forest for movement cost, fire spread,
+   * settlement siting and biome statistics, and still seeded reforestation onto
+   * its neighbours as though the trees were standing. Clearing land was invisible
+   * and consequence-free.
+   *
+   * Felled forest becomes grass, which `regrowResources` already knows how to
+   * reforest from a neighbouring stand — so the cycle closes: cut it down and it
+   * returns only if there is still forest nearby to seed it.
+   */
+  public settleDeforestation(): void {
+    for (let x = 0; x < this.width; x++) {
+      for (let y = 0; y < this.height; y++) {
+        const tile = this.grid[x][y];
+        if (tile.type !== TerrainType.FOREST || tile.isOnFire) continue;
+        // Only wood-bearing forest counts as felled: a forest tile that never
+        // held a timber deposit was never logged.
+        if (tile.resourceType !== 'wood' || tile.resourceAmount > 0.5) continue;
+        tile.type = TerrainType.GRASS;
+        tile.resourceType = null;
+        tile.resourceAmount = 0;
+        tile.resourceMax = 0;
+        this.markTerrainChanged(x, y);
+      }
+    }
+  }
+
+  /**
    * Renewable resources creep back toward their original abundance, wild food sprouts on fertile land,
    * and cleared forest reclaims grassland. Mineral and petroleum deposits remain finite.
    * Called once per simulated year.

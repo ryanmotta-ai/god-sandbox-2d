@@ -629,12 +629,46 @@ export class AlertCenter {
       this.note(`Uma nova era começa: ${era}`, 'era');
     });
 
-    // Distinct from `techDiscovered`: this one is a culture-level perk rather than
-    // a realm's research, and it was previously the only event with no channel
-    // besides a toast.
-    events.on('techUnlocked', (d: any) => {
-      if (!d?.perk) return;
-      this.note(`${d.culture ?? 'Um povo'} domina ${String(d.perk).replace(/_/g, ' ')}`, 'technology');
+    /**
+     * `techUnlocked` had no emitter anywhere in the codebase — a listener waiting
+     * for an event that has never once fired. `techDiscovered` above is the real
+     * one, and it was already handled, so this was pure dead weight pretending the
+     * alert channel covered something it did not. Removed rather than kept as a
+     * placeholder: a subscription to nothing is worse than no subscription,
+     * because it reads as coverage.
+     *
+     * These three, in its place, are events the world *does* emit and nothing was
+     * listening for.
+     */
+    events.on('cityOccupied', (d: any) => {
+      const city = this.asCity(d?.city);
+      const occupier = this.asKingdom(d?.occupier);
+      const previous = this.asKingdom(d?.previousOwner);
+      if (!city) return;
+      this.note(
+        `${city.name} está ocupada por ${occupier?.name ?? 'forças inimigas'}${previous ? `, tomada de ${previous.name}` : ''}`,
+        'war',
+        { focus: { x: city.x, y: city.y }, ref: this.cityRef(city) }
+      );
+    });
+
+    events.on('plagueOutbreak', (d: any) => {
+      const infected = Number(d?.infected) || 0;
+      if (infected <= 0) return;
+      const city = this.asCity((d?.cityIds ?? [])[0]);
+      this.note(
+        `Peste: ${infected} ${infected === 1 ? 'pessoa adoeceu' : 'pessoas adoeceram'}${city ? ` em ${city.name}` : ''}`,
+        'disaster',
+        city
+          ? { focus: { x: city.x, y: city.y }, ref: this.cityRef(city) }
+          : { focus: { x: Number(d?.x) || 0, y: Number(d?.y) || 0 } }
+      );
+    });
+
+    events.on('coupStaged', (d: any) => {
+      const kingdom = this.asKingdom(d?.kingdom);
+      if (!kingdom) return;
+      this.note(`Golpe militar em ${kingdom.name}: a junta tomou o poder`, 'politics');
     });
 
     events.on('cityCeded', (d: any) => {

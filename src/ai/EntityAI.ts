@@ -4,6 +4,7 @@ import { TraitId } from '../entities/Traits';
 import { AIState } from '../entities/Needs';
 import { TileMap } from '../world/TileMap';
 import { TerrainType, TERRAINS } from '../world/Biomes';
+import { WorldEra } from '../world/WeatherEras';
 import { SpatialHash } from '../core/SpatialHash';
 import { City } from '../civ/City';
 import { Kingdom, generateKingdomName, getNextKingdomColor } from '../civ/Kingdom';
@@ -226,7 +227,23 @@ export class SimulationEngine {
   private readonly regionalQueryScratch: Entity[] = [];
   private readonly regionalEntityIds = new Set<string>();
 
-  constructor() {}
+  /**
+   * The climatic era in force, mirrored from `EraManager`.
+   *
+   * The manager lives in `main.ts` and the simulation never had a way to see it,
+   * which is exactly why five named climate epochs had no effect on any harvest.
+   * `EraManager.setEra` emits on every change including on load, so subscribing
+   * here keeps the two in step without threading the manager through the whole
+   * yearly chain — and a headless harness that never touches main.ts still runs
+   * under the neutral default.
+   */
+  public currentEra: WorldEra = WorldEra.GOLDEN_AGE;
+
+  constructor() {
+    events.on('eraChanged', (era: any) => {
+      if (typeof era === 'string') this.currentEra = era as WorldEra;
+    });
+  }
 
   private rebuildEntityIndex(): void {
     this.entitiesById.clear();
@@ -377,7 +394,7 @@ export class SimulationEngine {
           {
             const dmg = e.traits.has(TraitId.FLAMMABLE) ? 30 : 15;
             e.hp -= dmg * stride;
-            particles.spawnDamageNumber(e.x, e.y, dmg * stride);
+            particles.spawnDamageNumber(e.x, e.y, dmg * stride, 'critical');
             // AI: Flee from fire
             if (e.aiState !== 'flee') {
               e.aiState = 'flee';
@@ -542,6 +559,7 @@ export class SimulationEngine {
         diplomacy: this.diplomacy,
         market: this.market,
         trade: this.trade,
+        era: this.currentEra,
         spawn: (species, x, y) => this.spawnEntity(species, x, y),
         sim: this
       }));
@@ -1837,7 +1855,7 @@ if (e.kingdomId) {
                 (tx, ty, d, targetEnt) => {
                   if (targetEnt && targetEnt.hp > 0) {
                     targetEnt.hp -= d;
-                    particles.spawnDamageNumber(tx, ty, d);
+                    particles.spawnDamageNumber(tx, ty, d, d >= targetEnt.maxHp * 0.25 ? 'critical' : 'normal');
                     sound.playHit();
                     if (targetEnt.hp <= 0 && e.kingdomId && targetEnt.kingdomId) {
                       e.kills++;
@@ -1858,7 +1876,7 @@ if (e.kingdomId) {
               e.attackCooldown = ATTACK_COOLDOWN;
 
               particles.spawnProjectile(e.x, e.y, target.x, target.y, 'spear_thrust', dmg);
-              particles.spawnDamageNumber(target.x, target.y, dmg);
+              particles.spawnDamageNumber(target.x, target.y, dmg, dmg >= target.maxHp * 0.25 ? 'critical' : 'normal');
               sound.playHit();
 
               if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
@@ -1870,7 +1888,7 @@ if (e.kingdomId) {
               // Standard Melee Blow
               target.hp -= dmg;
               e.attackCooldown = ATTACK_COOLDOWN;
-              particles.spawnDamageNumber(target.x, target.y, dmg);
+              particles.spawnDamageNumber(target.x, target.y, dmg, dmg >= target.maxHp * 0.25 ? 'critical' : 'normal');
               sound.playHit();
 
               if (target.hp <= 0 && e.kingdomId && target.kingdomId) {

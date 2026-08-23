@@ -126,10 +126,19 @@ export class StatsTracker {
           population += city.population;
           territory += city.territory.size;
         }
-        const militia = sim.entities.filter(e => e.kingdomId === k.id);
-        const power = Math.round(
-          militia.reduce((sum, e) => sum + e.damage + e.defense + e.level * 5, 0) + territory * 0.5
-        );
+        /**
+         * The realm's own military power, not a second opinion about it.
+         *
+         * This used to invent its own formula — every citizen's damage plus
+         * defence plus five per level, plus half the territory — which shares no
+         * term with `Kingdom.computePower()`. That is the number every actual
+         * decision in the world is made against: whether to declare war, whether
+         * to submit, whether a peace is dictated or negotiated. So the leaderboard
+         * ranked realms by a strength nothing in the simulation used, and a player
+         * reading it was being told the opposite of what the AI believed. It also
+         * swept the entire entity list once per realm, per refresh.
+         */
+        const power = k.militaryPower || k.computePower();
         return {
           id: k.id,
           name: k.name,

@@ -21,6 +21,7 @@ import { SPECIES_DEFINITIONS } from '../../entities/Species';
 import { TRAIT_DEFINITIONS } from '../../entities/Traits';
 import { SOCIAL_CLASSES, describeOrigin } from '../../entities/Identity';
 import { HUNGER_SEEK_FOOD } from '../../entities/Needs';
+import { PSYCHE_KEYS, type Psyche, type MemoryKind } from '../../entities/Psyche';
 import { BUILDINGS } from '../../civ/Building';
 import { GOODS } from '../../civ/Goods';
 import { buildFamilySummary } from '../../civ/Lineage';
@@ -45,6 +46,7 @@ export function buildCitizenPanel(entity: Entity, host: InspectorHost): Child[] 
     buildNeeds(entity),
     buildLife(entity, host, city, kingdom),
     buildFamily(entity, host, sim),
+    buildPsyche(entity, sim),
     buildEquipment(entity),
     buildTraits(entity),
     buildStats(entity, species.maxAge),
@@ -429,6 +431,34 @@ function buildFamily(entity: Entity, host: InspectorHost, sim: SimulationEngine)
   const family = buildFamilySummary(entity, lookup);
   const rows: Child[] = [];
 
+  /**
+   * The dead are still your parents.
+   *
+   * This panel resolved relatives out of `sim.entities` alone, which holds only
+   * the living. So the moment a citizen's father died, the panel stopped knowing
+   * they had ever had one — and a citizen whose parents were both gone was shown
+   * "no known relatives" with four documented generations behind them and their
+   * whole line recorded in `deceasedAncestors`. The genealogy existed; the panel
+   * simply never looked at it.
+   *
+   * Departed kin render as a plain row with a dagger and their years rather than
+   * a navigable link, because there is nobody left to select.
+   */
+  const departed = (label: string, id: string | null | undefined) => {
+    if (!id) return null;
+    if (lookup(id)) return null; // still alive — the live row already covers them
+    const record = sim.deceasedAncestors.get(id);
+    if (!record) return null;
+    return el('div', { class: 'ae-row ae-row-muted' }, [
+      icon(record.isGreatPerson ? 'crown' : 'history', { size: 16, class: 'ae-row-icon' }),
+      el('span', { class: 'ae-row-label', text: label }),
+      el('span', {
+        class: 'ae-row-value',
+        text: `† ${record.fullName || record.name} (${record.birthYear}–${record.deathYear})`
+      })
+    ]);
+  };
+
   const memberRow = (label: string, member: Entity | null) => {
     if (!member) return null;
     return el('div', { class: 'ae-row' }, [
@@ -448,10 +478,12 @@ function buildFamily(entity: Entity, host: InspectorHost, sim: SimulationEngine)
     ]);
   };
 
-  rows.push(memberRow('Pai', family.father));
-  rows.push(memberRow('Mãe', family.mother));
-  rows.push(memberRow('Cônjuge', family.partner));
+  rows.push(memberRow('Pai', family.father) ?? departed('Pai', entity.fatherId));
+  rows.push(memberRow('Mãe', family.mother) ?? departed('Mãe', entity.motherId));
+  rows.push(memberRow('Cônjuge', family.partner) ?? departed('Cônjuge', entity.partnerId));
   for (const child of family.children) rows.push(memberRow('Filho(a)', child));
+  // Children the citizen outlived. A parent who buried a child has still had one.
+  for (const childId of entity.childrenIds) rows.push(departed('Filho(a) †', childId));
   for (const sibling of family.siblings.slice(0, 4)) rows.push(memberRow('Irmão(ã)', sibling));
 
   const known = rows.filter(Boolean);
@@ -463,13 +495,115 @@ function buildFamily(entity: Entity, host: InspectorHost, sim: SimulationEngine)
     ]),
     known.length
       ? rowList(known)
-      // Not an error state: plenty of citizens are the first of their line.
+      // Now genuinely means what it says: not merely that the relatives are dead,
+      // but that there is no record of any.
       : emptyState({
           icon: 'population',
           title: 'Sem parentes conhecidos',
-          hint: 'Primeiro de sua linhagem, ou seus parentes já morreram e não deixaram registro.',
+          hint: 'Primeiro de sua linhagem — nenhum parente vivo nem registrado entre os antepassados.',
           compact: true
         })
+  ]);
+}
+
+// ============================ INNER LIFE ============================
+
+/** Portuguese labels for the seven dispositions. */
+const PSYCHE_LABELS: Record<keyof Psyche, string> = {
+  courage: 'Coragem',
+  sociability: 'Sociabilidade',
+  ambition: 'Ambição',
+  aggression: 'Agressividade',
+  loyalty: 'Lealdade',
+  curiosity: 'Curiosidade',
+  riskTolerance: 'Tolerância ao risco'
+};
+
+const MEMORY_LABELS: Record<MemoryKind, string> = {
+  bereavement: 'Perdeu alguém da família',
+  war_survived: 'Sobreviveu à guerra',
+  battle: 'Lutou em batalha',
+  moved: 'Deixou seu assentamento',
+  lost_home: 'Perdeu o teto',
+  jobless: 'Ano sem trabalho',
+  famine: 'Ano de fome',
+  fire: 'Viveu o fogo',
+  prospered: 'Ano de prosperidade'
+};
+
+/**
+ * Disposition, memory and ties — the person rather than the unit.
+ *
+ * `Psyche.ts` supplies the three inputs that make two citizens in the same
+ * famine behave differently: a lifelong disposition, a short memory of what has
+ * actually happened to them, and the handful of people they care about. All of it
+ * is simulated every year, all of it is saved, all of it is read by real
+ * decisions — and none of it was visible anywhere in the interface. The player
+ * could watch a citizen flee a war and had no way to find out that this one had
+ * survived one before.
+ */
+function buildPsyche(entity: Entity, sim: SimulationEngine): HTMLElement {
+  const psyche = entity.psyche;
+  const memories = [...(entity.memories ?? [])].sort((a, b) => b.weight - a.weight);
+  const bonds = [...(entity.bonds ?? [])].sort((a, b) => b.strength - a.strength);
+
+  // The two dispositions furthest from the middle are what make this person
+  // distinctive; the rest is the population average and reads as noise.
+  const ranked = PSYCHE_KEYS
+    .map(key => ({ key, value: psyche[key], deviation: Math.abs(psyche[key] - 0.5) }))
+    .sort((a, b) => b.deviation - a.deviation);
+
+  const nameOf = (id: string): string => {
+    const living = sim.entities.find(e => e.id === id);
+    if (living) return living.name;
+    const dead = sim.deceasedAncestors.get(id);
+    return dead ? `† ${dead.name}` : 'alguém que já partiu';
+  };
+
+  return panel({ title: 'Psiquê e Memória', icon: 'history' }, [
+    section('Disposição', [
+      rowList(ranked.map(({ key, value }) =>
+        progressBar({
+          label: PSYCHE_LABELS[key],
+          value,
+          valueText: `${Math.round(value * 100)}%`,
+          size: 'sm',
+          status: value >= 0.66 ? 'positive' : value <= 0.34 ? 'warning' : 'neutral'
+        })
+      ))
+    ], { hint: 'Fixa para a vida e herdada dos pais.' }),
+
+    section('Memórias', [
+      memories.length
+        ? rowList(memories.map(memory => statRow({
+            label: MEMORY_LABELS[memory.kind] ?? memory.kind,
+            value: `ano ${memory.year} · ${Math.round(memory.weight * 100)}%`,
+            icon: memory.kind === 'prospered' ? 'trade' : 'warning',
+            status: memory.kind === 'prospered' ? 'positive' : memory.weight > 0.5 ? 'critical' : 'warning'
+          })))
+        : emptyState({
+            icon: 'history',
+            title: 'Nada digno de lembrança',
+            hint: 'Uma vida sem sobressaltos até aqui. A intensidade de cada memória desvanece a cada ano.',
+            compact: true
+          })
+    ], { hint: 'O trauma sobrevive à boa notícia.' }),
+
+    section('Laços', [
+      bonds.length
+        ? rowList(bonds.map(bond => statRow({
+            label: nameOf(bond.id),
+            value: `${bond.kind === 'friend' ? 'Amizade' : 'Rivalidade'} · ${Math.round(bond.strength * 100)}%`,
+            icon: bond.kind === 'friend' ? 'population' : 'war',
+            status: bond.kind === 'friend' ? 'positive' : 'critical'
+          })))
+        : emptyState({
+            icon: 'population',
+            title: 'Sem laços próximos',
+            hint: 'Ninguém de quem se aproximou nem de quem se afastou o suficiente para contar.',
+            compact: true
+          })
+    ], { hint: 'Crescem com o convívio, desvanecem sem ele.' })
   ]);
 }
 
