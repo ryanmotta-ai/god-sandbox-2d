@@ -5,6 +5,23 @@ import { CITY_ASSET_MANIFEST, cityAssetAtlasKey, cityAssetEntry } from '../asset
 import { hashString, hashToUnit } from '../core/Random';
 import { districtForBuilding } from '../civ/UrbanDistricts';
 
+/**
+ * How much of a tile a building is allowed to take up.
+ *
+ * Both draw paths used to size a building at a full tile wide — the canvas
+ * renderer at `tileSize * levelScale`, the WebGPU one at the asset's own canvas
+ * over the manifest's tile pixels — so an ordinary house filled its plot edge to
+ * edge and a landmark overflowed onto its neighbours. At that size the street
+ * plan, the lot backdrops and the district gaps all disappear behind the
+ * silhouettes, and a town reads as one solid mass rather than as buildings with
+ * space between them.
+ *
+ * One constant for both renderers so they cannot drift apart. Existing anchor and
+ * offset maths is all relative, so shrinking here re-centres each sprite in its
+ * plot and settles it onto the ground without further adjustment.
+ */
+export const BUILDING_DRAW_SCALE = 0.78;
+
 export interface CityBuildingDecoration {
   atlasKey: string;
   assetId: string;

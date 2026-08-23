@@ -11,7 +11,7 @@ import type { OverlayMode } from '../Overlays';
 import { TerrainType } from '../../world/Biomes';
 import type { TileMap } from '../../world/TileMap';
 import type { AtlasRegion } from './TextureAtlas';
-import { resolveCityBuildingVisual } from '../CityVisualResolver';
+import { resolveCityBuildingVisual, BUILDING_DRAW_SCALE } from '../CityVisualResolver';
 import { GOODS } from '../../civ/Goods';
 import { entityArtAtlasKey } from '../../assets/EntityAssetManifest';
 import { resolveEntitySheetAnimation, resolveEntityVisualProfile } from '../EntityVisualResolver';
@@ -310,7 +310,8 @@ export class RenderSnapshotBuilder {
         const levelScale = 1 + (building.level >= 3 ? .08 : building.level === 2 ? .04 : 0)
           + ((kingdom?.capitalCityId === city.id && ['town_center', 'palace', 'keep'].includes(building.type)) ? .07 : 0);
         const identityScale = Math.max(.82, Math.min(1.32, visual.scale));
-        const width = visual.width * levelScale * identityScale, height = visual.height * levelScale * identityScale;
+        const footprint = levelScale * identityScale * BUILDING_DRAW_SCALE;
+        const width = visual.width * footprint, height = visual.height * footprint;
         const x = building.x + .5 - visual.anchorX * width;
         const y = building.y + 1 - visual.anchorY * height;
         push(region, packTint(visual.tint), this.yLayer(building.y, input.tileMap.height, .64, .12), x, y, width, height);

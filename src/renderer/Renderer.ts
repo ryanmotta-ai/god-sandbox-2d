@@ -25,6 +25,7 @@ import { PROP_SCALE, propAspect, roadProp, type RoadProp } from './RoadSprites';
 import { CARAVAN_FRAMES, CARAVAN_PX, STRIDE_TILES, caravanSprite, type CaravanView } from './CaravanSprites';
 import type { SpatialHash } from '../core/SpatialHash';
 import { perfProfiler } from '../perf/PerformanceProfiler';
+import { BUILDING_DRAW_SCALE } from './CityVisualResolver';
 
 /** Deposit tiers so plentiful that drawing every one clutters the whole map. */
 const COMMON_NODE_TIERS = new Set<GoodTier>(['common']);
@@ -1710,8 +1711,16 @@ export class PixelRenderer {
           this.drawLandmarkPresence(city, b, k, screenPos, tileSize);
 
           // Building Drop Shadow
+          // Sized against the sprite, not the tile: a shadow wider than the
+          // building it belongs to is what made small buildings look smudged.
+          const shadowW = tileSize * 0.9 * BUILDING_DRAW_SCALE;
           this.ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
-          this.ctx.fillRect(screenPos.x + 3, screenPos.y + tileSize * 0.7, tileSize * 0.9, tileSize * 0.3);
+          this.ctx.fillRect(
+            screenPos.x + (tileSize - shadowW) * 0.5,
+            screenPos.y + tileSize * 0.72,
+            shadowW,
+            tileSize * 0.26
+          );
 
           // V4 architecture composer: the sprite now reflects the real building
           // level, damage, staffing, extracted resource, era and city species.
@@ -1732,7 +1741,9 @@ export class PixelRenderer {
           const baseScale = b.level >= 3 ? 1.12 : b.level === 2 ? 1.06 : 1;
           const landmarkBoost = this.isLandmark(b.type) ? 0.10 : 0;
           const capitalBoost = !!k && k.capitalCityId === city.id && ['town_center', 'palace', 'keep'].includes(b.type) ? 0.07 : 0;
-          const levelScale = baseScale + landmarkBoost + capitalBoost;
+          // Shared with the WebGPU path so the two renderers cannot disagree
+          // about how much of a plot a building covers. See BUILDING_DRAW_SCALE.
+          const levelScale = (baseScale + landmarkBoost + capitalBoost) * BUILDING_DRAW_SCALE;
           const drawW = tileSize * levelScale;
           const drawH = tileSize * 1.15 * levelScale;
           const drawX = screenPos.x - (drawW - tileSize) * 0.5;
