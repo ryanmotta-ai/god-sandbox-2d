@@ -488,6 +488,26 @@ export class MilitaryLogistics {
   // WHAT THE UI ASKS
   // ============================================================
 
+  /**
+   * The supply lines as they stood, and which fronts were starving.
+   *
+   * These are rebuilt by the next yearly tick, but a save reloaded mid-year had
+   * no lines at all until then: every logistics panel read empty and the
+   * starvation notices already sent were sent again the following year.
+   */
+  public serialize(): any {
+    return { lines: [...this.lines.values()], starved: [...this.starved] };
+  }
+
+  public deserialize(data: any): void {
+    this.lines.clear();
+    this.starved.clear();
+    for (const line of data?.lines ?? []) {
+      this.lines.set(`${line.sectorId}:${line.kingdomId}`, line as SupplyLine);
+    }
+    for (const id of data?.starved ?? []) this.starved.add(id);
+  }
+
   public lineFor(sectorId: string, kingdomId: string): SupplyLine | null {
     return this.lines.get(`${sectorId}:${kingdomId}`) ?? null;
   }

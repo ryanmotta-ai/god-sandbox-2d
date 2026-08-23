@@ -800,6 +800,71 @@ export class SimulationEngine {
   }
 
   /**
+   * Winds up a house whose last member has died.
+   *
+   * The purse and the larder used to be dropped on the floor with the household
+   * object: a family that spent four generations accumulating savings had all of
+   * it deleted the moment the last name under that roof died, even with grown
+   * children living two streets away. Wealth could therefore only ever leave the
+   * economy, never move through it, and no line could compound across the
+   * generations the succession system exists to model.
+   *
+   * Claim runs outward from the household: the nearest living blood — children,
+   * then parents, then siblings — takes the coin and as much of the larder as
+   * their own pantry will hold. What no relative is left to claim escheats: the
+   * food to the settlement's store, the coin to the crown as a death duty. It is
+   * never destroyed, and a realm with no heirs quietly grows rich on them.
+   */
+  private dissolveHousehold(household: Household, dead: Entity): void {
+    const kin: Entity[] = [];
+    const push = (id: string | null | undefined) => {
+      if (!id) return;
+      const relative = this.getEntity(id);
+      if (relative && relative.hp > 0 && relative.householdId !== household.id) kin.push(relative);
+    };
+    for (const childId of dead.childrenIds) push(childId);
+    push(dead.fatherId);
+    push(dead.motherId);
+    // Siblings, through whichever parent is still on record.
+    for (const parentId of [dead.fatherId, dead.motherId]) {
+      const parent = parentId ? this.getEntity(parentId) : null;
+      if (!parent) continue;
+      for (const siblingId of parent.childrenIds) if (siblingId !== dead.id) push(siblingId);
+    }
+
+    const heirHousehold = kin
+      .map(relative => this.households.get(relative.householdId ?? ''))
+      .find((house): house is Household => !!house && house !== household);
+
+    const city = household.cityId ? this.cities.get(household.cityId) : null;
+    const kingdom = city?.kingdomId ? this.kingdoms.get(city.kingdomId) : null;
+
+    // The larder.
+    for (const { good, amount } of household.pantry.entries()) {
+      const taken = household.pantry.take(good, amount);
+      const inherited = heirHousehold ? heirHousehold.pantry.add(good, taken) : 0;
+      const leftover = taken - inherited;
+      if (leftover > 0 && city) {
+        const stored = city.stock.add(good, leftover);
+        city.ledger.recordProduced(good, stored);
+      }
+    }
+
+    // The purse.
+    if (household.coin > 0) {
+      const estate = household.coin;
+      household.coin = 0;
+      if (heirHousehold) {
+        heirHousehold.earn(estate);
+      } else if (kingdom) {
+        kingdom.economy.treasury += kingdom.economy.hasCurrency
+          ? kingdom.economy.fromWorldValue(estate)
+          : estate;
+      }
+    }
+  }
+
+  /**
    * Pays a wage out of a realm's till and reports what was actually handed over.
    *
    * Wages are quoted in world value, because that is the unit a household purse
@@ -3631,7 +3696,10 @@ if (e.kingdomId) {
     // Leave the household. What they were carrying is simply lost with them.
     if (household) {
       household.memberIds.delete(dead.id);
-      if (household.memberIds.size === 0) this.households.delete(household.id);
+      if (household.memberIds.size === 0) {
+        this.dissolveHousehold(household, dead);
+        this.households.delete(household.id);
+      }
     }
     dead.carrying = null;
 

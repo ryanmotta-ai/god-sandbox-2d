@@ -207,6 +207,12 @@ export class SaveSystem {
         needs: e.needs,
         starvingDays: e.starvingDays,
         carrying: e.carrying,
+        // A pregnancy in progress. Without these three fields every expectant
+        // mother in the world miscarried on load, the father's line was lost
+        // even when he was alive, and a posthumous child born after a reload was
+        // fathered by nobody and given a placeholder ancestor.
+        pregnancyTimer: e.pregnancyTimer,
+        pregnantFatherId: e.pregnantFatherId,
         // SOC-V2. Disposition, memory and relations are the person, not a cache —
         // a reload that regenerated them would hand the player a settlement of
         // strangers wearing the same names.
@@ -239,7 +245,23 @@ export class SaveSystem {
       trade: sim.trade.serialize(),
       // WAR-V2: a front's position is progress, not a derived value — a war
       // reloaded mid-campaign must resume where the lines actually were.
-      fronts: sim.fronts.serialize()
+      fronts: sim.fronts.serialize(),
+      /**
+       * The dead.
+       *
+       * Ancestors are not a cache — nothing in a living world can reconstruct a
+       * grandmother who died sixty years ago. Leaving them out broke every family
+       * tree at the first departed generation, so dynastic succession could not
+       * find a claimant's descent, the citizen inspector reported "no known
+       * relatives" for people with four documented generations behind them, and a
+       * child born after its father's death was assigned the invented ancestor
+       * "Pai Ancestral".
+       */
+      deceasedAncestors: [...sim.deceasedAncestors.values()],
+      // Freight and hulls in transit, and the supply lines feeding the fronts.
+      caravans: sim.caravans.serialize(),
+      naval: sim.naval.serialize(),
+      logistics: sim.logistics.serialize()
     };
   }
 
@@ -298,6 +320,8 @@ export class SaveSystem {
       e.birthCityId = ed.birthCityId ?? ed.cityId ?? null;
       e.birthCityName = ed.birthCityName ?? '';
       e.homeBuildingId = ed.homeBuildingId ?? null;
+      e.pregnancyTimer = ed.pregnancyTimer ?? 0;
+      e.pregnantFatherId = ed.pregnantFatherId ?? null;
       e.householdId = ed.householdId ?? null;
       e.wealth = ed.wealth ?? 0;
       e.needs = { ...createNeeds(), ...(ed.needs ?? {}) };
@@ -335,8 +359,12 @@ export class SaveSystem {
       sim.entityChunks.insert(e);
     }
 
-    // Restore Cities
+    // Restore Cities. The spatial index is emptied with them: loading a save on
+    // top of a running game left every destroyed settlement in the grid, and the
+    // lazy `size !== cities.size` rebuild cannot notice when the two counts
+    // happen to match, so those ghosts answered proximity queries forever.
     sim.cities.clear();
+    sim.citySpatialHash.clear();
     for (const cd of data.cities ?? []) {
       const city = City.deserialize(cd);
       sim.cities.set(city.id, city);
@@ -375,5 +403,16 @@ export class SaveSystem {
     if (data.trade) sim.trade.deserialize(data.trade);
     // Older saves predate fronts; a war in one simply starts its lines at zero.
     sim.fronts.deserialize(data.fronts);
+    sim.caravans.deserialize(data.caravans);
+    sim.naval.deserialize(data.naval);
+    sim.logistics.deserialize(data.logistics);
+
+    // The dead, before anything reads a family tree.
+    sim.deceasedAncestors.clear();
+    for (const record of data.deceasedAncestors ?? []) {
+      sim.deceasedAncestors.set(record.id, record);
+    }
+
+    sim.citySpatialHash.rebuild(sim.cities.values());
   }
 }

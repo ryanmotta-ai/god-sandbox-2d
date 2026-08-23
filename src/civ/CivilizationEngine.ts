@@ -1601,7 +1601,18 @@ export class CivilizationEngine {
     for (let i = 0; i < Math.min(count, citizens.length); i++) {
       citizens[i].hp = 0; // The entity layer handles the actual removal
     }
-    city.population = Math.max(0, city.population - count);
+    /**
+     * The head count is *not* decremented here.
+     *
+     * `handleEntityDeath` already takes one off the settlement for every citizen
+     * it buries, and it buries exactly the people this loop just killed. Doing it
+     * here as well took each famine death off the books twice, so a settlement
+     * that lost ten people to hunger reported twenty gone — and every figure
+     * derived from population for the rest of that year (tax base, production,
+     * prosperity, growth, the famine mortality rate itself) was computed against
+     * a settlement half the size of the real one, which deepened the next
+     * famine. Killing is this function's job; counting is the entity layer's.
+     */
   }
 
   // ============================================================
@@ -2238,11 +2249,24 @@ export class CivilizationEngine {
     }
 
     prosperity = cityCount > 0 ? prosperity / cityCount : 0.5;
+    /**
+     * Society is told the tax rate people actually pay, not the one the form of
+     * government nominally implies.
+     *
+     * `gov.taxRate` ignores every fiscal law on the books. A realm that had just
+     * passed punitive taxation looked, to its own population, exactly like one
+     * that had abolished it: `taxPain` never moved, so no faction ever resented a
+     * tax law, and the whole fiscal branch of the law system was invisible to the
+     * people it taxed. `collectTaxes` has always used the effective rate — this
+     * is the same number, so the levy and the resentment finally agree.
+     */
+    const societyLawEffects = aggregateLawEffects(kingdom.laws);
+    const societyTaxRate = clamp(gov.taxRate * (1 + (societyLawEffects.taxMultiplier ?? 0)), 0.01, 0.62);
     kingdom.society = updateSociety(kingdom.society, {
       year: world.year,
       government: kingdom.government,
       economy: gov.economy,
-      taxRate: gov.taxRate,
+      taxRate: societyTaxRate,
       atWar: wars.length > 0,
       wars: wars.length,
       stability: kingdom.economy.stability,
@@ -2259,7 +2283,7 @@ export class CivilizationEngine {
       famineYears,
       warWeariness: kingdom.warWeariness,
       culture: kingdom.culture,
-      laws: aggregateLawEffects(kingdom.laws),
+      laws: societyLawEffects,
       ...this.economicPressures(kingdom, world)
     });
 

@@ -120,6 +120,20 @@ export class NavalSystem {
    * - engineering researched → ocean-going galleons
    * - industrialization researched → fuel-burning steel cruisers
    */
+  /** Hulls at sea, with their cargo and how far along the crossing they were. */
+  public serialize(): any {
+    return { ships: [...this.activeShips.values()] };
+  }
+
+  public deserialize(data: any): void {
+    this.activeShips.clear();
+    this.renderIndex.clear();
+    for (const ship of data?.ships ?? []) {
+      this.activeShips.set(ship.id, ship as Ship);
+    }
+    this.renderIndex.rebuild(this.activeShips.values());
+  }
+
   public static getTierForKingdom(kingdom: Kingdom): ShipTierConfig {
     if (kingdom.research.knows('industrialization')) return SHIP_TIERS[3]; // Cruzador de Aço
     if (kingdom.research.knows('engineering')) return SHIP_TIERS[2]; // Galeão Imperial

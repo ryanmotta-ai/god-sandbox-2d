@@ -114,6 +114,28 @@ export class CaravanSystem {
    * Called once per year to decay road traffic across the entire map.
    * Roads that are no longer used will gradually degrade.
    */
+  /**
+   * The caravans currently on the road, with their cargo and where they had got to.
+   *
+   * A convoy three quarters of the way to market is real freight in transit: it
+   * has already left the seller's warehouse and has not yet reached the buyer's.
+   * Saving without it made every load in the world vanish and every route restart
+   * from its origin, so reloading a busy trading age quietly destroyed a year of
+   * commerce and reset the traffic that had been wearing the roads in.
+   */
+  public serialize(): any {
+    return { caravans: [...this.activeCaravans.values()] };
+  }
+
+  public deserialize(data: any): void {
+    this.activeCaravans.clear();
+    this.renderIndex.clear();
+    for (const caravan of data?.caravans ?? []) {
+      this.activeCaravans.set(caravan.id, caravan as OverlandCaravan);
+    }
+    this.renderIndex.rebuild(this.activeCaravans.values());
+  }
+
   public decayRoadTraffic(tileMap: TileMap): void {
     let topologyChanged = false;
     for (let x = 0; x < tileMap.width; x++) {

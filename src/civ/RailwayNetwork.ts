@@ -49,6 +49,16 @@ const LAY_PER_YEAR = 4;
 /** Steel + wood cost per segment laid. */
 const SEGMENT_STEEL = 1.2;
 const SEGMENT_WOOD = 3;
+/**
+ * Machinery drawn per segment where the realm has any.
+ *
+ * A rail line is rolling stock, cranes and pumps, not only rail and sleeper.
+ * Machinery was the one crafted good in the world with a factory, a recipe, a
+ * three-input supply chain and no consumer at all — it was manufactured purely
+ * to sit in a warehouse. It is optional rather than required so a realm that
+ * reaches steam before industry can still lay track, just more slowly.
+ */
+const SEGMENT_MACHINERY = 0.35;
 /** Track upgrades the AI raises per year (steam → industrialized → electric). */
 const UPGRADE_PER_YEAR = 6;
 /** Steel + wood to raise a segment one level; electrification drops the wood. */
@@ -304,6 +314,8 @@ export class RailwayNetwork {
         if (!this.layTrack(world.tileMap, step.x, step.y, kingdom.id)) continue;
         yard.stock.take('steel', SEGMENT_STEEL);
         yard.stock.take('wood', SEGMENT_WOOD);
+        const geared = yard.stock.take('machinery', SEGMENT_MACHINERY);
+        if (geared > 0) yard.ledger.recordConsumed('machinery', geared);
         yard.ledger.recordConsumed('steel', SEGMENT_STEEL);
         yard.ledger.recordConsumed('wood', SEGMENT_WOOD);
         laid++;

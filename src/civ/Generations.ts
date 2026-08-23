@@ -194,12 +194,25 @@ export function settleEstate(
   }
   dead.wealth = 0;
 
-  // The house passes to the first claimant who has no better one.
-  const roofless = claimants.find(heir => !heir.homeBuildingId);
-  if (dead.homeBuildingId && roofless) {
-    roofless.homeBuildingId = dead.homeBuildingId;
-    roofless.homeX = dead.homeX;
-    roofless.homeY = dead.homeY;
+  /**
+   * The house passes to whoever is actually living in it, or failing that to the
+   * first claimant who has no better one.
+   *
+   * The cohabitation case used to be missed entirely: this looked only for an
+   * heir with `!homeBuildingId`, and a child is born under their mother's roof
+   * with `homeBuildingId` already set. So the one person who unambiguously lives
+   * in the house — the son who never left home — failed the test, no inheritance
+   * was recorded, and `estate.home` stayed false. The caller then never added
+   * anyone to the building's resident list, and the family home was released as
+   * vacant with the family still inside it.
+   */
+  const successorHome =
+    claimants.find(heir => dead.homeBuildingId && heir.homeBuildingId === dead.homeBuildingId) ??
+    claimants.find(heir => !heir.homeBuildingId);
+  if (dead.homeBuildingId && successorHome) {
+    successorHome.homeBuildingId = dead.homeBuildingId;
+    successorHome.homeX = dead.homeX;
+    successorHome.homeY = dead.homeY;
     estate.home = true;
   }
 
