@@ -72,6 +72,14 @@ export interface SocietyProfile {
   peacePressure: number;
   dominantFaction: SocialFactionId;
   lastUnrestYear: number;
+  /**
+   * Year the capital last overturned its own government.
+   *
+   * Kept apart from `lastUnrestYear` so an ordinary strike or a merchants' capital
+   * flight does not put a revolution's cooldown on the clock, and so a realm
+   * cannot be overthrown twice in a decade.
+   */
+  lastRevolutionYear: number;
 }
 
 export interface SocietyTickContext {
@@ -243,7 +251,8 @@ export function createSocietyProfile(government: GovernmentType = 'tribe'): Soci
     warPressure: 0.22,
     peacePressure: 0.28,
     dominantFaction: 'peasants',
-    lastUnrestYear: 0
+    lastUnrestYear: 0,
+    lastRevolutionYear: 0
   });
 }
 
@@ -260,6 +269,7 @@ export function deserializeSocietyProfile(data: any, government: GovernmentType 
   }
 
   base.lastUnrestYear = data.lastUnrestYear ?? 0;
+  base.lastRevolutionYear = data.lastRevolutionYear ?? 0;
   return recomputeSociety(base);
 }
 
@@ -287,6 +297,7 @@ export function updateSociety(profile: SocietyProfile, ctx: SocietyTickContext):
   }
 
   next.lastUnrestYear = profile.lastUnrestYear ?? 0;
+  next.lastRevolutionYear = profile.lastRevolutionYear ?? 0;
   return recomputeSociety(next);
 }
 

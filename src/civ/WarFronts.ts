@@ -36,6 +36,11 @@ const SECTOR_MERGE = 9;
 export const SECTOR_RADIUS = 9;
 /** Soldiers a side needs in a sector before it counts as holding the line at all. */
 const SECTOR_MIN_PRESENCE = 2;
+/**
+ * How close an invading army has to get to an enemy settlement to open a front
+ * on it, regardless of how far apart the two realms' own borders are.
+ */
+const EXPEDITION_RANGE = 14;
 /** Ground handed over per year at full dominance, in tiles. */
 const MAX_TILES_PER_YEAR = 9;
 /**
@@ -192,12 +197,108 @@ export class WarFrontSystem {
       }
     }
 
+    this.openExpeditionSectors(world, live);
+
     // A sector whose war ended, or whose facing settlements are gone, closes.
     for (const [id, sector] of [...this.sectors]) {
       if (live.has(id)) continue;
       if (world.diplomacy.isAtWar(sector.aId, sector.bId)) continue;
       this.sectors.delete(id);
       this.announced.delete(id);
+    }
+  }
+
+  /**
+   * Opens a front wherever an invading army is actually standing.
+   *
+   * Sectors were derived purely from pairs of *settlements* within
+   * `CONTACT_RANGE` of each other. Two realms further apart than that formed no
+   * front anywhere on the map, no matter what happened between them: an
+   * expeditionary force could cross the world, camp outside an enemy capital and
+   * still be fighting a war with no line, no supply sectors and nothing for
+   * logistics to feed. Overseas and long-range wars were structurally
+   * unfightable — the whole front, supply and attrition layer simply did not
+   * apply to them.
+   *
+   * A war is not fought where two capitals happen to be near each other. It is
+   * fought where the soldiers are, so a sector opens on any settlement an enemy
+   * army has reached — but only for wars that have no line anywhere else.
+   *
+   * That last restriction is the important one. Where the two realms already face
+   * each other, the settlement-derived front is the whole point of this system: a
+   * besieger has to win the countryside before the walls are worth attacking, and
+   * dropping an extra sector on top of the town he is standing next to would hand
+   * him the ground for free and let a lone warband annex a realm by loitering.
+   * Expedition sectors exist to give a front to wars that have none at all, not to
+   * add a second one to wars that do.
+   */
+  private openExpeditionSectors(world: FrontsWorld, live: Set<string>): void {
+    // Fronts that the facing-settlement pass already gave a line to.
+    const established = new Set<string>();
+    for (const sector of this.sectors.values()) {
+      if (live.has(sector.id)) established.add(sector.frontId);
+    }
+    // Soldiers bucketed by coarse cell, so this stays one pass over entities plus
+    // a small constant lookup per settlement rather than a full cross product.
+    const cell = EXPEDITION_RANGE;
+    const buckets = new Map<string, Map<string, number>>();
+    for (const e of world.entities) {
+      if (!e.kingdomId || e.hp <= 0 || e.isChild) continue;
+      if (e.profession !== 'soldier' && e.profession !== 'king') continue;
+      const key = `${Math.floor(e.x / cell)},${Math.floor(e.y / cell)}`;
+      let byRealm = buckets.get(key);
+      if (!byRealm) { byRealm = new Map(); buckets.set(key, byRealm); }
+      byRealm.set(e.kingdomId, (byRealm.get(e.kingdomId) ?? 0) + 1);
+    }
+    if (buckets.size === 0) return;
+
+    for (const city of world.cities.values()) {
+      const defenderId = city.kingdomId;
+      if (!defenderId) continue;
+
+      const cx = Math.floor(city.x / cell);
+      const cy = Math.floor(city.y / cell);
+      const invaders = new Map<string, number>();
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const byRealm = buckets.get(`${cx + dx},${cy + dy}`);
+          if (!byRealm) continue;
+          for (const [realmId, count] of byRealm) {
+            if (realmId === defenderId) continue;
+            if (!world.diplomacy.isAtWar(realmId, defenderId)) continue;
+            invaders.set(realmId, (invaders.get(realmId) ?? 0) + count);
+          }
+        }
+      }
+
+      for (const [invaderId, count] of invaders) {
+        if (count < SECTOR_MIN_PRESENCE) continue;
+
+        const fid = frontKey(invaderId, defenderId);
+        if (established.has(fid)) continue;
+        const existing = [...this.sectors.values()].find(
+          sector => sector.frontId === fid && Math.hypot(sector.x - city.x, sector.y - city.y) <= SECTOR_MERGE
+        );
+        if (existing) { live.add(existing.id); continue; }
+
+        const [aId, bId] = invaderId < defenderId ? [invaderId, defenderId] : [defenderId, invaderId];
+        const id = `${fid}@${Math.round(city.x)},${Math.round(city.y)}`;
+        if (this.sectors.has(id)) { live.add(id); continue; }
+
+        this.sectors.set(id, {
+          id, frontId: fid, aId, bId,
+          x: city.x, y: city.y,
+          push: 0,
+          strengthA: 0, strengthB: 0,
+          soldiersA: 0, soldiersB: 0,
+          supplyA: 1, supplyB: 1,
+          groundTakenByA: 0, groundTakenByB: 0,
+          casualtiesA: 0, casualtiesB: 0,
+          lastBattleYear: null,
+          openedYear: world.year
+        });
+        live.add(id);
+      }
     }
   }
 
@@ -575,6 +676,31 @@ export class WarFrontSystem {
 
   public isIsolated(cityId: string): boolean {
     return this.isolated.has(cityId);
+  }
+
+  /**
+   * How well fed a realm's troops are around a given settlement, 0..1.
+   *
+   * Logistics computes `supplyA`/`supplyB` for every sector and the field battle
+   * already scales strength by it — but siege resolution never read it at all, so
+   * a besieging army at the end of a severed line pressed the walls exactly as
+   * hard as one with a working railhead behind it. Starving out a besieger by
+   * cutting his supply was impossible; the only thing supply could do was thin
+   * the men standing in a sector.
+   *
+   * Returns 1 where no front has an opinion, so a siege beyond the reach of any
+   * sector is judged on its own merits rather than penalised for the silence.
+   */
+  public supplyNear(city: City, kingdomId: string): number {
+    let best: number | null = null;
+    for (const sector of this.sectors.values()) {
+      const side = this.sideOf(sector, kingdomId);
+      if (side === null) continue;
+      if (Math.hypot(sector.x - city.x, sector.y - city.y) > SECTOR_RADIUS * 1.6) continue;
+      const supply = side === 'a' ? sector.supplyA : sector.supplyB;
+      best = best === null ? supply : Math.max(best, supply);
+    }
+    return best ?? 1;
   }
 
   // ============================================================

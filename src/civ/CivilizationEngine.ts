@@ -2339,6 +2339,8 @@ export class CivilizationEngine {
     const workers = kingdom.society.factions.workers;
     const reformists = kingdom.society.factions.reformists;
     const frontier = kingdom.society.factions.frontier;
+    const clergy = kingdom.society.factions.clergy_scholars;
+    const bureaucrats = kingdom.society.factions.bureaucrats;
     const gov = GOVERNMENTS[kingdom.government];
 
     if (peasants.satisfaction < 0.25 && peasants.radicalization > 0.48 && kingdom.foodSecurity < 0.42 && rng.chance(0.18)) {
@@ -2412,6 +2414,72 @@ export class CivilizationEngine {
       return;
     }
 
+    /**
+     * The army takes the palace.
+     *
+     * `coupRisk` was computed every year, displayed in three separate panels, fed
+     * into legitimacy and read by the government chooser — and could never
+     * actually depose anybody. The only thing a coup-risk of 90% produced was a
+     * chronicle line about officers issuing "a public warning to the court". The
+     * whole variable was theatre.
+     *
+     * Past the threshold the junta takes over for real: the throne is vacated so
+     * succession has to find someone new, the realm reorganises itself under
+     * whatever military order it can sustain, and the officers who did it are
+     * satisfied while everyone who did not is not.
+     */
+    if (military.satisfaction < 0.3 && military.influence > 0.22 && kingdom.society.coupRisk > 0.65 && rng.chance(0.3)) {
+      const deposed = kingdom.rulerId ? world.entities.find(e => e.id === kingdom.rulerId) ?? null : null;
+      // Whatever hard order the realm actually has the political theory for. An
+      // army that seizes power does not invent a constitution to do it under.
+      const available = kingdom.research.unlockedGovernments();
+      const nextOrder = (['empire', 'monarchy', 'feudal_kingdom', 'chiefdom'] as const)
+        .find(order => available.includes(order)) ?? kingdom.government;
+
+      kingdom.rulerId = null;
+      if (deposed) deposed.profession = 'none';
+      if (nextOrder !== kingdom.government) kingdom.adoptGovernment(nextOrder as any, world.year);
+
+      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.22, 0, 1);
+      kingdom.legitimacy = clamp(kingdom.legitimacy - 0.3, 0, 1);
+      kingdom.society.coupRisk = clamp(kingdom.society.coupRisk - 0.45, 0, 1);
+      military.satisfaction = clamp(military.satisfaction + 0.4, 0, 1);
+      military.influence = clamp(military.influence + 0.18, 0, 1);
+      for (const other of [nobles, merchants, reformists, bureaucrats, clergy, peasants, workers]) {
+        other.satisfaction = clamp(other.satisfaction - 0.09, 0, 1);
+        other.radicalization = clamp(other.radicalization + 0.07, 0, 1);
+      }
+      rememberCulture(kingdom.culture, 'revolution', world.year, 0.85, 'O exército tomou o poder e a corte foi dissolvida.');
+      kingdom.society.lastUnrestYear = world.year;
+      chronicle.log(
+        world.year,
+        'kingdom',
+        `Uma junta militar tomou o poder em ${kingdom.name}${deposed ? ` e depôs ${deposed.fullName}` : ''}.`,
+        {
+          title: `Golpe Militar em ${kingdom.name}`,
+          importance: 'legendary',
+          scope: 'kingdom',
+          refs: [
+            { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
+            ...(deposed ? [{ kind: 'person' as const, id: deposed.id, name: deposed.fullName }] : [])
+          ],
+          tags: ['society', 'coup', 'military', 'government'],
+          causes: [`O risco de golpe atingiu ${Math.round(kingdom.society.coupRisk * 100 + 45)}% com o exército insatisfeito e influente.`],
+          consequences: [
+            'O trono ficou vago e a sucessão terá de encontrar um novo soberano.',
+            `A ordem política do reino passou a ${nextOrder}.`,
+            'A legitimidade e a estabilidade caíram bruscamente.'
+          ],
+          threadId: `coup:${kingdom.id}:${world.year}`,
+          threadTitle: `Golpe em ${kingdom.name}`
+        }
+      );
+      events.emit('coupStaged', { kingdom, deposed, government: nextOrder, year: world.year });
+      events.emit('societyUnrest', { kingdom, faction: 'military', year: world.year });
+      return;
+    }
+
+    // Short of an outright coup, the officers still make themselves heard.
     if (military.satisfaction < 0.28 && military.influence > 0.24 && kingdom.society.coupRisk > 0.28 && rng.chance(0.08)) {
       kingdom.economy.stability = clamp(kingdom.economy.stability - 0.1, 0, 1);
       kingdom.legitimacy = clamp(kingdom.legitimacy - 0.08, 0, 1);
@@ -2480,6 +2548,85 @@ export class CivilizationEngine {
         }
       );
       events.emit('societyUnrest', { kingdom, faction: 'reformists', year: world.year });
+      return;
+    }
+
+    /**
+     * The clergy and the scholars.
+     *
+     * Both of these factions had influence, loyalty, satisfaction and
+     * radicalization tracked every year, were read by the legitimacy formula and
+     * the succession scorer, and had not one event of their own. Six factions
+     * could make trouble; these two could only ever be a number on a panel. A
+     * learned order that has lost faith in the crown withdraws its blessing —
+     * which is a legitimacy crisis, and for a realm that keeps its scholars in
+     * the same faction, a research one too.
+     */
+    if (clergy.satisfaction < 0.3 && clergy.influence > 0.16 && rng.chance(0.12)) {
+      kingdom.legitimacy = clamp(kingdom.legitimacy - 0.11, 0, 1);
+      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.05, 0, 1);
+      // Scholarship stops where patronage stops.
+      kingdom.research.progress = Math.max(0, kingdom.research.progress * 0.82);
+      clergy.radicalization = clamp(clergy.radicalization + 0.08, 0, 1);
+      kingdom.society.lastUnrestYear = world.year;
+      chronicle.log(
+        world.year,
+        'society',
+        `Templos e escolas de ${kingdom.name} retiraram sua bênção à coroa e fecharam suas portas.`,
+        {
+          title: `Cisma Clerical em ${kingdom.name}`,
+          importance: 'major',
+          scope: 'kingdom',
+          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
+          tags: ['society', 'unrest', 'clergy', 'legitimacy'],
+          causes: ['O clero e os eruditos perderam a confiança na corte.'],
+          consequences: [
+            'A legitimidade do soberano foi publicamente contestada.',
+            'A pesquisa em curso perdeu patrocínio e recuou.'
+          ],
+          threadId: `unrest:${kingdom.id}:${world.year}`,
+          threadTitle: `Inquietação em ${kingdom.name}`
+        }
+      );
+      events.emit('societyUnrest', { kingdom, faction: 'clergy_scholars', year: world.year });
+      return;
+    }
+
+    /**
+     * The bureaucracy.
+     *
+     * The one faction whose discontent has a mechanical meaning nothing else can
+     * express: when the clerks stop working, the state stops reaching its own
+     * provinces. That is administrative reach, and until now no event in the game
+     * could move it.
+     */
+    if (bureaucrats.satisfaction < 0.3 && bureaucrats.influence > 0.15 && kingdom.cityIds.size > 1 && rng.chance(0.12)) {
+      kingdom.administrativeReach = clamp(kingdom.administrativeReach - 0.14, 0, 1);
+      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.06, 0, 1);
+      // A state that cannot collect cannot spend.
+      kingdom.economy.treasury *= 0.93;
+      bureaucrats.radicalization = clamp(bureaucrats.radicalization + 0.07, 0, 1);
+      kingdom.society.lastUnrestYear = world.year;
+      chronicle.log(
+        world.year,
+        'society',
+        `A administração de ${kingdom.name} parou: registros sem lançamento, tributos sem cobrança, ordens sem cumprimento.`,
+        {
+          title: `Paralisia Administrativa em ${kingdom.name}`,
+          importance: 'major',
+          scope: 'kingdom',
+          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
+          tags: ['society', 'unrest', 'bureaucrats', 'administration'],
+          causes: ['O corpo burocrático, insatisfeito e influente, cruzou os braços.'],
+          consequences: [
+            'O alcance administrativo do reino sobre suas províncias caiu.',
+            'A arrecadação do ano foi perdida em parte.'
+          ],
+          threadId: `unrest:${kingdom.id}:${world.year}`,
+          threadTitle: `Inquietação em ${kingdom.name}`
+        }
+      );
+      events.emit('societyUnrest', { kingdom, faction: 'bureaucrats', year: world.year });
       return;
     }
 
@@ -4276,12 +4423,109 @@ export class CivilizationEngine {
    * Distant, starved or unstable settlements under heavy war weariness secede
    * to form independent break-away realms, causing realistic imperial collapse.
    */
+  /**
+   * A revolution in the capital.
+   *
+   * The capital was flatly exempt from unrest — `continue` on the very first line
+   * of the secession loop — and any realm of one city was exempt from the whole
+   * function. So the two places most likely to boil over in history, the seat of
+   * power and the small desperate state, were the only two that could not: a
+   * one-city realm could starve at zero legitimacy for three centuries with no
+   * political consequence whatsoever, and no dynasty in the world was ever
+   * overthrown by its own people in its own capital.
+   *
+   * A capital does not secede — it *is* the realm. What happens there is a change
+   * of regime: the crown falls, the government is replaced by whatever the people
+   * have the political theory to demand, and the realm continues under new
+   * management with its legitimacy reset and its memory of the day intact.
+   */
+  private tryCapitalRevolution(kingdom: Kingdom, capital: City, world: CivWorld): void {
+    // Revolutions need a crowd, real hunger or real anger, and a decade between them.
+    if (capital.population < 8) return;
+    if (world.year - kingdom.society.lastRevolutionYear < 20) return;
+
+    const society = kingdom.society;
+    const pressure =
+      society.revoltRisk * 0.34 +
+      (1 - kingdom.legitimacy) * 0.26 +
+      Math.max(0, 0.45 - kingdom.economy.stability) * 0.4 +
+      society.reformPressure * 0.18 +
+      Math.min(0.25, capital.famineYears * 0.06) +
+      (kingdom.warWeariness / 100) * 0.14 -
+      kingdom.culture.authority * 0.12;
+
+    if (pressure < 0.55) return;
+    if (!rng.chance(0.06 * (pressure - 0.35))) return;
+
+    const deposed = kingdom.rulerId ? world.entities.find(e => e.id === kingdom.rulerId) ?? null : null;
+    const available = kingdom.research.unlockedGovernments();
+    // The crowd installs the most answerable order it knows how to ask for.
+    const nextOrder = (['republic', 'constitutional_monarchy', 'communist_state', 'monarchy', 'chiefdom'] as const)
+      .find(order => order !== kingdom.government && available.includes(order));
+
+    kingdom.rulerId = null;
+    if (deposed) deposed.profession = 'none';
+    if (nextOrder) kingdom.adoptGovernment(nextOrder, world.year);
+
+    kingdom.dynasty = '';
+    kingdom.legitimacy = clamp(0.34 + pressure * 0.12, 0, 1);
+    kingdom.economy.stability = clamp(kingdom.economy.stability - 0.16, 0, 1);
+    society.revoltRisk = clamp(society.revoltRisk - 0.4, 0, 1);
+    society.reformPressure = clamp(society.reformPressure - 0.35, 0, 1);
+    society.lastRevolutionYear = world.year;
+    society.lastUnrestYear = world.year;
+
+    // The people who made it are heard; those who held the old order are not.
+    for (const id of ['peasants', 'workers', 'reformists'] as const) {
+      society.factions[id].satisfaction = clamp(society.factions[id].satisfaction + 0.28, 0, 1);
+      society.factions[id].radicalization = clamp(society.factions[id].radicalization - 0.2, 0, 1);
+      society.factions[id].influence = clamp(society.factions[id].influence + 0.06, 0, 1);
+    }
+    for (const id of ['nobles', 'clergy_scholars'] as const) {
+      society.factions[id].satisfaction = clamp(society.factions[id].satisfaction - 0.2, 0, 1);
+      society.factions[id].influence = clamp(society.factions[id].influence - 0.08, 0, 1);
+    }
+
+    capital.prosperity = clamp(capital.prosperity - 0.1, 0, 1);
+    rememberCulture(kingdom.culture, 'revolution', world.year, 0.92,
+      `O povo de ${capital.name} derrubou a antiga ordem.`);
+    kingdom.culture.authority = clamp(kingdom.culture.authority - 0.14, 0, 1);
+    kingdom.culture.openness = clamp(kingdom.culture.openness + 0.1, 0, 1);
+
+    chronicle.log(
+      world.year,
+      'rebellion',
+      `O povo de ${capital.name} tomou as ruas e derrubou o governo de ${kingdom.name}${deposed ? `; ${deposed.fullName} foi deposto` : ''}.`,
+      {
+        title: `Revolução de ${capital.name}`,
+        importance: 'legendary',
+        scope: 'kingdom',
+        refs: [
+          { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
+          { kind: 'city', id: capital.id, name: capital.name },
+          ...(deposed ? [{ kind: 'person' as const, id: deposed.id, name: deposed.fullName }] : [])
+        ],
+        tags: ['rebellion', 'revolution', 'government', 'capital'],
+        causes: [
+          `A pressão popular atingiu ${Math.round(pressure * 100)}% na capital.`,
+          ...(capital.famineYears > 0 ? [`${capital.name} passava fome havia ${capital.famineYears} anos.`] : [])
+        ],
+        consequences: [
+          nextOrder ? `A ordem política passou a ${nextOrder}.` : 'A coroa caiu sem uma ordem sucessora clara.',
+          'A dinastia foi encerrada e o trono ficou vago.'
+        ],
+        threadId: `revolution:${kingdom.id}:${world.year}`,
+        threadTitle: `Revolução em ${kingdom.name}`
+      }
+    );
+    events.emit('rebellionOccurred', { kingdom, city: capital, kind: 'revolution', year: world.year });
+  }
+
   private tickRebellions(world: CivWorld): void {
     if (world.year < 15) return;
 
     for (const kingdom of [...world.kingdoms.values()]) {
       if (kingdom.isColony) continue;
-      if (kingdom.cityIds.size <= 1) continue; // Single-city realms cannot split
       if (
         kingdom.economy.stability > 0.42 &&
         kingdom.warWeariness < 60 &&
@@ -4291,6 +4535,13 @@ export class CivilizationEngine {
 
       const capital = world.cities.get(kingdom.capitalCityId);
       if (!capital) continue;
+
+      // The capital can rise too — but against its own government, not against
+      // the realm. This is checked before secession because a revolution in the
+      // seat of power is the one thing that can prevent a break-up.
+      this.tryCapitalRevolution(kingdom, capital, world);
+
+      if (kingdom.cityIds.size <= 1) continue; // Single-city realms cannot split
 
       // Check non-capital cities for secession
       for (const cityId of [...kingdom.cityIds]) {

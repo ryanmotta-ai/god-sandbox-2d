@@ -976,7 +976,22 @@ export class WarfareSystem {
    * WAR-V5: Sistema de Cercos Estruturados
    */
   private pressSiege(city: City, owner: Kingdom, assessment: SiegeAssessment, world: WarfareWorld): void {
-    const { besieger, attackStrength, defenceStrength, besiegingArmies } = assessment;
+    const { besieger, defenceStrength, besiegingArmies } = assessment;
+
+    /**
+     * A besieging army is only as strong as what reaches it.
+     *
+     * Siege resolution ignored `sector.supplyA/B` entirely: an army at the end of
+     * a cut line bombarded, assaulted and starved a city out exactly as fast as
+     * one with a working railhead behind it. Cutting a besieger's supply — the
+     * single most decisive act in the history of siege warfare — did nothing.
+     * At full supply this is 1 and changes nothing; at nothing it halves the
+     * besieger's effective weight, which is what lets a defender break a siege by
+     * severing the roads behind it instead of by winning at the walls.
+     */
+    const siegeSupply = world.fronts?.supplyNear(city, besieger.id) ?? 1;
+    const supplyModifier = 0.5 + 0.5 * Math.max(0, Math.min(1, siegeSupply));
+    const attackStrength = assessment.attackStrength * supplyModifier;
 
     if (city.besiegerId !== besieger.id || !city.siegeState) {
       city.besiegerId = besieger.id;
@@ -1171,7 +1186,14 @@ export class WarfareSystem {
         this.captureCity(city, owner, besieger, world);
       }
     } else {
-      city.siegeProgress = Math.min(0.50, city.siegeProgress + 0.05);
+      // A besieger that cannot feed itself does not creep forward. Below a third
+      // of its needs the camp is coming apart faster than the walls are.
+      if (supplyModifier < 0.68) {
+        city.siegeProgress = Math.max(0, city.siegeProgress - 0.06);
+        besieger.warWeariness = Math.min(100, besieger.warWeariness + 4);
+      } else {
+        city.siegeProgress = Math.min(0.50, city.siegeProgress + 0.05);
+      }
     }
   }
 
@@ -1525,9 +1547,76 @@ export class WarfareSystem {
       war.goal.progress = Number(progress.toFixed(2));
 
       if (progress >= 1.0 && world.year - war.startYear >= 2) {
+        // A war fought to subjugate ends in subjugation.
+        //
+        // `subjugation` had a name, a description, a target-selection rule that
+        // marched armies on the enemy capital, and a completion check — and then
+        // settled as an ordinary victory. `overlordId` and `vassalIds` were never
+        // written, so no realm in the world's history was ever made a vassal by
+        // being beaten: the only path into vassalage was the voluntary-fealty
+        // roll, which needs a friendly relation. Conquest and tribute were two
+        // systems that could not reach each other.
+        if (war.goal.kind === 'subjugation') this.imposeVassalage(attacker, defender, world);
         world.diplomacy.settleWar(war.attacker, war.defender, world.year, 'victory', war.attacker, -15, 6);
       }
     }
+  }
+
+  /**
+   * Binds a beaten realm to its conqueror as a tributary.
+   *
+   * The overlord inherits any vassals the loser held — a defeated empire's
+   * subjects pass with it rather than being freed by their master's defeat — and
+   * the loser is released from anyone it was itself sworn to, because it cannot
+   * owe fealty to two crowns.
+   */
+  private imposeVassalage(overlord: Kingdom, vassal: Kingdom, world: WarfareWorld): void {
+    if (overlord.id === vassal.id) return;
+    // A realm cannot be made vassal of its own vassal, and a chain cannot loop.
+    if (overlord.overlordId === vassal.id) return;
+    if (vassal.vassalIds.has(overlord.id)) vassal.vassalIds.delete(overlord.id);
+
+    const formerOverlord = vassal.overlordId ? world.kingdoms.get(vassal.overlordId) : null;
+    formerOverlord?.vassalIds.delete(vassal.id);
+
+    vassal.overlordId = overlord.id;
+    overlord.vassalIds.add(vassal.id);
+
+    for (const subId of [...vassal.vassalIds]) {
+      if (subId === overlord.id) continue;
+      const sub = world.kingdoms.get(subId);
+      if (!sub) { vassal.vassalIds.delete(subId); continue; }
+      sub.overlordId = overlord.id;
+      overlord.vassalIds.add(subId);
+      vassal.vassalIds.delete(subId);
+    }
+
+    vassal.legitimacy = Math.max(0, vassal.legitimacy - 0.18);
+    world.diplomacy.setRelation(overlord.id, vassal.id, -5);
+
+    chronicle.log(
+      world.year,
+      'conquest',
+      `${vassal.name} capitulou e jurou vassalagem tributária a ${overlord.name}.`,
+      {
+        title: `Subjugação de ${vassal.name}`,
+        importance: 'legendary',
+        scope: 'international',
+        refs: [
+          { kind: 'kingdom', id: overlord.id, name: overlord.name },
+          { kind: 'kingdom', id: vassal.id, name: vassal.name }
+        ],
+        tags: ['conquest', 'vassalage', 'war'],
+        causes: ['A guerra de subjugação atingiu seu objetivo.'],
+        consequences: [
+          `${vassal.name} passa a pagar tributo anual a ${overlord.name}.`,
+          'A legitimidade da coroa vencida foi abalada pela capitulação.'
+        ],
+        threadId: `vassalage:${vassal.id}`,
+        threadTitle: `Vassalagem de ${vassal.name}`
+      }
+    );
+    events.emit('vassalageSworn', { overlord, vassal, year: world.year });
   }
 
   private settleConcludedWars(world: WarfareWorld): void {
