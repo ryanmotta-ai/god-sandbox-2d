@@ -46,6 +46,38 @@ import { BUILDING_DRAW_SCALE } from './CityVisualResolver';
  * water tile on the map was set up, noise-sampled, neighbour-scanned and
  * edge-painted every single frame, and most of them had nothing to draw.
  */
+/**
+ * Frames between refreshes of the animated terrain layer.
+ *
+ * The water animation is slow by construction: `animTimer` advances 0.04 per
+ * frame and the fastest term in the surface (`animTimer * 2.2`, the specular
+ * glint) turns over in about 70 frames. Redrawing the layer every fourth frame
+ * gives roughly 18 samples per glint cycle and far more for the waves and the
+ * foam — continuous to the eye, at a quarter of the cost.
+ */
+const ANIM_REFRESH_FRAMES = 4;
+
+/**
+ * Largest world the animated layer is baked for.
+ *
+ * The layer mirrors the terrain bake's geometry, so it also mirrors its memory:
+ * width x height x 16px x 4 bytes. At 256 squared that is 67 MB on top of the
+ * terrain bake's own, which is a fair trade for taking the sea off the per-frame
+ * path. At 512 squared it would be 268 MB, so that size keeps drawing directly —
+ * and at the zoom a 512 map is actually played at, the animated detail is
+ * sub-pixel anyway.
+ */
+const ANIM_BAKE_MAX_TILES = 256 * 256;
+
+/**
+ * Zoom ceiling for using the layer, as a multiple of the bake resolution.
+ *
+ * Past this the blit would upscale the layer noticeably, and there is no reason
+ * to: at high zoom only a few hundred tiles are on screen, so drawing them
+ * directly is both cheap and sharper.
+ */
+const ANIM_MAX_ZOOM_FACTOR = 1.5;
+
 const WATER_EDGED = 1;
 const WATER_ANIMATES = 2;
 
@@ -178,13 +210,34 @@ export class PixelRenderer {
    * work produced nothing at all.
    */
   private waterMask: Uint8Array | null = null;
+  /**
+   * Offscreen layer holding the animated water and lava surfaces.
+   *
+   * Same geometry as the terrain bake, so the blit maths is identical and panning
+   * costs nothing — the camera just reads a different region. What it buys is the
+   * per-frame path: composing the sea used to mean five thousand `fillRect` calls
+   * and twenty-seven hundred `fillStyle` changes every frame, and it is now two
+   * `drawImage` calls, with the drawing itself amortised over ANIM_REFRESH_FRAMES.
+   */
+  private animCanvas: HTMLCanvasElement | null = null;
+  private animCtx: CanvasRenderingContext2D | null = null;
+  private animW: number = 0;
+  private animH: number = 0;
+  /** Frame counter driving the refresh cadence. */
+  private animFrame: number = 0;
+  /** Terrain revision the layer was drawn against, so terraforming invalidates it. */
+  private animTerrainVersion: number = -1;
+  /** Tile range currently drawn into the layer. */
+  private animMinX: number = 0;
+  private animMinY: number = 0;
+  private animMaxX: number = -1;
+  private animMaxY: number = -1;
   private readonly bakeTileSize: number = 16;
-
   private readonly visibleEntityScratch: Entity[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { alpha: false })!;
+    this.ctx = canvas.getContext('2d', { alpha: true })!;
     this.ctx.imageSmoothingEnabled = false;
   }
 
@@ -831,6 +884,86 @@ export class PixelRenderer {
     this.terrainH = tileMap.height;
     this.waterMask = new Uint8Array(tileMap.width * tileMap.height);
     tileMap.markAllDirty();
+  }
+
+  /**
+   * Brings the animated terrain layer up to date, and reports whether the frame
+   * may blit it instead of drawing the sea tile by tile.
+   *
+   * Returns false when the layer is not the right tool — a world too large to bake,
+   * or a zoom close enough that upscaling the layer would be visible — and the
+   * caller falls back to the direct path.
+   */
+  private ensureAnimatedLayer(
+    tileMap: TileMap,
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+    tileSize: number
+  ): boolean {
+    if (tileMap.width * tileMap.height > ANIM_BAKE_MAX_TILES) return false;
+    if (tileSize > this.bakeTileSize * ANIM_MAX_ZOOM_FACTOR) return false;
+
+    if (!this.animCanvas || this.animW !== tileMap.width || this.animH !== tileMap.height) {
+      this.animCanvas = document.createElement('canvas');
+      this.animCanvas.width = tileMap.width * this.bakeTileSize;
+      this.animCanvas.height = tileMap.height * this.bakeTileSize;
+      this.animCtx = this.animCanvas.getContext('2d', { alpha: true })!;
+      this.animCtx.imageSmoothingEnabled = false;
+      this.animW = tileMap.width;
+      this.animH = tileMap.height;
+      this.animMaxX = -1;
+      this.animTerrainVersion = -1;
+    }
+
+    this.animFrame++;
+    const rangeMoved =
+      minX !== this.animMinX || minY !== this.animMinY ||
+      maxX !== this.animMaxX || maxY !== this.animMaxY;
+    const terraformed = this.animTerrainVersion !== tileMap.terrainVersion;
+    const phaseDue = this.animFrame % ANIM_REFRESH_FRAMES === 0;
+
+    // A moved camera or reshaped ground must be answered at once; the animation
+    // phase can wait for its turn.
+    if (rangeMoved || terraformed || phaseDue) {
+      this.redrawAnimatedLayer(tileMap, minX, minY, maxX, maxY);
+      this.animMinX = minX; this.animMinY = minY;
+      this.animMaxX = maxX; this.animMaxY = maxY;
+      this.animTerrainVersion = tileMap.terrainVersion;
+    }
+    return true;
+  }
+
+  /**
+   * Draws the visible sea into the layer, at bake resolution.
+   *
+   * Deliberately the same art code the direct path uses, called with the layer's
+   * coordinates instead of the screen's — so what lands here is exactly what the
+   * frame would have drawn, and there is no second implementation to keep in step.
+   */
+  private redrawAnimatedLayer(tileMap: TileMap, minX: number, minY: number, maxX: number, maxY: number): void {
+    const ctx = this.animCtx;
+    if (!ctx) return;
+    const ts = this.bakeTileSize;
+
+    ctx.clearRect(minX * ts, minY * ts, (maxX - minX + 1) * ts, (maxY - minY + 1) * ts);
+
+    const saved = this.ctx;
+    this.ctx = ctx;
+    for (let x = minX; x <= maxX; x++) {
+      const column = tileMap.grid[x];
+      for (let y = minY; y <= maxY; y++) {
+        const tile = column[y];
+        if (tile.type === TerrainType.LAVA) {
+          this.drawAnimatedTerrainAccent(tileMap, tile, x, y, x * ts, y * ts, ts);
+        } else if (this.isWater(tile.type)) {
+          const mask = this.waterMask ? this.waterMask[x * this.terrainH + y] : (WATER_EDGED | WATER_ANIMATES);
+          if (mask !== 0) this.drawAnimatedTerrainAccent(tileMap, tile, x, y, x * ts, y * ts, ts, mask);
+        }
+      }
+    }
+    this.ctx = saved;
   }
 
   /** Redraw dirty static tiles, including a stable base frame for animated surfaces. */
@@ -1596,6 +1729,7 @@ export class PixelRenderer {
     // Analytical modes tint the baked terrain in later passes. Only the two
     // legacy terrain-replacement views need the slower per-tile path.
     const useBake = overlayMode !== 'biome' && overlayMode !== 'temperature';
+    let animatedLayerBlitted = false;
     if (useBake) {
       this.ensureTerrainBake(tileMap);
       this.bakeDirtyTiles(tileMap);
@@ -1611,6 +1745,19 @@ export class PixelRenderer {
         minX * tileSize + baseSX, minY * tileSize + baseSY,
         srcW * camera.zoom, srcH * camera.zoom
       );
+
+      // The moving sea, on top of the static ground, in one more blit. When the
+      // layer is not usable — world too big, or zoomed in past its resolution —
+      // this stays false and the per-tile loop below does the work as before.
+      animatedLayerBlitted = this.ensureAnimatedLayer(tileMap, minX, minY, maxX, maxY, tileSize);
+      if (animatedLayerBlitted) {
+        this.ctx.drawImage(
+          this.animCanvas!,
+          srcX, srcY, srcW, srcH,
+          minX * tileSize + baseSX, minY * tileSize + baseSY,
+          srcW * camera.zoom, srcH * camera.zoom
+        );
+      }
     }
 
     for (let x = minX; x <= maxX; x++) {
@@ -1622,6 +1769,8 @@ export class PixelRenderer {
         // cached base and receive only a cheap moving accent.
         if (!useBake) {
           this.drawTerrainTile(tileMap, tile, x, y, sx, sy, tileSize, overlayMode);
+        } else if (animatedLayerBlitted) {
+          // Already on screen, drawn into the layer and blitted above.
         } else if (tile.type === TerrainType.LAVA) {
           this.drawAnimatedTerrainAccent(tileMap, tile, x, y, sx, sy, tileSize);
         } else if (this.isWater(tile.type)) {
@@ -1677,6 +1826,21 @@ export class PixelRenderer {
         }
 
         // ===== TREE & VEGETATION SPRITES with Sway =====
+        /**
+         * Seeded from this tile, which it never was.
+         *
+         * The scatter below reads `h(800)` / `h(801)` without setting the hash
+         * base, so it used whatever base the last caller happened to leave —
+         * in practice the previous water or lava tile, since those are the only
+         * things in this loop that seed it. Every land tile between two water
+         * tiles therefore shared a single hash value, and "one tree every ~3
+         * tiles" came out as all-or-nothing: whole runs of forest either fully
+         * wooded or completely bare, which is why forest masses read as bands.
+         *
+         * It also made vegetation depend on draw order, so any change to what
+         * seeds the hash silently moved every tree on the map.
+         */
+        this.setHashBase(x, y);
         const sway = Math.sin(this.animTimer * 2 + x * 0.5 + y * 0.3) * 1.5;
 
         if (tile.type === TerrainType.FOREST) {
