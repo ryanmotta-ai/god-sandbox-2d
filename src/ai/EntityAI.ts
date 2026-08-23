@@ -394,7 +394,7 @@ export class SimulationEngine {
           {
             const dmg = e.traits.has(TraitId.FLAMMABLE) ? 30 : 15;
             e.hp -= dmg * stride;
-            particles.spawnDamageNumber(e.x, e.y, dmg * stride, 'critical');
+            particles.spawnDamageNumber(e.x, e.y, dmg * stride);
             // AI: Flee from fire
             if (e.aiState !== 'flee') {
               e.aiState = 'flee';
@@ -1855,7 +1855,7 @@ if (e.kingdomId) {
                 (tx, ty, d, targetEnt) => {
                   if (targetEnt && targetEnt.hp > 0) {
                     targetEnt.hp -= d;
-                    particles.spawnDamageNumber(tx, ty, d, d >= targetEnt.maxHp * 0.25 ? 'critical' : 'normal');
+                    particles.spawnDamageNumber(tx, ty, d);
                     sound.playHit();
                     if (targetEnt.hp <= 0 && e.kingdomId && targetEnt.kingdomId) {
                       e.kills++;
@@ -1876,7 +1876,7 @@ if (e.kingdomId) {
               e.attackCooldown = ATTACK_COOLDOWN;
 
               particles.spawnProjectile(e.x, e.y, target.x, target.y, 'spear_thrust', dmg);
-              particles.spawnDamageNumber(target.x, target.y, dmg, dmg >= target.maxHp * 0.25 ? 'critical' : 'normal');
+              particles.spawnDamageNumber(target.x, target.y, dmg);
               sound.playHit();
 
               if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
@@ -1888,7 +1888,7 @@ if (e.kingdomId) {
               // Standard Melee Blow
               target.hp -= dmg;
               e.attackCooldown = ATTACK_COOLDOWN;
-              particles.spawnDamageNumber(target.x, target.y, dmg, dmg >= target.maxHp * 0.25 ? 'critical' : 'normal');
+              particles.spawnDamageNumber(target.x, target.y, dmg);
               sound.playHit();
 
               if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
