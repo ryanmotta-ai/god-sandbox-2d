@@ -70,6 +70,27 @@ const ROAD_COST_MULTIPLIER: Record<number, number> = {
 };
 
 /**
+ * What an existing road is worth to a survey, as opposed to a traveller.
+ *
+ * ROAD_COST_MULTIPLIER above prices how fast somebody moves along a road, and a
+ * fifth off for a dirt track is right for that. It is badly wrong for laying a
+ * new one: a stretch that is already built costs nothing to build again, so a
+ * survey should be pulled onto it almost regardless of the detour. Sharing that
+ * one table meant a new trade road saw only a fifth off for following the last
+ * one and carved its own line instead, a few tiles to the side, over and over.
+ * The map filled with parallel tracks that ran together for twenty tiles and
+ * never touched, which is both the ugliness and the reason the network came out
+ * in ten disconnected pieces. A road network is supposed to converge on trunks
+ * and branch off them.
+ */
+const SURVEY_ROAD_MULTIPLIER: Record<number, number> = {
+  0: 1.0,
+  1: 0.22,
+  2: 0.15,
+  3: 0.10
+};
+
+/**
  * What one tile of water costs a road survey before the span is measured.
  * Set against a typical land tile of ~1–3, a single-tile ford is worth a
  * detour of about ten tiles and a five-tile crossing is worth nearly sixty —
@@ -433,17 +454,47 @@ export class SimplePathfinder {
         ? tile.type !== TerrainType.DEEP_OCEAN && tile.type !== TerrainType.MOUNTAIN && tile.type !== TerrainType.LAVA && !isFortificationBarrierId(tile.buildingId)
         : !terrain.isWater && terrain.isWalkable && !isFortificationBarrierId(tile.buildingId);
     };
+    /**
+     * Where the straight line from start to target crosses a given coordinate.
+     * The seam is taken as near that point as the ground allows, rather than at
+     * whichever tile a scan happened to reach first: scanning from the top of
+     * the seam and taking the first opening dragged every long route to the
+     * edge of each chunk it crossed and back again, which is where the zigzag
+     * in long roads came from. Chunks are 32 tiles, so a route only has to run
+     * past 64 to start collecting those detours.
+     */
+    const crossingAt = (along: number, fromA: number, toA: number, fromB: number, toB: number): number => {
+      const span = toA - fromA;
+      if (Math.abs(span) < 1e-6) return (fromB + toB) / 2;
+      const t = Math.max(0, Math.min(1, (along - fromA) / span));
+      return fromB + t * (toB - fromB);
+    };
+
     const portals: Array<{ x: number; y: number }> = [];
     for (let i = 1; i < macro.length; i++) {
       const from = macro[i - 1], to = macro[i]; let portal: { x: number; y: number } | null = null;
       if (to.cx !== from.cx) {
         const x = to.cx > from.cx ? to.cx * tileMap.chunkSize : from.cx * tileMap.chunkSize;
         const minY = Math.max(from.cy, to.cy) * tileMap.chunkSize, maxY = Math.min(tileMap.height, minY + tileMap.chunkSize);
-        for (let y = minY; y < maxY; y++) if (passable(x - 1, y) && passable(x, y)) { portal = { x: x + (to.cx > from.cx ? .25 : -.25), y: y + .5 }; break; }
+        const idealY = crossingAt(x, startX, targetX, startY, targetY);
+        let bestGap = Infinity;
+        for (let y = minY; y < maxY; y++) {
+          if (!passable(x - 1, y) || !passable(x, y)) continue;
+          const gap = Math.abs(y + .5 - idealY);
+          if (gap >= bestGap) continue;
+          bestGap = gap; portal = { x: x + (to.cx > from.cx ? .25 : -.25), y: y + .5 };
+        }
       } else {
         const y = to.cy > from.cy ? to.cy * tileMap.chunkSize : from.cy * tileMap.chunkSize;
         const minX = Math.max(from.cx, to.cx) * tileMap.chunkSize, maxX = Math.min(tileMap.width, minX + tileMap.chunkSize);
-        for (let x = minX; x < maxX; x++) if (passable(x, y - 1) && passable(x, y)) { portal = { x: x + .5, y: y + (to.cy > from.cy ? .25 : -.25) }; break; }
+        const idealX = crossingAt(y, startY, targetY, startX, targetX);
+        let bestGap = Infinity;
+        for (let x = minX; x < maxX; x++) {
+          if (!passable(x, y - 1) || !passable(x, y)) continue;
+          const gap = Math.abs(x + .5 - idealX);
+          if (gap >= bestGap) continue;
+          bestGap = gap; portal = { x: x + .5, y: y + (to.cy > from.cy ? .25 : -.25) };
+        }
       }
       if (!portal) return [];
       portals.push(portal);
@@ -573,7 +624,8 @@ export class SimplePathfinder {
           return WATER_CROSSING_BASE + WATER_CROSSING_PER_SPAN * span;
         }
         const relief = from ? gradePenalty(roadGrade(from, tile, run)) : 1;
-        return TERRAINS[tile.type].moveCost * roadMultiplier * relief * groundworkFactor(tile.type);
+        const surveyMultiplier = SURVEY_ROAD_MULTIPLIER[tile.roadLevelEffective] ?? 1.0;
+        return TERRAINS[tile.type].moveCost * surveyMultiplier * relief * groundworkFactor(tile.type);
       }
       // Land mode: terrain, roads, and a traveller's reluctance to climb.
       const climb = from ? 1 + roadGrade(from, tile, run) / TRAVEL_GRADE_DIVISOR : 1;

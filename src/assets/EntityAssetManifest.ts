@@ -81,11 +81,9 @@ export const ENTITY_ASSET_MANIFEST = {
   ] as readonly EntityAssetEntry[]
 } as const;
 
-const ENTITY_ASSET_URLS = import.meta.glob('./entities/{humans,professions,animals}/*.png', {
-  eager: true,
-  query: '?url',
-  import: 'default'
-}) as Record<string, string>;
+const ENTITY_ASSET_URLS = typeof import.meta.glob === 'function'
+  ? import.meta.glob('./entities/{humans,professions,animals}/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
+  : {};
 
 export function resolveEntityAssetUrl(entry: EntityAssetEntry): string | undefined {
   return ENTITY_ASSET_URLS[entry.source];

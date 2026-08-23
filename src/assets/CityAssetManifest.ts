@@ -155,11 +155,9 @@ export const CITY_ASSET_MANIFEST = {
   ] as readonly CityAssetEntry[]
 } as const;
 
-const CITY_ASSET_URLS = import.meta.glob('./city/**/*.png', {
-  eager: true,
-  query: '?url',
-  import: 'default'
-}) as Record<string, string>;
+const CITY_ASSET_URLS = typeof import.meta.glob === 'function'
+  ? import.meta.glob('./city/**/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
+  : {};
 
 /** Returns undefined for planned assets whose final PNG has not been added yet. */
 export function resolveCityAssetUrl(entry: CityAssetEntry): string | undefined {

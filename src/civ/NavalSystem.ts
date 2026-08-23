@@ -249,10 +249,11 @@ export class NavalSystem {
             // Out of fuel — ship is dead in the water this tick
             continue;
           }
+          // Burning the barrels is the cost. Debiting the treasury their market
+          // value on top charged for the same fuel twice — once in goods and
+          // once in coin — which is where a steel cruiser's ruinous running cost
+          // came from.
           operatingKingdom.treasury.take('fuel', tierConfig.fuelPerTick);
-          // Reflect fuel cost in economy.treasury so GDP/inflation account for naval ops.
-          const fuelCost = tierConfig.fuelPerTick * (GOODS['fuel']?.basePrice ?? 8);
-          operatingKingdom.economy.treasury -= fuelCost;
         }
       }
 

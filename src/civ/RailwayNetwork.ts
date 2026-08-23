@@ -294,13 +294,18 @@ export class RailwayNetwork {
       while (plan.cursor < plan.path.length && laid < LAY_PER_YEAR) {
         const step = plan.path[plan.cursor];
         plan.cursor++;
-        if (producer.stock.get('steel') < SEGMENT_STEEL || producer.stock.get('wood') < SEGMENT_WOOD) break;
+        // Whichever end of the line actually holds the steel pays for the track.
+        // This used to bill the coal mine for both materials — and a mining town
+        // does not forge steel, the city at the other end with the smithy does.
+        // So the check failed on the first segment and no realm ever laid track.
+        const yard = consumer.stock.get('steel') >= SEGMENT_STEEL ? consumer : producer;
+        if (yard.stock.get('steel') < SEGMENT_STEEL || yard.stock.get('wood') < SEGMENT_WOOD) break;
         // Over water or an already-laid stretch the segment is skipped at no cost.
         if (!this.layTrack(world.tileMap, step.x, step.y, kingdom.id)) continue;
-        producer.stock.take('steel', SEGMENT_STEEL);
-        producer.stock.take('wood', SEGMENT_WOOD);
-        producer.ledger.recordConsumed('steel', SEGMENT_STEEL);
-        producer.ledger.recordConsumed('wood', SEGMENT_WOOD);
+        yard.stock.take('steel', SEGMENT_STEEL);
+        yard.stock.take('wood', SEGMENT_WOOD);
+        yard.ledger.recordConsumed('steel', SEGMENT_STEEL);
+        yard.ledger.recordConsumed('wood', SEGMENT_WOOD);
         laid++;
       }
       this.yearlyConstructed += laid;

@@ -86,9 +86,12 @@ const CARAVAN_SPEED: Record<CaravanType, number> = {
 
 /** Road traffic thresholds for road evolution */
 const ROAD_UPGRADE_THRESHOLDS = {
-  dirt: 5,       // traffic >= 5 → Dirt Trail (Level 1)
-  stone: 25,     // traffic >= 25 → Stone Road (Level 2)
-  imperial: 80   // traffic >= 80 → Imperial Highway (Level 3)
+  // Five footfalls used to be enough to turn grass into a dirt track, so the
+  // ground visibly changed the moment anybody was placed on it and a new
+  // settlement looked like it was paving the countryside by walking on it.
+  dirt: 15,      // traffic >= 15 → Dirt Trail (Level 1)
+  stone: 40,     // traffic >= 40 → Stone Road (Level 2)
+  imperial: 110  // traffic >= 110 → Imperial Highway (Level 3)
 };
 
 /** Minimum traffic fraction to maintain a road level (below this, road degrades) */

@@ -720,12 +720,31 @@ function scoreUrbanForm(ctx: CityContext, type: BuildingType, profile: UrbanProf
   return score;
 }
 
+/**
+ * A structure big enough that it has to be given ground of its own.
+ *
+ * `buildingVisualExtent` is the sprite canvas measured in tiles: a `small`
+ * asset is 64px against a 32px tile, so two. That canvas carries roof height
+ * and transparent margin above a footprint of one single tile, which is all
+ * the simulation ever marks on the map. Two ordinary buildings whose canvases
+ * overlap by a tile are a terrace, drawn back to front, and a terrace is what
+ * a street of houses is supposed to look like.
+ *
+ * Treating that canvas as ground is what emptied the settlements. Every pair of
+ * buildings was pushed at least 1.5 tiles apart, so nothing could ever stand
+ * beside anything: measured over grown cities, 8% of buildings had a neighbour
+ * and a town sat on a quarter of its own land while the planner's own density
+ * target asks for half. Only monumental work reserves space now, which is what
+ * the rule was always for. A palace should not be lost behind a colosseum; two
+ * cottages sharing a wall are just a street.
+ */
+const MONUMENTAL_EXTENT = 4;
+
 function hasVisualClearance(ctx: CityContext, type: BuildingType, x: number, y: number): boolean {
   const extent = buildingVisualExtent(type) * (ctx.city.architecturalProfile?.urbanForm.buildingScale ?? 1);
   for (const building of ctx.buildings) {
-    // Canvases contain roof height and transparent margins, so they may touch;
-    // only reject the dense overlap that makes distinct buildings unreadable.
-    const clearance = (extent + building.visualExtent) * .38;
+    if (extent < MONUMENTAL_EXTENT && building.visualExtent < MONUMENTAL_EXTENT) continue;
+    const clearance = (extent + building.visualExtent) * .25;
     if (Math.hypot(building.x - x, building.y - y) < clearance) return false;
   }
   return true;

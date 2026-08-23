@@ -59,7 +59,10 @@ export class GreatPersonManager {
         type = 'scholar';
       }
       // Hero: 3+ kills or King in war
-      else if (e.kills >= 3 || (e.profession === 'king' && kingdom.militaryPower > 150 && rng.chance(0.1))) {
+      // Every other kind of great person is drawn against a chance. This branch
+      // was not, so any soldier who reached three kills was promoted the very
+      // next year — and in a war that is most of them, every year.
+      else if ((e.kills >= 3 && rng.chance(0.08)) || (e.profession === 'king' && kingdom.militaryPower > 150 && rng.chance(0.1))) {
         type = 'hero';
       }
       // Builder: High level woodcutter/miner in capital

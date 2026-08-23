@@ -171,19 +171,28 @@ export class EcologySystem {
     let naturalVegetation = 0, pressure = 0, land = 0;
     for (let x = minX; x < maxX; x++) for (let y = minY; y < maxY; y++) {
       const tile = tileMap.getTile(x, y)!;
-      if (TERRAINS[tile.type].isWater || !TERRAINS[tile.type].isWalkable || tile.isOnFire) continue;
-      land++;
+      if (TERRAINS[tile.type].isWater || tile.isOnFire) continue;
+
       const disturbed = tile.buildingId || tile.cityId ? 1 : tile.roadLevelEffective > 0 ? .55 : 0;
-      pressure += disturbed;
       const naturalness = 1 - disturbed;
-      // Forest cover carries more browse and shelter than cleared soil. This
-      // makes deforestation a real ecological loss even before a building is
-      // erected on the newly cleared tile.
-      naturalVegetation += Math.max(0, tile.fertility) * vegetationCover(tile.type) * naturalness;
+
+      // Habitat is measured before the walkability test, because mountains are
+      // impassable and were being skipped outright — which gave the bear, the
+      // eagle and the dragon zero range in the one biome all three of them name
+      // as preferred. A crag is territory even where a cart cannot go; it simply
+      // carries no pasture and no human pressure, so it is left out of both below.
       for (const species of WILDLIFE_SPECIES) {
         const quality = habitatQuality(species, tile.type, tile.fertility);
         if (quality) habitat[species] = (habitat[species] ?? 0) + quality * naturalness;
       }
+
+      if (!TERRAINS[tile.type].isWalkable) continue;
+      land++;
+      pressure += disturbed;
+      // Forest cover carries more browse and shelter than cleared soil. This
+      // makes deforestation a real ecological loss even before a building is
+      // erected on the newly cleared tile.
+      naturalVegetation += Math.max(0, tile.fertility) * vegetationCover(tile.type) * naturalness;
     }
     return {
       vegetationPotential: land ? clamp01(naturalVegetation / land) : 0,

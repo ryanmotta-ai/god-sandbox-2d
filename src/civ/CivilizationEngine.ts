@@ -30,7 +30,7 @@ import {
   avgEffectiveRoadLevel, repairInfrastructure
 } from './Infrastructure';
 import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadEngineering';
-import { UrbanPlanner } from './UrbanPlanner';
+import { UrbanPlanner, type UrbanStreetClass } from './UrbanPlanner';
 import { perfProfiler } from '../perf/PerformanceProfiler';
 import { buildingArchitecturalStamp, refreshArchitecturalProfile } from './ArchitecturalProfile';
 import { FortificationPlanner } from './FortificationPlanner';
@@ -64,6 +64,17 @@ export interface CivWorld {
 }
 
 /** Food a single citizen eats per year. */
+/** Share of a tax levy the crown keeps as goods; the rest is sold for coin. */
+/** How far from a building the street plan is worth paving. */
+const STREET_SERVICE_REACH = 2;
+const TAX_KEPT_IN_KIND = 0.5;
+/**
+ * How hard neighbours resent each other over land. This is the strongest term
+ * in the drift model on purpose: between two crowded, ambitious realms the
+ * competition for ground has to be able to outweigh kinship, shared markets and
+ * a trade agreement, or they stay friends forever and no war ever begins.
+ */
+const BORDER_LAND_HUNGER = 3.0;
 const FOOD_PER_CITIZEN = 1.1;
 /**
  * Research a citizen contributes even with no buildings.
@@ -269,6 +280,7 @@ export class CivilizationEngine {
     this.consumeGoods(city, world);
     this.runConstruction(city, world, kingdom);
     this.repairCityInfrastructure(city, world);
+    this.paveStreetPlan(city, world);
     this.expandTerritory(city, world, techMods.territory + (gov?.expansion ?? 8) + expansionCulture + (lawEffects?.expansion ?? 0));
 
     const fortification = FortificationPlanner.tickCity(city, kingdom, world);
@@ -318,6 +330,12 @@ export class CivilizationEngine {
       if (def.category === 'craft') return 78;
       if (def.category === 'knowledge') return 58;
       if (def.category === 'commerce') return 52;
+      // A realm staffs its garrison before its library. Barracks sit in the
+      // 'power' category, which ranked below every other kind of workplace, so
+      // any settlement not overflowing with spare hands gave the barracks the
+      // leftovers — usually nobody. That was the last link in the chain: the
+      // building could finally be built, and still produced no soldiers.
+      if (building.type === 'barracks') return 74;
       if (def.category === 'power') return 42;
       return 48;
     };
@@ -461,8 +479,33 @@ export class CivilizationEngine {
   }
 
   /** Hand-cut timber from the settlement's territory. Deliberately inefficient. */
+  /**
+   * How many of a settlement's people the visible layer is already gathering with.
+   *
+   * EntityAI walks foragers and woodcutters to real deposits, takes a real load
+   * off the tile and carries it into this same stockpile. The comment on those
+   * states still reads "purely visual, yearly produceGoods handles the actual
+   * economy", and that stopped being true the day the delivery was added. So the
+   * yearly pass counted the whole population again, harvesting the same people
+   * twice and drawing the same tiles down at double rate.
+   *
+   * The visible layer is the one that tells the truth now: people who are out
+   * gathering are subtracted here, and the yearly pass covers only the rest.
+   * That keeps the causal, watchable version without leaving a settlement to
+   * starve because its foragers could not find a path.
+   */
+  private citizensGatheringByHand(city: City, world: CivWorld, state: string): number {
+    let count = 0;
+    for (const entity of world.entities) {
+      if (entity.cityId !== city.id || entity.hp <= 0) continue;
+      if (entity.aiState === state) count++;
+    }
+    return count;
+  }
+
   private gatherWildWood(city: City, world: CivWorld): number {
-    let effort = city.population * HAND_WOOD_PER_CITIZEN;
+    const byHand = this.citizensGatheringByHand(city, world, 'gather_wood');
+    let effort = Math.max(0, city.population - byHand) * HAND_WOOD_PER_CITIZEN;
     if (effort <= 0) return 0;
 
     let gathered = 0;
@@ -484,7 +527,8 @@ export class CivilizationEngine {
 
   /** Draws wild food from the settlement's own territory. Returns units stored. */
   private forageWildFood(city: City, world: CivWorld): number {
-    let effort = city.population * FORAGE_PER_CITIZEN;
+    const byHand = this.citizensGatheringByHand(city, world, 'gather_food');
+    let effort = Math.max(0, city.population - byHand) * FORAGE_PER_CITIZEN;
     if (effort <= 0) return 0;
 
     let gathered = 0;
@@ -499,7 +543,7 @@ export class CivilizationEngine {
     }
 
     // The last scraps of gathering that need no standing deposit at all.
-    gathered += Math.min(effort, city.population * 0.12);
+    gathered += Math.min(effort, Math.max(0, city.population - byHand) * 0.12);
 
     // Report what actually reached the granary, not what was picked: a full
     // stockpile must not look like extra supply to the price model.
@@ -512,7 +556,16 @@ export class CivilizationEngine {
   private assignVisibleWorker(worker: Entity, building: Building): void {
     // Do not override urgent states. EntityAI remains the authority on combat,
     // fleeing, healing and active construction.
-    const interruptible = ['idle', 'wander', 'socialize', 'explore', 'return_city', 'craft'];
+    // Foraging is interruptible: it is what people do when they have no job, and
+    // being given one should end it. Leaving the gather states out meant anyone
+    // already working the fields could never be reassigned to anything — so a
+    // settlement that finally built a barracks staffed it only from whoever
+    // happened to be standing idle that year, which in a small town is nobody.
+    // Combat, fleeing, healing and active construction remain untouchable.
+    const interruptible = [
+      'idle', 'wander', 'socialize', 'explore', 'return_city', 'craft',
+      'gather_food', 'gather_wood', 'gather_ore'
+    ];
     if (!interruptible.includes(worker.aiState)) return;
 
     const type = building.type;
@@ -525,6 +578,15 @@ export class CivilizationEngine {
     } else if (type === 'mine' || type === 'quarry' || type === 'oil_well') {
       worker.profession = 'miner';
       worker.aiState = 'gather_ore';
+    } else if (type === 'barracks') {
+      // The barracks definition promises "professional soldiers, fed all year,
+      // war or no war". Nothing here ever kept that promise: the post was
+      // staffed, but the citizen stayed a farmer, so a realm at peace had no
+      // soldiers, and the wartime levy below had no barracks veterans to build
+      // a regiment around.
+      worker.profession = 'soldier';
+      worker.workplaceId = building.id;
+      worker.aiState = 'idle';
     } else if (type === 'workshop' || type === 'smithy' || type === 'factory' || type === 'refinery') {
       worker.profession = 'builder';
       // `craft` is a purely visual workplace state, so it can be set safely here.
@@ -1101,6 +1163,79 @@ export class CivilizationEngine {
     repairInfrastructure(city, world.tileMap);
   }
 
+  /**
+   * Lays a little of the street plan each year.
+   *
+   * `plannedStreetAt` has always drawn a full grid for every settlement: two
+   * high streets crossing at the centre and secondaries every block, staggered
+   * by the city's own irregularity so it never reads as graph paper. Nothing
+   * ever paved any of it. The plan existed only as a hint about where a
+   * building ought to sit, so a town of a hundred buildings owned a dozen road
+   * tiles and read as a heap of roofs rather than a place with streets.
+   *
+   * Paving goes one tile at a time and only ever outward from ground the
+   * network already touches, so a city's streets are connected by construction
+   * and are a record of how long it has been growing rather than something that
+   * arrives whole. Materials come out of the city's own stores like any other
+   * works; a dirt track is cheap, which is why a poor village still gets lanes.
+   */
+  private paveStreetPlan(city: City, world: CivWorld): void {
+    const map = world.tileMap;
+    const structure = UrbanPlanner.structure(city, map, this.citySurveyRadius(city));
+    const level = this.roadGradeFor(city, world);
+
+    const paved = new Set<string>();
+    for (const key of structure.streets.keys()) paved.add(`${Math.floor(key / map.height)},${key % map.height}`);
+    // A settlement with no street at all starts from its own centre.
+    if (paved.size === 0) paved.add(`${Math.floor(city.x)},${Math.floor(city.y)}`);
+
+    // A street serves buildings. Without this the plan was paved out to the
+    // whole survey radius, which laid avenues across empty fields and turned
+    // two fifths of a city's ground into road. Only the stretches within reach
+    // of something built get laid, so the grid arrives with the neighbourhood
+    // rather than ahead of it.
+    const served = new Set<string>();
+    for (const building of city.buildings.values()) {
+      const bx = Math.round(building.x), by = Math.round(building.y);
+      for (let dx = -STREET_SERVICE_REACH; dx <= STREET_SERVICE_REACH; dx++) {
+        for (let dy = -STREET_SERVICE_REACH; dy <= STREET_SERVICE_REACH; dy++) served.add(`${bx + dx},${by + dy}`);
+      }
+    }
+
+    const budget = Math.min(5, 1 + Math.floor(city.population / 45));
+    for (let laid = 0; laid < budget; laid++) {
+      let best: { x: number; y: number; streetClass: UrbanStreetClass; fromX: number; fromY: number; score: number } | null = null;
+
+      for (const lot of structure.lots.values()) {
+        if (!lot.plannedStreet || !served.has(`${lot.x},${lot.y}`)) continue;
+        const tile = map.getTile(lot.x, lot.y);
+        if (!tile || tile.buildingId || tile.roadLevelEffective > 0) continue;
+
+        let fromX = 0, fromY = 0, touches = false;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          if (!paved.has(`${lot.x + dx},${lot.y + dy}`)) continue;
+          fromX = lot.x + dx; fromY = lot.y + dy; touches = true; break;
+        }
+        if (!touches) continue;
+
+        // High streets first, and inner work before outer, so the centre is
+        // laid out before the edges rather than a ring appearing in a field.
+        const score = (lot.plannedStreet === 'primary' ? 60 : 0) - Math.hypot(lot.x - city.x, lot.y - city.y);
+        if (!best || score > best.score) best = { x: lot.x, y: lot.y, streetClass: lot.plannedStreet, fromX, fromY, score };
+      }
+
+      if (!best) return;
+
+      const survey = surveyRoad(map, best.fromX, best.fromY, best.x, best.y, level, 200);
+      if (survey.path.length === 0) return;
+      // Out of materials this year is not a failure, only a delay: the same
+      // tile is still the best candidate next year.
+      if (layRoad(city, map, survey, level).tilesLaid === 0) return;
+      UrbanPlanner.recordStreetPath(city, map, survey.path, best.streetClass);
+      paved.add(`${best.x},${best.y}`);
+    }
+  }
+
   /** Rare state transition cleanup, bounded to the affected city's indexed citizens. */
   private releaseInactiveBuildingAssignments(city: City, lifecycle: UrbanLifecycleResult): void {
     const inactive = new Set(lifecycle.vacatedBuildingIds);
@@ -1143,7 +1278,13 @@ export class CivilizationEngine {
     if (resourceGood && def.resourceTargets?.includes(resourceGood)) {
       const held = city.stock.get(resourceGood);
       const price = world.market.price(resourceGood);
-      score += 38 + Math.min(80, price * 1.2) + (held < 30 ? 35 : held < 80 ? 16 : 0);
+      // Scarcity has to scale. A flat +35 for "under thirty" meant a settlement
+      // sitting on zero stone valued a new quarry barely more than one sitting on
+      // twenty-nine, while its wood piled up past three hundred — so it kept
+      // choosing its eleventh lumber camp and every stone building in the realm
+      // went unbuilt for want of thirty stone.
+      const scarcity = Math.max(0, 1 - held / 80);
+      score += 38 + Math.min(80, price * 1.2) + scarcity * scarcity * 140;
       if (GOODS[resourceGood].strategic) score += 70;
       if (resourceGood === 'oil' && kingdom?.research.knows('industrialization')) score += 95;
     }
@@ -1209,13 +1350,16 @@ export class CivilizationEngine {
     if (type === 'barracks') {
       const soldierJobs = city.countOfType('barracks') * 4;
       const target = Math.max(2, city.population * 0.05);
-      if (target > soldierJobs) score += (target - soldierJobs) * 35;
+      if (target > soldierJobs) score += (target - soldierJobs) * 70;
     }
 
     if (def.storage) score += city.stock.fullness() > 0.6 ? 35 : 8;
 
     const existing = city.countOfType(type);
-    const repeatPenalty = def.housing || def.produces?.food || def.category === 'extraction' ? 0.16 : 0.7;
+    // Housing and food genuinely scale with population, so copies of those stay
+    // cheap. Extraction did too, which is why a city would rather sink its next
+    // plot into a fifth mine than its first barracks.
+    const repeatPenalty = def.housing || def.produces?.food ? 0.16 : def.category === 'extraction' ? 0.45 : 0.7;
     score /= 1 + existing * repeatPenalty;
 
     const costTotal = Object.values(def.cost).reduce((sum, v) => sum + (v as number), 0);
@@ -1495,8 +1639,12 @@ export class CivilizationEngine {
         const taken = city.stock.take(good, levy);
         // Tax in kind leaves the settlement for the crown's stores.
         city.ledger.recordExported(good, taken);
-        const stored = kingdom.treasury.add(good, taken);
-        taxValue += stored * world.market.price(good);
+        // The crown keeps part of the levy and sells the rest for coin. It used
+        // to store the whole levy *and* be credited its full market value, so
+        // the crown was paid twice for the same grain and every treasury ran
+        // away within a few decades. Anything its stores cannot hold is sold too.
+        const stored = kingdom.treasury.add(good, taken * TAX_KEPT_IN_KIND);
+        taxValue += (taken - stored) * world.market.price(good);
       }
 
       const taxPain = Math.max(0, effectiveTaxRate - 0.22);
@@ -1900,7 +2048,7 @@ export class CivilizationEngine {
     for (const otherId of kingdom.knownKingdoms) {
       const other = world.kingdoms.get(otherId);
       if (!other) continue;
-      const distance = this.closestRealmDistance(kingdom, other, world);
+      const distance = this.closestRealmDistance(kingdom, other, world.cities);
       const proximity = clamp(1 - distance / 90, 0, 1);
       const relation = world.diplomacy.getRelation(kingdom.id, other.id);
       const powerRatio = other.computePower() / Math.max(1, kingdom.computePower());
@@ -2589,7 +2737,7 @@ export class CivilizationEngine {
 
         const truce = world.diplomacy.getTruce(a.id, b.id, world.year);
         const relation = world.diplomacy.getRelation(a.id, b.id);
-        const distance = this.closestRealmDistance(a, b, world);
+        const distance = this.closestRealmDistance(a, b, world.cities);
         const proximity = clamp(1 - distance / 75, 0, 1);
         const govA = GOVERNMENTS[a.government];
         const govB = GOVERNMENTS[b.government];
@@ -2614,7 +2762,11 @@ export class CivilizationEngine {
 
         let drift = 0;
         const alreadyAllied = world.diplomacy.getStatus(a.id, b.id) === 'alliance';
-        drift += sameSpecies ? 0.45 : -0.45 + avgOpenness * 0.2;
+        // Kinship binds realms that are far apart. It does not survive a shared
+        // fence: the bitterest wars in history were fought between the same
+        // people over the same ground. Leaving this unconditional was what kept
+        // the two founding human realms at +100 forever.
+        drift += sameSpecies ? 0.45 * (1 - proximity) : -0.45 + avgOpenness * 0.2;
         drift += sameEconomy ? 0.18 : 0;
         drift += ideologicalConflict ? -0.9 : 0;
         drift += (affinity - 0.5) * 1.0;
@@ -2623,7 +2775,7 @@ export class CivilizationEngine {
         drift += commonEnemy ? 0.65 : 0;
         drift += Math.max(0, avgSocialPeace - 0.52) * 0.42;
         drift -= proximity * (govA.aggression + govB.aggression) * 0.34;
-        drift -= proximity * borderAmbition * 0.26;
+        drift -= proximity * borderAmbition * BORDER_LAND_HUNGER;
         drift -= proximity * Math.max(0, avgSocialWar - 0.46) * 0.30;
         drift -= Math.max(0, a.externalThreat - 0.55) * proximity * 0.25;
         drift -= Math.max(0, b.externalThreat - 0.55) * proximity * 0.25;
@@ -3301,6 +3453,12 @@ export class CivilizationEngine {
         buyerKingdom.economy.treasury += tariff;
         buyerKingdom.treasury.add('gold', tariff);
         buyerKingdom.importVolume += value;
+        // And the buyer pays for what it imported. This debit simply was not
+        // here: the seller was credited and the buyer collected a tariff, so
+        // both sides ended a trade richer than they started and the world
+        // minted gold on every route, every year. No realm ever had a budget.
+        buyerKingdom.economy.treasury -= value;
+        buyerKingdom.treasury.take('gold', value);
       }
       this.settleColonialTribute(route, sellerKingdom, buyerKingdom, value);
 
@@ -3829,7 +3987,7 @@ export class CivilizationEngine {
         continue;
       }
 
-      const distance = this.closestRealmDistance(colony, metropole, world);
+      const distance = this.closestRealmDistance(colony, metropole, world.cities);
       const distancePressure = clamp(distance / 100, 0, 1);
       const prosperity = this.colonialProsperity(colony, world);
       const famine = [...colony.cityIds].reduce((sum, id) => sum + (world.cities.get(id)?.famineYears ?? 0), 0);
@@ -4281,13 +4439,13 @@ export class CivilizationEngine {
     }
   }
 
-  private closestRealmDistance(k1: Kingdom, k2: Kingdom, world: CivWorld): number {
+  public closestRealmDistance(k1: Kingdom, k2: Kingdom, cities: Map<string, City>): number {
     let minDist = Infinity;
     for (const c1Id of k1.cityIds) {
-      const c1 = world.cities.get(c1Id);
+      const c1 = cities.get(c1Id);
       if (!c1) continue;
       for (const c2Id of k2.cityIds) {
-        const c2 = world.cities.get(c2Id);
+        const c2 = cities.get(c2Id);
         if (!c2) continue;
         const d = Math.hypot(c1.x - c2.x, c1.y - c2.y);
         if (d < minDist) minDist = d;
@@ -4385,6 +4543,15 @@ export class CivilizationEngine {
         }
       );
       events.emit('kingdomFell', { kingdom, year: world.year });
+
+      // A realm that no longer exists cannot still be at war. Its active wars
+      // used to be left standing in diplomacy.activeWars with nobody on the
+      // other side, which held the victor in a permanent war it could never
+      // win or settle — still levying troops, still accruing weariness, still
+      // blocked from making peace with anyone by a truce that never came.
+      for (const war of world.diplomacy.getWarsFor(id)) {
+        world.diplomacy.endWar(id, war.attacker === id ? war.defender : war.attacker, world.year);
+      }
 
       // Release vassals and detach from any overlord.
       for (const vassalId of kingdom.vassalIds) {

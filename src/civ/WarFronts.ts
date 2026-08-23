@@ -553,6 +553,26 @@ export class WarFrontSystem {
     return best;
   }
 
+  /**
+   * Whether a front exists around this settlement at all for the given realm.
+   *
+   * `siegePressure` returns zero both when a sector is there and holds no
+   * ground and when there is no sector within reach, and the siege gate could
+   * not tell those apart. Two realms further apart than CONTACT_RANGE form no
+   * front anywhere, so a besieger that marched across the map met a gate that
+   * could never open and sat outside the walls for ever at 35% progress. The
+   * front should govern sieges where it has something to say and stand aside
+   * where it does not.
+   */
+  public coversCity(city: City, kingdomId: string): boolean {
+    for (const sector of this.sectors.values()) {
+      if (this.sideOf(sector, kingdomId) === null) continue;
+      if (Math.hypot(sector.x - city.x, sector.y - city.y) > SECTOR_RADIUS * 1.6) continue;
+      return true;
+    }
+    return false;
+  }
+
   public isIsolated(cityId: string): boolean {
     return this.isolated.has(cityId);
   }

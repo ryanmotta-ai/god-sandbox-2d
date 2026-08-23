@@ -439,10 +439,14 @@ function syncCityList(city: City, runtime: RuntimeDistrictCache): void {
 export function districtAt(city: City, x: number, y: number): UrbanDistrictCell | null {
   const { gx, gy } = cellCoords(x, y);
   const runtime = RUNTIME.get(city);
-  const exact = runtime?.byId.get(cellId(city, gx, gy)) ?? city.urbanDistricts.find(district => district.gx === gx && district.gy === gy);
+  // The renderer reaches this with whatever city-shaped thing it is drawing,
+  // which is not always a fully built City — a partial one crashed the whole
+  // snapshot build here rather than simply having no districts.
+  const districts = city.urbanDistricts ?? [];
+  const exact = runtime?.byId.get(cellId(city, gx, gy)) ?? districts.find(district => district.gx === gx && district.gy === gy);
   if (exact) return exact;
   let nearest: UrbanDistrictCell | null = null, best = CELL_SIZE * 1.7;
-  for (const district of runtime?.byId.values() ?? city.urbanDistricts) {
+  for (const district of runtime?.byId.values() ?? districts) {
     const distance = Math.hypot(district.centerX - x, district.centerY - y);
     if (distance < best) { best = distance; nearest = district; }
   }

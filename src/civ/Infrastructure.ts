@@ -159,6 +159,38 @@ const REPAIR_PRIORITY: Record<string, number> = {
  * Repairs are slow and never free: materials are spent, and only a fraction of
  * the damage closes per year.
  */
+/**
+ * How far past its own claimed tiles a settlement will keep the works in repair.
+ *
+ * Repair used to walk city.territory alone. A road or rail corridor between two
+ * cities runs mostly over unclaimed ground, so a stretch wrecked by a siege
+ * stayed wrecked for the rest of the world's life — and with it the supply line
+ * it fed, which is precisely the thing WAR-V3 lets an enemy cut.
+ */
+const MAINTENANCE_RADIUS = 14;
+
+function maintainedTiles(city: City, tileMap: TileMap): Tile[] {
+  const seen = new Set<string>();
+  const out: Tile[] = [];
+  for (const key of city.territory) {
+    const [tx, ty] = key.split(',').map(Number);
+    const tile = tileMap.getTile(tx, ty);
+    if (tile) { seen.add(key); out.push(tile); }
+  }
+  const cx = Math.round(city.x), cy = Math.round(city.y);
+  for (let dx = -MAINTENANCE_RADIUS; dx <= MAINTENANCE_RADIUS; dx++) {
+    for (let dy = -MAINTENANCE_RADIUS; dy <= MAINTENANCE_RADIUS; dy++) {
+      if (dx * dx + dy * dy > MAINTENANCE_RADIUS * MAINTENANCE_RADIUS) continue;
+      const key = `${cx + dx},${cy + dy}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const tile = tileMap.getTile(cx + dx, cy + dy);
+      if (tile) out.push(tile);
+    }
+  }
+  return out;
+}
+
 export function repairInfrastructure(city: City, tileMap: TileMap): void {
   let roadsChanged = false;
   let railsChanged = false;
@@ -190,12 +222,7 @@ export function repairInfrastructure(city: City, tileMap: TileMap): void {
 
   // --- Roads ---
   if (repairBudget(city) <= 0) return;
-  const roadTiles: Tile[] = [];
-  for (const key of city.territory) {
-    const [tx, ty] = key.split(',').map(Number);
-    const tile = tileMap.getTile(tx, ty);
-    if (tile && tile.roadLevel > 0 && tile.roadDamage > 0) roadTiles.push(tile);
-  }
+  const roadTiles = maintainedTiles(city, tileMap).filter(t => t.roadLevel > 0 && t.roadDamage > 0);
   // Most important roads (highest level) are rebuilt first.
   roadTiles.sort((a, b) => b.roadLevel - a.roadLevel);
   for (const tile of roadTiles) {
@@ -216,12 +243,7 @@ export function repairInfrastructure(city: City, tileMap: TileMap): void {
   }
 
   // --- Railways ---
-  const railTiles: Tile[] = [];
-  for (const key of city.territory) {
-    const [tx, ty] = key.split(',').map(Number);
-    const tile = tileMap.getTile(tx, ty);
-    if (tile && tile.railLevel > 0 && tile.railDamage > 0) railTiles.push(tile);
-  }
+  const railTiles = maintainedTiles(city, tileMap).filter(t => t.railLevel > 0 && t.railDamage > 0);
   for (const tile of railTiles) {
     const budget = repairBudget(city);
     if (budget <= 0) break;

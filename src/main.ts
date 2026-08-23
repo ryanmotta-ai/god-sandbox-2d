@@ -6,7 +6,7 @@ import { Camera } from './renderer/Camera';
 import { RendererHost } from './renderer/world/RendererHost';
 import { ParticleManager } from './renderer/Particles';
 import { BrushManager } from './powers/BrushManager';
-import { PowerExecutor } from './powers/GodPowers';
+import { PowerExecutor, ALL_POWERS } from './powers/GodPowers';
 import { EraManager, WorldEra } from './world/WeatherEras';
 import { OverlayManager } from './renderer/Overlays';
 import { SpeciesType, SPECIES_DEFINITIONS } from './entities/Species';
@@ -67,6 +67,8 @@ const DEV_RENDER_SEED = (() => {
 })();
 
 /** Probability that the world spawns a disaster on its own, rolled once per simulated year. */
+/** Ambient weather hits softer than a god's own hand. */
+const NATURAL_DISASTER_SEVERITY = 0.45;
 const DISASTER_CHANCE_PER_YEAR: Record<string, number> = {
   none: 0,
   rare: 0.02,
@@ -115,7 +117,6 @@ class AethoriaGame implements GameContext {
   public simSpeed = 0;
   private scheduler = new SimulationScheduler({ frameBudgetMs: 5, maxTicksPerFrame: 48, maxDebtTicks: 240 });
   private selectedEntityIds = new Set<string>();
-  private diplomacyIds: string[] = [];
   public fps = 60;
   public activeFires = 0;
 
@@ -282,12 +283,18 @@ class AethoriaGame implements GameContext {
       // A real food chain is mostly prey. Seeding half the wildlife as wolves and
       // bears meant the founding bands were hunted to the edge of extinction in
       // their first years, and the predators then starved with nothing left to eat.
+      // The mammoth was simply left out of this list, so it existed as a species
+      // the player could spawn and never as an animal the world produced.
       const fauna = [
         SpeciesType.DEER, SpeciesType.DEER, SpeciesType.DEER, SpeciesType.DEER,
         SpeciesType.DEER, SpeciesType.BOAR, SpeciesType.BOAR, SpeciesType.EAGLE,
-        SpeciesType.WOLF, SpeciesType.BEAR
+        SpeciesType.WOLF, SpeciesType.BEAR, SpeciesType.MAMMOTH
       ];
-      const wildCount = Math.round((config.size * config.size) / 700);
+      // One animal per seven hundred tiles left a 128x128 world with about
+      // twenty-three creatures across eleven kinds — two wolves, two bears. A
+      // species that loses one member cannot breed, so the food chain collapsed
+      // in the first decades and never recovered.
+      const wildCount = Math.round((config.size * config.size) / 300);
       for (let i = 0; i < wildCount; i++) {
         const spot = this.randomWalkableTile();
         if (!spot) continue;
@@ -622,6 +629,12 @@ class AethoriaGame implements GameContext {
     });
   }
 
+  private isPaintablePower(): boolean {
+    if (this.brush.activePowerId === 'inspect_select') return false;
+    const power = ALL_POWERS.find(p => p.id === this.brush.activePowerId);
+    return !!power && (power.category === 'terrain' || power.category === 'nature');
+  }
+
   private keysHeld: Set<string> = new Set();
 
   private setupInput(): void {
@@ -647,13 +660,17 @@ class AethoriaGame implements GameContext {
 
       if (this.isRightMouseDown) {
         this.camera.pan(e.clientX - this.lastMousePos.x, e.clientY - this.lastMousePos.y);
-      } else if (this.isMouseDown && this.inGame && this.brush.activePowerId !== 'inspect_select') {
+      } else if (this.isMouseDown && this.inGame && this.isPaintablePower()) {
         this.applyActivePower(e.clientX, e.clientY);
       }
 
       this.lastMousePos = { x: e.clientX, y: e.clientY };
     });
 
+    // Only brush-like powers repeat while the mouse is dragged. Spawning and
+    // smiting are point actions: a light drag used to fire them once per mouse
+    // event, so three to ten settlers landed in a fraction of a second and a
+    // whole village appeared where the player meant to place one person.
     this.canvas.addEventListener('wheel', e => {
       e.preventDefault();
       this.camera.zoomAt(e.deltaY < 0 ? 0.2 : -0.2, e.clientX, e.clientY, this.canvas.width, this.canvas.height);
@@ -903,18 +920,12 @@ class AethoriaGame implements GameContext {
       selectedEntityIds: this.selectedEntityIds,
       trackedEntityId: this.camera.targetEntityId
     };
-    if (this.diplomacyIds.length !== this.sim.kingdoms.size) this.diplomacyIds = [...this.sim.kingdoms.keys()];
-
     const result = this.scheduler.runFrame(this.simSpeed, absoluteTick => {
       this.sim.tickAI(this.tileMap, this.particles, relevanceContext);
 
       if (absoluteTick % 2 === 0) {
         this.activeFires = this.tileMap.updateFireTick();
         this.tileMap.updateFluidTick();
-      }
-
-      if (this.sim.kingdoms.size > 1) {
-        this.sim.diplomacy.tickDiplomacySlice(this.diplomacyIds, this.sim.currentYear, absoluteTick % 10, 10);
       }
     });
     perfProfiler.record('simulation', result.elapsedMs);
@@ -954,14 +965,14 @@ class AethoriaGame implements GameContext {
 
     const roll = Math.random();
     if (roll < 0.5) {
-      DisasterSystem.triggerLightning(spot.x, spot.y, this.tileMap, this.sim.spatialHash, this.particles, this.camera);
+      DisasterSystem.triggerLightning(spot.x, spot.y, this.tileMap, this.sim.spatialHash, this.particles, this.camera, NATURAL_DISASTER_SEVERITY);
       this.toast('Lightning splits the sky', 'disaster');
     } else if (roll < 0.8) {
       this.tileMap.applyBrush(spot.x, spot.y, 2, t => { t.isOnFire = true; });
       this.toast('A wildfire has broken out', 'disaster');
       chronicle.log(this.sim.currentYear, 'disaster', 'A wildfire swept across the land.');
     } else {
-      DisasterSystem.triggerEarthquake(spot.x, spot.y, this.tileMap, this.particles, this.camera);
+      DisasterSystem.triggerEarthquake(spot.x, spot.y, this.tileMap, this.sim.spatialHash, this.particles, this.camera, NATURAL_DISASTER_SEVERITY);
       this.toast('The ground shakes violently', 'disaster');
       chronicle.log(this.sim.currentYear, 'disaster', 'An earthquake fractured the earth.');
     }

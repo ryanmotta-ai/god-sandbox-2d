@@ -183,7 +183,13 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     // tools need a smithy (25 stone) plus a mine (20 stone) — more than a new
     // settlement owns. Charging tools for it deadlocks the entire build tree.
     cost: { wood: 25 },
-    produces: { stone: 7 },
+    // Twelve, not seven. A quarry costs three workers where a lumber camp costs
+    // two, so at seven it returned 2.3 stone per worker against the camp's 4 wood
+    // — and stone is what walls, barracks, smithies and keeps are made of, while
+    // almost nothing needs wood in bulk. Settlements ended up sitting on three
+    // hundred wood and four stone, unable to afford a thirty-stone barracks.
+    // Twelve makes a quarry worker exactly as productive as a forester.
+    produces: { stone: 12 },
     jobs: 3,
     resourceTargets: ['stone', 'clay'],
     resourceMode: 'required',

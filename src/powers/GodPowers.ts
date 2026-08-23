@@ -267,7 +267,7 @@ export class PowerExecutor {
       case 'wildfire':
         tileMap.applyBrush(tx, ty, radius, t => { t.isOnFire = true; });
         break;
-      case 'earthquake': DisasterSystem.triggerEarthquake(tx, ty, tileMap, particles, camera); break;
+      case 'earthquake': DisasterSystem.triggerEarthquake(tx, ty, tileMap, spatialHash, particles, camera); break;
       case 'meteorite': DisasterSystem.triggerMeteorite(tx, ty, tileMap, spatialHash, particles, camera); break;
       case 'plague': DisasterSystem.triggerPlague(tx, ty, spatialHash); break;
     }

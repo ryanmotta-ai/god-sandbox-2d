@@ -7,7 +7,7 @@ import { SpriteRegistry } from '../SpriteRegistry';
 import { caravanSprite, CARAVAN_FRAMES, type CaravanView } from '../CaravanSprites';
 import { TERRAIN_VISUALS } from '../TerrainPalette';
 import { CITY_ASSET_MANIFEST, resolveCityAssetUrl, type CityAssetEntry } from '../../assets/CityAssetManifest';
-import { MASTER_ASSET_MANIFEST, resolveMasterAssetUrl, type MasterAssetEntry } from '../../assets/MasterAssetManifest';
+import { MASTER_ASSET_MANIFEST, masterBuildingAtlasKey, resolveMasterAssetUrl, type MasterAssetEntry } from '../../assets/MasterAssetManifest';
 import {
   ENTITY_ASSET_MANIFEST, ENTITY_SHEET_ANIMATIONS, ENTITY_SHEET_CELL,
   ENTITY_SHEET_DIRECTIONS, ENTITY_SHEET_FRAMES, entityArtAtlasKey,
@@ -257,7 +257,16 @@ async function collectExternalMasterSources(): Promise<AtlasSource[]> {
     }
   }));
   const sources: AtlasSource[] = [];
-  for (const source of loaded) if (source) sources.push(source);
+  for (const source of loaded) {
+    if (!source) continue;
+    sources.push(source);
+    // Also register under the key the world renderer actually asks for. Without
+    // this the entire library is decoded, packed into the atlas and uploaded to
+    // the GPU without ever being drawn, because nothing in the game requests an
+    // `asset:<id>` region from this pack.
+    const gameplayKey = source.asset ? masterBuildingAtlasKey(source.asset as MasterAssetEntry) : null;
+    if (gameplayKey) sources.push({ ...source, key: gameplayKey });
+  }
   return sources;
 }
 

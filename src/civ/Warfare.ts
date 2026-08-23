@@ -1043,9 +1043,16 @@ export class WarfareSystem {
     damageRailAround(world.tileMap, city.x, city.y, 5);
     damageStrategicBuildings(city, world.tileMap, world.year);
 
-    const blockaded = world.fronts
-      ? world.fronts.isIsolated(city.id) || world.fronts.siegePressure(city, besieger.id) >= SIEGE_GATE_PUSH
+    // Being cut off always unlocks the walls. The front's opinion on the
+    // countryside only counts where there is a front: realms further apart than
+    // the contact range form no sectors at all, and a gate that waits on an
+    // absent front never opens, which left a besieger camped at 35% for the rest
+    // of the world's life. Where the front is silent, the old siege rules stand.
+    const isolated = !!world.fronts?.isIsolated(city.id);
+    const groundTaken = world.fronts && world.fronts.coversCity(city, besieger.id)
+      ? world.fronts.siegePressure(city, besieger.id) >= SIEGE_GATE_PUSH
       : true;
+    const blockaded = isolated || groundTaken;
 
     if (!blockaded) {
       city.siegeProgress = Math.min(city.siegeProgress, 0.35);
