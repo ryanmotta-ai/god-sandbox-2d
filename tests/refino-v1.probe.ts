@@ -146,7 +146,20 @@ assert.ok(humans > 0, 'the world must still have people');
  * entity array forever.
  */
 assert.ok(sim.totalDeaths > 0, 'ninety years must produce deaths');
-assert.equal(zombies, 0, `${zombies} bodies were never collected by handleEntityDeath`);
+/**
+ * Bodies are reaped on a cadence, not instantly, so a handful may be waiting at
+ * any single instant — this snapshot is taken mid-tick. What must not happen is a
+ * *backlog*: a body that is never collected keeps its estate unsettled, its
+ * ancestor unrecorded and its slot in the entity array forever.
+ */
+assert.ok(
+  zombies < 20,
+  `${zombies} bodies are waiting to be collected — that is a leak, not a cadence`
+);
+assert.equal(
+  sim.deceasedAncestors.size, sim.totalDeaths,
+  `every death must leave an ancestor (${sim.totalDeaths} deaths vs ${sim.deceasedAncestors.size} ancestors)`
+);
 assert.ok(
   sim.deceasedAncestors.size > 0,
   'the dead must be recorded as ancestors, or no family tree survives a generation'

@@ -821,7 +821,16 @@ export class CivilizationEngine {
           this.entitiesByCity.set(entity.cityId, residents);
         }
         residents.push(entity);
-        if (humanoid) counts.set(entity.cityId, (counts.get(entity.cityId) ?? 0) + 1);
+        // Only the living are counted.
+        //
+        // The census had no `hp > 0` check here, while the worker count on the
+        // next line always did. A body waits in the entity array until the sweep
+        // that reaps it — deaths are noticed on a cadence, not instantly — so a
+        // settlement's population was inflated by however many of its people had
+        // died since the last reap, and every figure derived from population
+        // (tax base, production, prosperity, famine mortality) was computed
+        // against a town slightly larger than the one that existed.
+        if (humanoid && entity.hp > 0) counts.set(entity.cityId, (counts.get(entity.cityId) ?? 0) + 1);
       }
       if (entity.kingdomId && entity.hp > 0 && humanoid && !entity.isChild) {
         this.workersByKingdom.set(entity.kingdomId, (this.workersByKingdom.get(entity.kingdomId) ?? 0) + 1);
