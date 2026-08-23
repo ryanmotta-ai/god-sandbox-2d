@@ -780,9 +780,45 @@ export class SimulationEngine {
     city.householdFoodDrawn += taken;
     city.ledger.recordConsumed('food', taken);
 
-    // The settlement earns what the family spent.
+    // The settlement earns what the family spent — all of it, as money.
+    //
+    // This used to credit `paid * 0.25` into `kingdom.treasury`, which is the
+    // realm's *warehouse*, not its till. Three quarters of every coin a family
+    // spent on bread ceased to exist, and the quarter that survived arrived as
+    // physical gold ore on a shelf. Both halves of that were wrong: money has to
+    // be conserved, and a grocery sale does not produce metal.
+    //
+    // Prices here are quoted in world value (LocalMarket anchors to the world
+    // price), so the crown's till is credited through the exchange rate like
+    // every other public receipt.
     const kingdom = city.kingdomId ? this.kingdoms.get(city.kingdomId) : null;
-    if (kingdom && paid > 0) kingdom.treasury.add('gold', paid * 0.25);
+    if (kingdom && paid > 0) {
+      kingdom.economy.treasury += kingdom.economy.hasCurrency
+        ? kingdom.economy.fromWorldValue(paid)
+        : paid;
+    }
+  }
+
+  /**
+   * Pays a wage out of a realm's till and reports what was actually handed over.
+   *
+   * Wages are quoted in world value, because that is the unit a household purse
+   * and a market price are both denominated in; the till is kept in the realm's
+   * own money. A realm with no currency yet has no money to conserve — its
+   * economy is still barter — so the wage is simply honoured.
+   *
+   * The till is allowed to go negative. A crown that cannot make payroll should
+   * discover that as a deficit, which `collectTaxes` then covers by printing and
+   * the currency pays for next year. Refusing to pay instead would quietly stop
+   * an early realm's whole food economy the first winter it ran short.
+   */
+  private payWageFromTreasury(kingdom: Kingdom | null | undefined, worldValue: number): number {
+    if (worldValue <= 0) return 0;
+    if (!kingdom) return worldValue;
+    kingdom.economy.treasury -= kingdom.economy.hasCurrency
+      ? kingdom.economy.fromWorldValue(worldValue)
+      : worldValue;
+    return worldValue;
   }
 
   /**
@@ -1969,7 +2005,16 @@ if (e.kingdomId) {
 
         // Wages. The worker is paid for what they actually brought in, and the
         // money lands in the family purse that buys the family's food.
-        const wage = stored * this.market.price(load.good) * 0.35;
+        //
+        // The pay comes out of a real till at the realm's own price. Before, it
+        // was minted from nothing at the *world* reference price — a settlement
+        // could pay any wage bill it liked, and the coin it invented was spent
+        // into the food market as pure inflation nobody had earned.
+        const dKingdom = dCity.kingdomId ? this.kingdoms.get(dCity.kingdomId) : null;
+        const localPrice = dKingdom
+          ? dKingdom.economy.market.price(load.good, this.market.price(load.good))
+          : this.market.price(load.good);
+        const wage = this.payWageFromTreasury(dKingdom, stored * localPrice * 0.35);
         e.wealth += wage;
         const household = this.householdFor(e);
         if (household) household.earn(wage);

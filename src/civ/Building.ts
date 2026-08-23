@@ -72,6 +72,17 @@ export interface BuildingDefinition {
   jobs?: number;
   /** Research points generated per year. */
   research?: number;
+  /**
+   * Annual public receipts, in world value, collected by the crown.
+   *
+   * Markets, harbours, banks, exchanges, ports and palaces used to carry
+   * `produces: { gold: N }`, which had them digging metal out of a vault floor
+   * every year: an inland bank was the richest gold mine in the world, and the
+   * ore it invented could be spent as raw material. What a counting house
+   * actually generates is *revenue* — duties, fees and tolls — so it is booked
+   * here and reaches the treasury through `collectTaxes` as money.
+   */
+  fiscal?: number;
   /** Multiplier on the settlement's military strength. */
   defense?: number;
   /** Extra stockpile capacity. */
@@ -138,7 +149,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     icon: '🏚️',
     category: 'food',
     maxHp: 180,
-    cost: { wood: 30, stone: 15 },
+    cost: { wood: 30, stone: 15, clay: 8 },
     storage: 250,
     produces: { food: 3 },
     unique: true,
@@ -242,7 +253,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     icon: '🏭',
     category: 'craft',
     maxHp: 400,
-    cost: { stone: 80, steel: 45, tools: 20 },
+    cost: { stone: 80, steel: 45, tools: 20, machinery: 6 },
     produces: { machinery: 12 },
     jobs: 12,
     craftCapacity: 5.5,
@@ -255,7 +266,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     icon: '🛢️',
     category: 'extraction',
     maxHp: 260,
-    cost: { steel: 35, tools: 12 },
+    cost: { steel: 35, tools: 12, machinery: 3 },
     produces: { oil: 12 },
     jobs: 5,
     resourceTargets: ['oil'],
@@ -269,7 +280,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     icon: '⛽',
     category: 'craft',
     maxHp: 320,
-    cost: { steel: 35, stone: 70, tools: 16 },
+    cost: { steel: 35, stone: 70, tools: 16, machinery: 4 },
     produces: { fuel: 9 },
     jobs: 7,
     craftCapacity: 4.5,
@@ -320,8 +331,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     icon: '🏪',
     category: 'commerce',
     maxHp: 200,
-    cost: { wood: 40, stone: 20 },
-    produces: { gold: 5 },
+    cost: { wood: 40, stone: 20, clay: 10 },
+    fiscal: 5,
     jobs: 3,
     unique: true,
     description: 'Onde o excedente se torna moeda, e a moeda se torna uma razão para construir estradas.'
@@ -333,7 +344,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'commerce',
     maxHp: 250,
     cost: { wood: 60, stone: 30 },
-    produces: { food: 5, gold: 3 },
+    produces: { food: 5 },
+    fiscal: 3,
     jobs: 4,
     requiresCoast: true,
     unique: true,
@@ -346,7 +358,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'commerce',
     maxHp: 280,
     cost: { stone: 80, gold: 40 },
-    produces: { gold: 16 },
+    fiscal: 16,
     jobs: 4,
     unique: true,
     description: 'Depósitos, empréstimos e juros. A riqueza começa a se multiplicar.'
@@ -358,7 +370,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'commerce',
     maxHp: 320,
     cost: { stone: 120, gold: 100, tools: 20 },
-    produces: { gold: 40 },
+    fiscal: 40,
     jobs: 6,
     unique: true,
     description: 'Propriedade negociada como papel. O crescimento acelera, assim como as crises.'
@@ -404,8 +416,8 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     icon: '🚢',
     category: 'infrastructure',
     maxHp: 250,
-    cost: { wood: 55, stone: 90, tools: 12 },
-    produces: { gold: 5 },
+    cost: { wood: 55, stone: 90, tools: 12, machinery: 4 },
+    fiscal: 5,
     jobs: 6,
     requiresCoast: true,
     unique: true,
@@ -446,7 +458,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     cost: { stone: 150, gold: 80, tools: 12 },
     defense: 1.5,
     housing: 10,
-    produces: { gold: 10 },
+    fiscal: 10,
     consumes: { food: 10 },
     research: 4,
     unique: true,
@@ -461,7 +473,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     maxHp: 1000,
     cost: { stone: 200, gold: 100 },
     housing: 10,
-    produces: { gold: 15 },
+    fiscal: 15,
     unique: true,
     description: 'Um monumento colossal financiado por um Grande Construtor. Concede +30% de Estabilidade do Reino.'
   },

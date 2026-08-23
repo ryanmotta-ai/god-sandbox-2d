@@ -535,6 +535,29 @@ export class KingdomEconomy {
     this.currency.inflation = previous > 0 ? (previous - this.currency.value) / previous : 0;
   }
 
+  /**
+   * Pays another realm out of this till, across the exchange rate.
+   *
+   * Every cross-border payment in the world — war reparations, peace indemnities,
+   * export revenue, vassal tribute, colonial tribute, foreign aid — used to move
+   * a bare number from one `treasury` to another. Two realms holding money of
+   * very different worth were therefore trading at a permanent, silent 1:1, so a
+   * weak currency could buy a strong one's whole economy and an indemnity was
+   * worth whatever the *payer's* mint happened to say.
+   *
+   * The payment is converted out of this realm's money into world value and back
+   * into the recipient's, which is the only conversion an exchange rate means.
+   * Returns what the payer actually parted with, in the payer's money.
+   */
+  public payAcrossBorder(recipient: KingdomEconomy, amount: number): number {
+    if (amount <= 0) return 0;
+    const paid = Math.min(amount, Math.max(0, this.treasury));
+    if (paid <= 0) return 0;
+    this.treasury -= paid;
+    recipient.treasury += recipient.fromWorldValue(this.toWorldValue(paid));
+    return paid;
+  }
+
   /** Printing money to cover a shortfall. Cheap now, expensive later. */
   public printMoney(amount: number): void {
     if (!this.currency) return;

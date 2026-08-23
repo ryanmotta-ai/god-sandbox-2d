@@ -737,14 +737,26 @@ export class CivilizationEngine {
       tools: population * 0.08,
       // Building and repairing homes is a constant background draw.
       wood: population * 0.15,
-      stone: population * 0.06
+      stone: population * 0.06,
+      // Salt is the preservative that carries a household through winter, so it
+      // is wanted everywhere and produced only on salt coasts. Furs are the same
+      // shape of demand for warmth: only cold ground grows them, everyone needs
+      // them. Both used to be mined and then sat in a warehouse forever, which is
+      // why neither ever became worth a trade route.
+      salt: population * 0.05,
+      furs: population * 0.035
     };
 
     // Prosperous settlements develop a taste for luxury.
     if (city.prosperity > 0.6 && city.population > 20) {
       wants.gems = population * 0.02;
     }
+    // Spice is what a town buys once it can afford to care how its food tastes.
+    if (city.prosperity >= 0.5 && city.population > 12) {
+      wants.spices = population * 0.03;
+    }
 
+    const comforts: GoodId[] = ['cloth', 'tools', 'gems', 'salt', 'furs', 'spices'];
     for (const [goodKey, amount] of Object.entries(wants)) {
       const good = goodKey as GoodId;
       const want = amount as number;
@@ -753,7 +765,7 @@ export class CivilizationEngine {
       // Consume what is available, so surplus is drawn down rather than hoarded.
       const consumed = city.stock.take(good, Math.min(want, city.stock.get(good) * 0.25));
       city.ledger.recordConsumed(good, consumed);
-      if (consumed > 0 && (good === 'cloth' || good === 'tools' || good === 'gems')) {
+      if (consumed > 0 && comforts.includes(good)) {
         // Met wants lift the standard of living.
         city.prosperity = Math.min(1, city.prosperity + consumed / Math.max(1, population * 40));
       }
@@ -1647,6 +1659,17 @@ export class CivilizationEngine {
         taxValue += (taken - stored) * world.market.price(good);
       }
 
+      // Public receipts: duties, fees, tolls and interest. This is what a market,
+      // a harbour, a bank, an exchange, a port or a palace actually contributes to
+      // a crown — revenue, collected in money, scaled by how well the building is
+      // running. It replaces the `produces: { gold }` entries those buildings used
+      // to carry, which minted physical ore out of bookkeeping.
+      for (const building of city.buildings.values()) {
+        const fiscal = building.definition.fiscal;
+        if (!fiscal) continue;
+        taxValue += fiscal * building.outputMultiplier();
+      }
+
       const taxPain = Math.max(0, effectiveTaxRate - 0.22);
       if (taxPain > 0) {
         city.prosperity = clamp(city.prosperity - taxPain * 0.035, 0, 1);
@@ -1670,10 +1693,7 @@ export class CivilizationEngine {
         const creditor = world.kingdoms.get(kingdom.warReparations.creditorId);
         if (creditor) {
           const payment = Math.min(Math.max(0, kingdom.economy.treasury * 0.25), kingdom.warReparations.annualAmount);
-          if (payment > 0) {
-            kingdom.economy.treasury -= payment;
-            creditor.economy.treasury += payment;
-          }
+          kingdom.economy.payAcrossBorder(creditor.economy, payment);
         }
       } else {
         kingdom.warReparations = null;
@@ -2866,9 +2886,7 @@ export class CivilizationEngine {
     const settlement: PeaceSettlement = victor ? 'victory' : exhausted ? 'exhaustion' : 'white_peace';
 
     if (victor && loser) {
-      const reparations = Math.max(0, loser.economy.treasury * 0.12);
-      loser.economy.treasury -= reparations;
-      victor.economy.treasury += reparations;
+      loser.economy.payAcrossBorder(victor.economy, Math.max(0, loser.economy.treasury * 0.12));
       victor.legitimacy = clamp(victor.legitimacy + 0.06, 0, 1);
       loser.legitimacy = clamp(loser.legitimacy - 0.08, 0, 1);
       rememberCulture(victor.culture, 'victory', world.year, 0.7, `A vitória sobre ${loser.name} fortaleceu o orgulho nacional.`);
@@ -3443,22 +3461,28 @@ export class CivilizationEngine {
       // route — multiplied by a solvency check that inflated revenue whenever
       // the buyer had any gold stock, so a few routes minted hundreds of
       // thousands of gold for a realm of twenty people.
+      // Booked as money, in the seller's own currency. The matching
+      // `treasury.add('gold', ...)` is gone: a grain sale paid the seller twice,
+      // once in coin and once in bullion that appeared in its warehouse.
       sellerKingdom.exportVolume += sellerRevenue;
-      sellerKingdom.economy.treasury += sellerRevenue;
-      sellerKingdom.treasury.add('gold', sellerRevenue);
+      sellerKingdom.economy.treasury += sellerKingdom.economy.hasCurrency
+        ? sellerKingdom.economy.fromWorldValue(sellerRevenue)
+        : sellerRevenue;
       if (buyerKingdom.id !== sellerKingdom.id) {
         const tariffRate = world.trade.getAgreement(sellerKingdom.id, buyerKingdom.id)?.tariff ?? buyerKingdom.tariffRate();
         const tariff = value * tariffRate;
         buyerKingdom.tariffRevenue += tariff;
-        buyerKingdom.economy.treasury += tariff;
-        buyerKingdom.treasury.add('gold', tariff);
+        buyerKingdom.economy.treasury += buyerKingdom.economy.hasCurrency
+          ? buyerKingdom.economy.fromWorldValue(tariff)
+          : tariff;
         buyerKingdom.importVolume += value;
         // And the buyer pays for what it imported. This debit simply was not
         // here: the seller was credited and the buyer collected a tariff, so
         // both sides ended a trade richer than they started and the world
         // minted gold on every route, every year. No realm ever had a budget.
-        buyerKingdom.economy.treasury -= value;
-        buyerKingdom.treasury.take('gold', value);
+        buyerKingdom.economy.treasury -= buyerKingdom.economy.hasCurrency
+          ? buyerKingdom.economy.fromWorldValue(value)
+          : value;
       }
       this.settleColonialTribute(route, sellerKingdom, buyerKingdom, value);
 
@@ -3532,9 +3556,7 @@ export class CivilizationEngine {
         0.04,
         0.18
       );
-      const tribute = Math.max(0, vassal.economy.treasury * tributeRate);
-      vassal.economy.treasury -= tribute;
-      overlord.economy.treasury += tribute;
+      vassal.economy.payAcrossBorder(overlord.economy, Math.max(0, vassal.economy.treasury * tributeRate));
 
       vassal.economy.stability = clamp(vassal.economy.stability - tributeRate * 0.08, 0, 1);
       vassal.legitimacy = clamp(vassal.legitimacy - tributeRate * 0.04, 0, 1);
@@ -3601,12 +3623,11 @@ export class CivilizationEngine {
   private settleColonialTribute(route: { colonialRoute?: boolean; colonialDirection?: string }, seller: Kingdom, buyer: Kingdom, value: number): void {
     if (!route.colonialRoute || route.colonialDirection !== 'colony_to_metropole') return;
     if (seller.metropoleId !== buyer.id || !seller.isColony) return;
-    const tribute = Math.min(value * 0.08, seller.economy.treasury);
-    if (tribute <= 0) return;
-    seller.economy.treasury -= tribute;
-    seller.treasury.take('gold', tribute);
-    buyer.economy.treasury += tribute;
-    buyer.treasury.add('gold', tribute);
+    // Tribute is money, and it crosses a border, so it crosses an exchange rate.
+    // The bullion legs were removed with the rest of the gold alchemy: a colony
+    // shipping timber home did not also ship ore out of thin air.
+    const tribute = Math.min(seller.economy.fromWorldValue(value * 0.08), seller.economy.treasury);
+    seller.economy.payAcrossBorder(buyer.economy, tribute);
   }
 
   private recordColonialRouteInterruption(route: { id: string; colonialRoute?: boolean; good: GoodId; fromCityId: string; toCityId: string }, world: CivWorld, reason: string): void {
@@ -4106,10 +4127,8 @@ export class CivilizationEngine {
       if (!power) continue;
       const supportsColony = world.diplomacy.getRelation(power.id, colony.id) >= 25 && world.diplomacy.getRelation(power.id, metropole.id) < 25;
       const recipient = supportsColony ? colony : metropole;
-      const aid = Math.min(30, Math.max(0, power.economy.treasury * 0.035));
+      const aid = power.economy.payAcrossBorder(recipient.economy, Math.min(30, Math.max(0, power.economy.treasury * 0.035)));
       if (aid <= 0) continue;
-      power.economy.treasury -= aid;
-      recipient.economy.treasury += aid;
       if (supportsColony) {
         colony.foreignSupport = clamp(colony.foreignSupport + aid / 180, 0, 1);
         world.diplomacy.createAlliance(colony.id, power.id, `Liga de ${colony.name}`, world.year);

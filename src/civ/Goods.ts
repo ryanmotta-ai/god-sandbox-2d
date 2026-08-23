@@ -436,15 +436,25 @@ export const PRODUCTION_RECIPES: Partial<Record<GoodId, ProductionRecipe[]>> = {
     { inputs: { iron: 3, coal: 2 }, output: 1.5, requiresTech: 'metallurgy', label: 'blast-furnace steel' }
   ],
   tools: [
+    // Fired clay: pots, tiles and crucibles. The earliest workshop good there is,
+    // and the reason a clay pit is worth digging at all.
+    { inputs: { clay: 3, wood: 1 }, output: 1.1, requiresTech: 'pottery', label: 'cerâmica e telha' },
     { inputs: { bronze: 1, wood: 1 }, output: 1.8, requiresTech: 'bronze_working', label: 'bronze tools' },
     { inputs: { iron: 2, wood: 1 }, output: 1.25, requiresTech: 'iron_working', label: 'iron tools' },
     { inputs: { steel: 1, wood: 1 }, output: 2.3, requiresTech: 'metallurgy', label: 'steel tools' }
   ],
   cloth: [
-    { inputs: { cotton: 2 }, output: 1.4, requiresTech: 'pottery', label: 'woven cloth' }
+    { inputs: { cotton: 2 }, output: 1.4, requiresTech: 'pottery', label: 'woven cloth' },
+    // Tanning, which needs no loom and no cotton climate. This is the only thing
+    // a fur was ever for: without it, a cold realm mined pelts into a warehouse
+    // and had nothing to wear.
+    { inputs: { furs: 2 }, output: 1.15, requiresTech: 'animal_husbandry', label: 'peleteria curtida' }
   ],
   fuel: [
-    { inputs: { oil: 2 }, output: 1.8, requiresTech: 'industrialization', label: 'refined fuel' }
+    { inputs: { oil: 2 }, output: 1.8, requiresTech: 'industrialization', label: 'refined fuel' },
+    // Fission. A tiny input for an enormous output, which is what makes the two
+    // uranium basins on a map worth a war — and what finally gives the ore a use.
+    { inputs: { uranium: 1 }, output: 7.5, requiresTech: 'electricity', label: 'combustível de fissão' }
   ],
   gunpowder: [
     { inputs: { saltpeter: 2, coal: 1 }, output: 1.8, requiresTech: 'gunpowder', label: 'black powder' }
