@@ -58,23 +58,30 @@ import { BUILDING_DRAW_SCALE } from './CityVisualResolver';
 const ANIM_REFRESH_FRAMES = 4;
 
 /**
- * Largest world the animated layer is baked for.
+ * Memory the animated layer is allowed, in bytes of canvas.
  *
- * The layer mirrors the terrain bake's geometry, so it also mirrors its memory:
- * width x height x 16px x 4 bytes. At 256 squared that is 67 MB on top of the
- * terrain bake's own, which is a fair trade for taking the sea off the per-frame
- * path. At 512 squared it would be 268 MB, so that size keeps drawing directly —
- * and at the zoom a 512 map is actually played at, the animated detail is
- * sub-pixel anyway.
+ * This used to be a flat "no worlds above 256 squared" cutoff, on the assumption
+ * that a 512 world's 268 MB layer would not allocate. That assumption was wrong:
+ * the engine allocates two 8192-square canvases and draws to both without
+ * complaint, and it is the same engine either way — Tauri on Windows is WebView2,
+ * which is Chromium, so leaving the browser buys nothing here.
+ *
+ * A budget is the honest constraint rather than a map-size cutoff. The layer
+ * drops its resolution to fit, which costs nothing that can be seen: a large
+ * world is played zoomed out, where the animated detail is already sub-pixel.
  */
-const ANIM_BAKE_MAX_TILES = 256 * 256;
+const ANIM_LAYER_BUDGET_BYTES = 96 * 1024 * 1024;
+
+/** Resolutions the layer will accept, best first. */
+const ANIM_TILE_SIZES = [16, 8, 4];
 
 /**
  * Zoom ceiling for using the layer, as a multiple of the bake resolution.
  *
  * Past this the blit would upscale the layer noticeably, and there is no reason
  * to: at high zoom only a few hundred tiles are on screen, so drawing them
- * directly is both cheap and sharper.
+ * directly is both cheap and sharper. Measured against the layer's own
+ * resolution, which is not always the terrain bake's.
  */
 const ANIM_MAX_ZOOM_FACTOR = 1.5;
 
@@ -223,6 +230,8 @@ export class PixelRenderer {
   private animCtx: CanvasRenderingContext2D | null = null;
   private animW: number = 0;
   private animH: number = 0;
+  /** Pixels per tile in the layer. Drops below the bake's 16 to fit the budget. */
+  private animTileSize: number = 16;
   /** Frame counter driving the refresh cadence. */
   private animFrame: number = 0;
   /** Terrain revision the layer was drawn against, so terraforming invalidates it. */
@@ -902,13 +911,18 @@ export class PixelRenderer {
     maxY: number,
     tileSize: number
   ): boolean {
-    if (tileMap.width * tileMap.height > ANIM_BAKE_MAX_TILES) return false;
-    if (tileSize > this.bakeTileSize * ANIM_MAX_ZOOM_FACTOR) return false;
+    // Best resolution that fits the budget. A 128 world keeps the bake's 16px; a
+    // 512 world drops to 8 and costs the same 64 MB it would have at 256.
+    const area = tileMap.width * tileMap.height;
+    const fitted = ANIM_TILE_SIZES.find(px => area * px * px * 4 <= ANIM_LAYER_BUDGET_BYTES);
+    if (fitted === undefined) return false;
+    if (tileSize > fitted * ANIM_MAX_ZOOM_FACTOR) return false;
 
-    if (!this.animCanvas || this.animW !== tileMap.width || this.animH !== tileMap.height) {
+    if (!this.animCanvas || this.animW !== tileMap.width || this.animH !== tileMap.height || this.animTileSize !== fitted) {
+      this.animTileSize = fitted;
       this.animCanvas = document.createElement('canvas');
-      this.animCanvas.width = tileMap.width * this.bakeTileSize;
-      this.animCanvas.height = tileMap.height * this.bakeTileSize;
+      this.animCanvas.width = tileMap.width * fitted;
+      this.animCanvas.height = tileMap.height * fitted;
       this.animCtx = this.animCanvas.getContext('2d', { alpha: true })!;
       this.animCtx.imageSmoothingEnabled = false;
       this.animW = tileMap.width;
@@ -945,7 +959,7 @@ export class PixelRenderer {
   private redrawAnimatedLayer(tileMap: TileMap, minX: number, minY: number, maxX: number, maxY: number): void {
     const ctx = this.animCtx;
     if (!ctx) return;
-    const ts = this.bakeTileSize;
+    const ts = this.animTileSize;
 
     // One tile of margin: a canopy is drawn taller than its own tile, so a sprite
     // on the boundary row would otherwise be sliced by the cleared region.
@@ -1850,11 +1864,14 @@ export class PixelRenderer {
       // this stays false and the per-tile loop below does the work as before.
       animatedLayerBlitted = this.ensureAnimatedLayer(tileMap, minX, minY, maxX, maxY, tileSize);
       if (animatedLayerBlitted) {
+        // Its own resolution, which is not always the bake's, so the source rect
+        // is measured in the layer's tiles rather than reusing the bake's.
+        const ats = this.animTileSize;
         this.ctx.drawImage(
           this.animCanvas!,
-          srcX, srcY, srcW, srcH,
+          minX * ats, minY * ats, (maxX - minX + 1) * ats, (maxY - minY + 1) * ats,
           minX * tileSize + baseSX, minY * tileSize + baseSY,
-          srcW * camera.zoom, srcH * camera.zoom
+          (maxX - minX + 1) * tileSize, (maxY - minY + 1) * tileSize
         );
       }
     }
