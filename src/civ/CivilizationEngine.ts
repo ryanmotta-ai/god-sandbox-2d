@@ -479,8 +479,33 @@ export class CivilizationEngine {
   }
 
   /** Hand-cut timber from the settlement's territory. Deliberately inefficient. */
+  /**
+   * How many of a settlement's people the visible layer is already gathering with.
+   *
+   * EntityAI walks foragers and woodcutters to real deposits, takes a real load
+   * off the tile and carries it into this same stockpile. The comment on those
+   * states still reads "purely visual, yearly produceGoods handles the actual
+   * economy", and that stopped being true the day the delivery was added. So the
+   * yearly pass counted the whole population again, harvesting the same people
+   * twice and drawing the same tiles down at double rate.
+   *
+   * The visible layer is the one that tells the truth now: people who are out
+   * gathering are subtracted here, and the yearly pass covers only the rest.
+   * That keeps the causal, watchable version without leaving a settlement to
+   * starve because its foragers could not find a path.
+   */
+  private citizensGatheringByHand(city: City, world: CivWorld, state: string): number {
+    let count = 0;
+    for (const entity of world.entities) {
+      if (entity.cityId !== city.id || entity.hp <= 0) continue;
+      if (entity.aiState === state) count++;
+    }
+    return count;
+  }
+
   private gatherWildWood(city: City, world: CivWorld): number {
-    let effort = city.population * HAND_WOOD_PER_CITIZEN;
+    const byHand = this.citizensGatheringByHand(city, world, 'gather_wood');
+    let effort = Math.max(0, city.population - byHand) * HAND_WOOD_PER_CITIZEN;
     if (effort <= 0) return 0;
 
     let gathered = 0;
@@ -502,7 +527,8 @@ export class CivilizationEngine {
 
   /** Draws wild food from the settlement's own territory. Returns units stored. */
   private forageWildFood(city: City, world: CivWorld): number {
-    let effort = city.population * FORAGE_PER_CITIZEN;
+    const byHand = this.citizensGatheringByHand(city, world, 'gather_food');
+    let effort = Math.max(0, city.population - byHand) * FORAGE_PER_CITIZEN;
     if (effort <= 0) return 0;
 
     let gathered = 0;
@@ -517,7 +543,7 @@ export class CivilizationEngine {
     }
 
     // The last scraps of gathering that need no standing deposit at all.
-    gathered += Math.min(effort, city.population * 0.12);
+    gathered += Math.min(effort, Math.max(0, city.population - byHand) * 0.12);
 
     // Report what actually reached the granary, not what was picked: a full
     // stockpile must not look like extra supply to the price model.

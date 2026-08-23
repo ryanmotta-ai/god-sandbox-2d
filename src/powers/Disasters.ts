@@ -70,7 +70,7 @@ export class DisasterSystem {
     }
   }
 
-  public static triggerEarthquake(x: number, y: number, tileMap: TileMap, particles: ParticleManager, camera?: Camera, severity: number = 1): void {
+  public static triggerEarthquake(x: number, y: number, tileMap: TileMap, spatialHash: SpatialHash<Entity>, particles: ParticleManager, camera?: Camera, severity: number = 1): void {
     sound.playHit();
     particles.spawnExplosion(x, y, '#78350f', 30);
     if (camera) camera.triggerShake(14, 0.4);
@@ -86,6 +86,16 @@ export class DisasterSystem {
       }
       if (tile.buildingId) tileMap.recordBuildingDamage(tile, .48 * severity, 'disaster');
     });
+
+    // The ground opening up used to be the one disaster that hurt nobody: it
+    // reshaped terrain and cracked buildings, and every person standing on it
+    // walked away untouched. Lightning, the meteor and the plague all reach for
+    // the spatial index; this one was never given it.
+    for (const entity of spatialHash.queryRadius(x, y, 4)) {
+      const damage = Math.round(45 * severity);
+      entity.hp -= damage;
+      particles.spawnDamageNumber(entity.x, entity.y, damage);
+    }
   }
 
   public static triggerPlague(x: number, y: number, spatialHash: SpatialHash<Entity>): number {

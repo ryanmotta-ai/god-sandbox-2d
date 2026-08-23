@@ -283,8 +283,26 @@ export class DiplomacyManager {
     war.victor = victor;
     this.warHistory.push(war);
     this.activeWars.delete(key);
-    this.setRelation(k1, k2, relationAfter ?? (settlement === 'white_peace' ? -20 : -35));
-    this.recordTruce(k1, k2, year, truceYears, settlement);
+    /**
+     * A treaty binds everyone who was called to the war, not only the two who
+     * signed it.
+     *
+     * Allies are dragged in by `callAlliesToWar`, which sets them to -80 against
+     * the other side. Settling used to touch the two principals alone, so every
+     * ally walked out of the peace still at -80 and with no truce holding them:
+     * the grievance gate opened again immediately and the same coalition was
+     * back at war the following year, over and over.
+     */
+    const settled = relationAfter ?? (settlement === 'white_peace' ? -20 : -35);
+    const oneSide = [war.attacker, ...war.attackerAllies];
+    const otherSide = [war.defender, ...war.defenderAllies];
+    for (const a of oneSide) {
+      for (const b of otherSide) {
+        if (a === b) continue;
+        this.setRelation(a, b, settled);
+        this.recordTruce(a, b, year, truceYears, settlement);
+      }
+    }
     events.emit('warEnded', { k1, k2, year, war });
   }
 

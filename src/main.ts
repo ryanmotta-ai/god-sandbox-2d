@@ -972,7 +972,7 @@ class AethoriaGame implements GameContext {
       this.toast('A wildfire has broken out', 'disaster');
       chronicle.log(this.sim.currentYear, 'disaster', 'A wildfire swept across the land.');
     } else {
-      DisasterSystem.triggerEarthquake(spot.x, spot.y, this.tileMap, this.particles, this.camera, NATURAL_DISASTER_SEVERITY);
+      DisasterSystem.triggerEarthquake(spot.x, spot.y, this.tileMap, this.sim.spatialHash, this.particles, this.camera, NATURAL_DISASTER_SEVERITY);
       this.toast('The ground shakes violently', 'disaster');
       chronicle.log(this.sim.currentYear, 'disaster', 'An earthquake fractured the earth.');
     }

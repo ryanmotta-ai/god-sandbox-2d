@@ -555,25 +555,6 @@ export class SimulationEngine {
        * pressed — a siege now needs the ground around the city, which the front
        * has just finished deciding.
        */
-      const warWorld = {
-        year: this.currentYear,
-        cities: this.cities,
-        kingdoms: this.kingdoms,
-        entities: this.entities,
-        tileMap,
-        diplomacy: this.diplomacy
-      };
-      perfProfiler.measure('fronts', () => this.fronts.tickYear(warWorld));
-      perfProfiler.measure('logistics', () => this.logistics.tickYear({
-        ...warWorld,
-        railways: this.railways,
-        fronts: this.fronts
-      }));
-      perfProfiler.measure('fronts', () => this.fronts.resolveYear(warWorld));
-      perfProfiler.measure('warfare', () => this.warfare.tickYear({
-        ...warWorld,
-        fronts: this.fronts
-      }));
       /**
        * Diplomacy is a yearly matter, and now runs on the same clock as
        * everything else.
@@ -591,6 +572,35 @@ export class SimulationEngine {
       this.diplomacy.tickDiplomacy([...this.kingdoms.keys()], this.currentYear);
       this.tickGeopolitics();
       this.musterArmies();
+
+      const warWorld = {
+        year: this.currentYear,
+        cities: this.cities,
+        kingdoms: this.kingdoms,
+        entities: this.entities,
+        tileMap,
+        diplomacy: this.diplomacy
+      };
+      /**
+       * War is fought after it is declared, not before.
+       *
+       * These four passes used to run above the block that declares wars and
+       * raises levies, so a war declared in a given year found its fronts
+       * already measured, its logistics already costed and its battles already
+       * resolved. Nothing happened until the following year, and the troops it
+       * called up arrived a year after that.
+       */
+      perfProfiler.measure('fronts', () => this.fronts.tickYear(warWorld));
+      perfProfiler.measure('logistics', () => this.logistics.tickYear({
+        ...warWorld,
+        railways: this.railways,
+        fronts: this.fronts
+      }));
+      perfProfiler.measure('fronts', () => this.fronts.resolveYear(warWorld));
+      perfProfiler.measure('warfare', () => this.warfare.tickYear({
+        ...warWorld,
+        fronts: this.fronts
+      }));
     }
   }
 
@@ -1823,7 +1833,10 @@ if (e.kingdomId) {
       }
 
       case 'gather_wood': {
-        // Purely visual — yearly produceGoods handles actual economy
+        // Not merely visual: this cuts a real load off the tile and carries it
+        // into the city store. The yearly pass in CivilizationEngine covers only
+        // the citizens who are *not* doing this, so the two do not harvest the
+        // same people twice.
         e.showEmote('🪓', 20);
         if (!e.cityId || !this.cities.has(e.cityId)) { e.aiState = 'wander'; break; }
         const gCity = this.cities.get(e.cityId)!;
@@ -1852,7 +1865,8 @@ if (e.kingdomId) {
       }
 
       case 'gather_food': {
-        // Purely visual — yearly produceGoods handles farm output
+        // Not merely visual: a real load is picked and delivered. The yearly
+        // pass covers only the citizens who are not out foraging.
         e.showEmote('🌾', 20);
         if (!e.cityId || !this.cities.has(e.cityId)) { e.aiState = 'wander'; break; }
         const gCity = this.cities.get(e.cityId)!;
