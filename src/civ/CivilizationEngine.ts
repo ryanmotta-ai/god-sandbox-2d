@@ -82,6 +82,12 @@ const STREET_SERVICE_REACH = 2;
 const HEGEMONY_THRESHOLD = 0.35;
 /** Mutual regard two frightened realms need before the fear becomes a treaty. */
 const COALITION_RELATION = 45;
+/** Accumulated neglect a settlement needs before another flag looks better. */
+const DEFECTION_GRIEVANCE = 0.62;
+/** How far a town will look for a better crown, in tiles. */
+const DEFECTION_REACH = 26;
+/** How much more prosperous the neighbour has to visibly be. */
+const DEFECTION_PROSPERITY_GAP = 0.22;
 const TAX_KEPT_IN_KIND = 0.5;
 /**
  * How hard neighbours resent each other over land. This is the strongest term
@@ -214,6 +220,7 @@ export class CivilizationEngine {
 
     this.tickDiplomaticContact(world);
     this.tickAntiHegemonicCoalitions(world);
+    this.tickSoftPowerDefection(world);
     this.tickStrategicDiplomacy(world);
     // Rail freight runs before trade settles so imports land in the current ledger year
     world.sim?.railways.tickRailways(world);
@@ -3181,6 +3188,143 @@ export class CivilizationEngine {
         }
       }
     }
+  }
+
+/**
+   * A city can simply stop wanting its crown.
+   *
+   * Every way a settlement changed hands went through an army. A frontier town
+   * could starve for decades, pay punitive taxes, hold no garrison and sit beside
+   * a neighbour twice as prosperous, and nothing would happen: prosperity,
+   * famine, legitimacy and administrative reach were numbers that only ever
+   * pushed *inward*, on growth and unrest, never outward onto the map.
+   *
+   * So a realm's neglect now has an external price. A town that is miserable,
+   * undefended, far from its own capital and next door to somewhere visibly
+   * better changes flag by acclamation — no war declared, no siege, no
+   * casualties. It is the peaceful counterpart of conquest, and the only route to
+   * a redrawn border that rewards *governing well* rather than fielding an army.
+   *
+   * Deliberately hard to trigger. It needs real misery, a genuinely better
+   * neighbour, peace between the two crowns, and no siege in progress — a city
+   * under attack is not defecting, it is falling.
+   */
+  private tickSoftPowerDefection(world: CivWorld): void {
+    for (const city of [...world.cities.values()]) {
+      if (!city.kingdomId || city.besiegerId) continue;
+      const owner = world.kingdoms.get(city.kingdomId);
+      if (!owner || owner.capitalCityId === city.id) continue;
+      // A realm cannot be reduced to nothing this way; that is what secession is for.
+      if (owner.cityIds.size <= 1) continue;
+
+      const capital = world.cities.get(owner.capitalCityId);
+      const fromCapital = capital ? Math.hypot(capital.x - city.x, capital.y - city.y) : 0;
+      const garrison = (this.entitiesByCity.get(city.id) ?? [])
+        .filter(e => e.hp > 0 && (e.profession === 'soldier' || e.profession === 'king')).length;
+
+      /**
+       * How little this town owes its crown.
+       *
+       * Hunger and poverty carry the most weight because they are what a resident
+       * actually feels; distance and a weak garrison decide whether anyone could
+       * stop them; low legitimacy and a thin administration decide whether the
+       * capital has any standing to object.
+       */
+      const grievance =
+        Math.min(0.34, city.famineYears * 0.09) +
+        Math.max(0, 0.5 - city.prosperity) * 0.5 +
+        (1 - owner.legitimacy) * 0.2 +
+        (1 - owner.administrativeReach) * 0.22 +
+        Math.min(0.16, fromCapital / 260) +
+        (garrison === 0 ? 0.12 : 0);
+      if (grievance < DEFECTION_GRIEVANCE) continue;
+
+      // Somewhere visibly better, close enough to walk to, and at peace with us.
+      let suitor: Kingdom | null = null;
+      let suitorGap = 0;
+      for (const other of world.cities.values()) {
+        if (!other.kingdomId || other.kingdomId === owner.id) continue;
+        if (Math.hypot(other.x - city.x, other.y - city.y) > DEFECTION_REACH) continue;
+        const claimant = world.kingdoms.get(other.kingdomId);
+        if (!claimant || claimant.id === owner.id) continue;
+        if (world.diplomacy.isAtWar(claimant.id, owner.id)) continue;
+        // Nobody defects to a realm their own people loathe.
+        if (world.diplomacy.getRelation(claimant.id, owner.id) < -55) continue;
+        const gap = other.prosperity - city.prosperity;
+        if (gap > suitorGap) { suitorGap = gap; suitor = claimant; }
+      }
+      if (!suitor || suitorGap < DEFECTION_PROSPERITY_GAP) continue;
+
+      // Rare even when everything lines up: a town changes allegiance once in a
+      // long lifetime, not the first bad winter.
+      if (!rng.chance(0.02 * grievance * (1 + suitorGap * 2))) continue;
+
+      this.defectCity(city, owner, suitor, world, grievance, suitorGap);
+    }
+  }
+
+  /** Moves a settlement to a new crown without a shot fired. */
+  private defectCity(
+    city: City,
+    from: Kingdom,
+    to: Kingdom,
+    world: CivWorld,
+    grievance: number,
+    gap: number
+  ): void {
+    from.removeCity(city.id);
+    to.addCity(city.id);
+    city.kingdomId = to.id;
+    city.formerOwnerId = from.id;
+    // Not slashed the way a captured city's is: this town chose, and the choice
+    // is the beginning of it doing better rather than worse.
+    city.prosperity = clamp(city.prosperity + 0.05, 0, 1);
+
+    for (const key of city.territory) {
+      const [tx, ty] = key.split(',').map(Number);
+      const tile = world.tileMap.getTile(tx, ty);
+      if (tile && tile.cityId === city.id) {
+        tile.kingdomId = to.id;
+        world.tileMap.markRenderDirty(tile.x, tile.y);
+      }
+    }
+    for (const resident of world.entities) {
+      if (resident.cityId === city.id && resident.hp > 0) resident.kingdomId = to.id;
+    }
+
+    // The crown that lost it is diminished; the one that gained it is admired.
+    from.legitimacy = clamp(from.legitimacy - 0.09, 0, 1);
+    to.legitimacy = clamp(to.legitimacy + 0.04, 0, 1);
+    world.diplomacy.changeRelation(from.id, to.id, -18);
+    rememberCulture(from.culture, 'defeat', world.year, 0.6, `${city.name} preferiu outra bandeira.`);
+
+    chronicle.log(
+      world.year,
+      'kingdom',
+      `${city.name} renunciou a ${from.name} e aclamou ${to.name}, sem um tiro disparado.`,
+      {
+        title: `A Aclamação de ${city.name}`,
+        importance: 'major',
+        scope: 'international',
+        refs: [
+          { kind: 'city', id: city.id, name: city.name },
+          { kind: 'kingdom', id: from.id, name: from.name },
+          { kind: 'kingdom', id: to.id, name: to.name }
+        ],
+        tags: ['territory', 'defection', 'soft-power'],
+        causes: [
+          `Décadas de descaso: queixa acumulada de ${Math.round(grievance * 100)}%.`,
+          `${to.name} prosperava ${Math.round(gap * 100)} pontos acima.`
+        ],
+        consequences: [
+          `${city.name} mudou de soberania sem guerra.`,
+          `A legitimidade de ${from.name} foi publicamente ferida.`
+        ],
+        threadId: `defection:${city.id}`,
+        threadTitle: `A aclamação de ${city.name}`
+      }
+    );
+    events.emit('cityCeded', { city, from, to, year: world.year, peaceful: true });
   }
 
   private tickStrategicDiplomacy(world: CivWorld): void {
