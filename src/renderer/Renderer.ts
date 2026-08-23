@@ -966,6 +966,91 @@ export class PixelRenderer {
     this.ctx = saved;
   }
 
+  /**
+   * Vegetation, terrain ornaments and deposit markers for one tile.
+   *
+   * Lifted out of the per-frame loop so the animated layer can carry it. These
+   * were the last per-tile blits on the frame path and by far the most numerous —
+   * around 1.600 `drawImage` calls a frame at 1080p, the great majority of them
+   * trees and resource nodes on ground that had not changed in centuries.
+   *
+   * It is drawn per frame at exact screen coordinates, and it stays that way.
+   * Routing it through the animated layer instead was measurably cheaper — 1.623
+   * blits a frame down to 49 — and was reverted anyway, because it moved 7,5% of
+   * the frame's pixels by up to 210 of a possible 765 and the cause did not
+   * reduce to rounding. Sprites do not survive a trip through a world-space
+   * layer the way flat terrain does, and the sprites are the reason anyone is
+   * using this renderer. Blits are the cheap operation; the expensive ones —
+   * fillRect and fillStyle churn — are already gone.
+   */
+  private drawTileDecoration(tile: Tile, x: number, y: number, sx: number, sy: number, tileSize: number): void {
+    /**
+     * Seeded from this tile, which it never was.
+     *
+     * The scatter below reads `h(800)` / `h(801)` without setting the hash
+     * base, so it used whatever base the last caller happened to leave —
+     * in practice the previous water or lava tile, since those are the only
+     * things in this loop that seed it. Every land tile between two water
+     * tiles therefore shared a single hash value, and "one tree every ~3
+     * tiles" came out as all-or-nothing: whole runs of forest either fully
+     * wooded or completely bare, which is why forest masses read as bands.
+     *
+     * It also made vegetation depend on draw order, so any change to what
+     * seeds the hash silently moved every tree on the map.
+     */
+    this.setHashBase(x, y);
+    const sway = Math.sin(this.animTimer * 2 + x * 0.5 + y * 0.3) * 1.5;
+
+    if (tile.type === TerrainType.FOREST) {
+      // One tree every ~3 tiles — forest masses read as canopy, not a carpet.
+      if (this.h(800) < 0.33) {
+        const s = SpriteRegistry.get('tree_oak');
+        if (s) this.ctx.drawImage(s, sx + sway, sy - tileSize * 0.2, tileSize, tileSize * 1.2);
+      }
+    } else if (tile.type === TerrainType.TUNDRA || tile.type === TerrainType.SNOW) {
+      if (this.h(801) > 0.68) {
+        const s = SpriteRegistry.get('tree_pine');
+        if (s) this.ctx.drawImage(s, sx + sway, sy - tileSize * 0.2, tileSize, tileSize * 1.2);
+      }
+    } else if (tile.type === TerrainType.SAVANNA) {
+      const s = SpriteRegistry.get('tree_palm');
+      if (s) this.ctx.drawImage(s, sx + sway, sy - tileSize * 0.15, tileSize, tileSize * 1.15);
+    } else if (tile.type === TerrainType.SWAMP) {
+      const s = SpriteRegistry.get('swamp_reed');
+      if (s) this.ctx.drawImage(s, sx + sway * 0.5, sy, tileSize, tileSize);
+    } else if (tile.type === TerrainType.ARCANE) {
+      const s = SpriteRegistry.get('arcane_crystal');
+      if (s) {
+        // Pulsing glow for crystals
+        this.ctx.globalAlpha = 0.7 + Math.sin(this.animTimer * 3) * 0.3;
+        this.ctx.drawImage(s, sx, sy, tileSize, tileSize);
+        this.ctx.globalAlpha = 1.0;
+      }
+    } else if (tile.type === TerrainType.CORRUPTED) {
+      const s = SpriteRegistry.get('corrupted_skull');
+      if (s) this.ctx.drawImage(s, sx, sy, tileSize, tileSize);
+    }
+
+    // Resource Node Sprites.
+    //
+    // Common deposits — wild food above all — blanket thousands of tiles. Drawing
+    // an icon on every one buries the terrain, the roads and the kingdom borders
+    // under a carpet of sprites. Abundant goods are therefore thinned to a stable
+    // scatter (same tiles every frame, so nothing flickers), while scarce and
+    // strategic deposits always draw: those are the ones worth going to war over.
+    if (tile.resourceType) {
+      // Sparse common deposits to a wider scatter; skip all of them at far zoom
+      // where they read as noise instead of information.
+      if (tileSize >= 5) {
+        const density = COMMON_NODE_TIERS.has(GOODS[tile.resourceType]?.tier) ? 0.12 : 1;
+        if (density >= 1 || this.h(917) < density) {
+          const nodeSprite = SpriteRegistry.get(`node_${tile.resourceType}`);
+          if (nodeSprite) this.ctx.drawImage(nodeSprite, sx, sy, tileSize, tileSize);
+        }
+      }
+    }
+  }
+
   /** Redraw dirty static tiles, including a stable base frame for animated surfaces. */
   private bakeDirtyTiles(tileMap: TileMap): void {
     if (!this.terrainCtx || (!tileMap.allTilesDirty && tileMap.dirtyTiles.size === 0)) return;
@@ -1825,72 +1910,7 @@ export class PixelRenderer {
           }
         }
 
-        // ===== TREE & VEGETATION SPRITES with Sway =====
-        /**
-         * Seeded from this tile, which it never was.
-         *
-         * The scatter below reads `h(800)` / `h(801)` without setting the hash
-         * base, so it used whatever base the last caller happened to leave —
-         * in practice the previous water or lava tile, since those are the only
-         * things in this loop that seed it. Every land tile between two water
-         * tiles therefore shared a single hash value, and "one tree every ~3
-         * tiles" came out as all-or-nothing: whole runs of forest either fully
-         * wooded or completely bare, which is why forest masses read as bands.
-         *
-         * It also made vegetation depend on draw order, so any change to what
-         * seeds the hash silently moved every tree on the map.
-         */
-        this.setHashBase(x, y);
-        const sway = Math.sin(this.animTimer * 2 + x * 0.5 + y * 0.3) * 1.5;
-
-        if (tile.type === TerrainType.FOREST) {
-          // One tree every ~3 tiles — forest masses read as canopy, not a carpet.
-          if (this.h(800) < 0.33) {
-            const s = SpriteRegistry.get('tree_oak');
-            if (s) this.ctx.drawImage(s, sx + sway, sy - tileSize * 0.2, tileSize, tileSize * 1.2);
-          }
-        } else if (tile.type === TerrainType.TUNDRA || tile.type === TerrainType.SNOW) {
-          if (this.h(801) > 0.68) {
-            const s = SpriteRegistry.get('tree_pine');
-            if (s) this.ctx.drawImage(s, sx + sway, sy - tileSize * 0.2, tileSize, tileSize * 1.2);
-          }
-        } else if (tile.type === TerrainType.SAVANNA) {
-          const s = SpriteRegistry.get('tree_palm');
-          if (s) this.ctx.drawImage(s, sx + sway, sy - tileSize * 0.15, tileSize, tileSize * 1.15);
-        } else if (tile.type === TerrainType.SWAMP) {
-          const s = SpriteRegistry.get('swamp_reed');
-          if (s) this.ctx.drawImage(s, sx + sway * 0.5, sy, tileSize, tileSize);
-        } else if (tile.type === TerrainType.ARCANE) {
-          const s = SpriteRegistry.get('arcane_crystal');
-          if (s) {
-            // Pulsing glow for crystals
-            this.ctx.globalAlpha = 0.7 + Math.sin(this.animTimer * 3) * 0.3;
-            this.ctx.drawImage(s, sx, sy, tileSize, tileSize);
-            this.ctx.globalAlpha = 1.0;
-          }
-        } else if (tile.type === TerrainType.CORRUPTED) {
-          const s = SpriteRegistry.get('corrupted_skull');
-          if (s) this.ctx.drawImage(s, sx, sy, tileSize, tileSize);
-        }
-
-        // Resource Node Sprites.
-        //
-        // Common deposits — wild food above all — blanket thousands of tiles. Drawing
-        // an icon on every one buries the terrain, the roads and the kingdom borders
-        // under a carpet of sprites. Abundant goods are therefore thinned to a stable
-        // scatter (same tiles every frame, so nothing flickers), while scarce and
-        // strategic deposits always draw: those are the ones worth going to war over.
-        if (tile.resourceType) {
-          // Sparse common deposits to a wider scatter; skip all of them at far zoom
-          // where they read as noise instead of information.
-          if (tileSize >= 5) {
-            const density = COMMON_NODE_TIERS.has(GOODS[tile.resourceType]?.tier) ? 0.12 : 1;
-            if (density >= 1 || this.h(917) < density) {
-              const nodeSprite = SpriteRegistry.get(`node_${tile.resourceType}`);
-              if (nodeSprite) this.ctx.drawImage(nodeSprite, sx, sy, tileSize, tileSize);
-            }
-          }
-        }
+        this.drawTileDecoration(tile, x, y, sx, sy, tileSize);
 
         // Fire overlay
         if (tile.isOnFire) {
