@@ -947,13 +947,21 @@ export class PixelRenderer {
     if (!ctx) return;
     const ts = this.bakeTileSize;
 
-    ctx.clearRect(minX * ts, minY * ts, (maxX - minX + 1) * ts, (maxY - minY + 1) * ts);
+    // One tile of margin: a canopy is drawn taller than its own tile, so a sprite
+    // on the boundary row would otherwise be sliced by the cleared region.
+    const x0 = Math.max(0, minX - 1);
+    const y0 = Math.max(0, minY - 1);
+    const x1 = Math.min(tileMap.width - 1, maxX + 1);
+    const y1 = Math.min(tileMap.height - 1, maxY + 1);
+
+    ctx.clearRect(x0 * ts, y0 * ts, (x1 - x0 + 1) * ts, (y1 - y0 + 1) * ts);
 
     const saved = this.ctx;
     this.ctx = ctx;
-    for (let x = minX; x <= maxX; x++) {
+    // Accent then decoration, per tile, in the order the direct path uses.
+    for (let x = x0; x <= x1; x++) {
       const column = tileMap.grid[x];
-      for (let y = minY; y <= maxY; y++) {
+      for (let y = y0; y <= y1; y++) {
         const tile = column[y];
         if (tile.type === TerrainType.LAVA) {
           this.drawAnimatedTerrainAccent(tileMap, tile, x, y, x * ts, y * ts, ts);
@@ -961,6 +969,7 @@ export class PixelRenderer {
           const mask = this.waterMask ? this.waterMask[x * this.terrainH + y] : (WATER_EDGED | WATER_ANIMATES);
           if (mask !== 0) this.drawAnimatedTerrainAccent(tileMap, tile, x, y, x * ts, y * ts, ts, mask);
         }
+        this.drawTileDecoration(tile, x, y, x * ts, y * ts, ts);
       }
     }
     this.ctx = saved;
@@ -974,14 +983,19 @@ export class PixelRenderer {
    * around 1.600 `drawImage` calls a frame at 1080p, the great majority of them
    * trees and resource nodes on ground that had not changed in centuries.
    *
-   * It is drawn per frame at exact screen coordinates, and it stays that way.
-   * Routing it through the animated layer instead was measurably cheaper — 1.623
-   * blits a frame down to 49 — and was reverted anyway, because it moved 7,5% of
-   * the frame's pixels by up to 210 of a possible 765 and the cause did not
-   * reduce to rounding. Sprites do not survive a trip through a world-space
-   * layer the way flat terrain does, and the sprites are the reason anyone is
-   * using this renderer. Blits are the cheap operation; the expensive ones —
-   * fillRect and fillStyle churn — are already gone.
+   * Everything here is either static or sways slowly, so the animated layer's
+   * quarter refresh rate carries it with no visible cost. Fire is deliberately
+   * *not* here: it flickers fast, there are only ever a handful of burning tiles,
+   * and it should react the instant it starts.
+   *
+   * A note for anyone measuring this. Moving these blits into the layer looked at
+   * first like a 7,5% pixel regression, and was reverted on that basis. The
+   * regression was the measurement: assigning `canvas.width` directly resets the
+   * 2D context to its defaults, and `imageSmoothingEnabled` defaults to *true* —
+   * so the harness had the per-frame path drawing every sprite through a bilinear
+   * filter while the layer drew them nearest-neighbour. Resize through
+   * `PixelRenderer.resize`, which restores the renderer's own context state, and
+   * the two paths agree to within alpha rounding.
    */
   private drawTileDecoration(tile: Tile, x: number, y: number, sx: number, sy: number, tileSize: number): void {
     /**
@@ -1910,7 +1924,7 @@ export class PixelRenderer {
           }
         }
 
-        this.drawTileDecoration(tile, x, y, sx, sy, tileSize);
+        if (!animatedLayerBlitted) this.drawTileDecoration(tile, x, y, sx, sy, tileSize);
 
         // Fire overlay
         if (tile.isOnFire) {
