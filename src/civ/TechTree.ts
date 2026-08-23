@@ -51,28 +51,81 @@ export const TECH_ERAS: Record<TechEra, TechEraInfo> = {
  * years and the entire metal economy — quarry, mine, smithy, bronze, tools —
  * stayed permanently out of reach.
  */
+/**
+ * How much more a technology of each era costs than its base price.
+ *
+ * The late entries used to be 6,5 and 11, and combined with base prices climbing
+ * from 30 to 2.100 that made the average industrial technology cost 470 times an
+ * average stone-age one. Research is paid for by population, which a measured
+ * ninety-year run grew fifteenfold, and by the tree's own research multiplier,
+ * which `damped` caps near three. Fifty times of income against four hundred and
+ * seventy times of cost: the industrial and modern eras were not slow, they were
+ * unreachable, and half the tree was content no game would ever see.
+ *
+ * Eased to 4 and 6. The curve still climbs steeply — a modern technology is far
+ * from cheap — but the climb is now something a realm can finish inside a
+ * civilisation's lifetime rather than four of them.
+ */
 const ERA_COST_SCALE: Record<TechEra, number> = {
   stone: 1,
   bronze: 1.2,
   iron: 1.8,
-  classical: 3.2,
-  industrial: 6.5,
-  modern: 11.0
+  classical: 2.8,
+  industrial: 4.0,
+  modern: 6.0
 };
 
-/** The real research cost of a technology, after era scaling and optional realm expansion factor. */
-export function techCost(tech: TechDefinition, cityCount: number = 1): number {
+/**
+ * The real research cost of a technology.
+ *
+ * `diffusion` is the discount, 0..1, earned from neighbours who already know it —
+ * see `ResearchState.diffusionOf`. Knowledge that exists somewhere in the world is
+ * cheaper to reach than knowledge nobody has: there are people to ask, artefacts
+ * to copy and craftsmen to poach.
+ */
+export function techCost(tech: TechDefinition, cityCount: number = 1, diffusion: number = 0): number {
   const expansionFactor = 1 + Math.max(0, (cityCount - 1) * 0.04);
-  return Math.round(tech.cost * ERA_COST_SCALE[tech.era] * expansionFactor);
+  const discount = 1 - Math.max(0, Math.min(MAX_DIFFUSION_DISCOUNT, diffusion));
+  return Math.round(tech.cost * ERA_COST_SCALE[tech.era] * expansionFactor * discount);
 }
+
+/**
+ * How much cheaper a technology gets per realm in contact that already has it.
+ *
+ * This is the lever that makes the late tree reachable, and it is deliberately a
+ * *world* mechanism rather than a flat buff. Eased era costs and gentler research
+ * damping together still left a realm of ordinary size a few centuries short; what
+ * closes the gap is that the cost of an era ends up paid by everyone, not by one
+ * town of seventy people.
+ *
+ * It also earns its keep as a rule rather than a correction. Contact and trade
+ * gain concrete strategic worth. Isolation acquires a price. A leader drags the
+ * world along behind it, so an era becomes a wave that crosses the map instead of
+ * one realm's privilege. Conquest transfers knowledge. And a realm that has fallen
+ * behind has a way back, which is what stops a single runaway winner.
+ */
+const DIFFUSION_PER_PEER = 0.12;
+const MAX_DIFFUSION_DISCOUNT = 0.6;
 
 /**
  * Compresses a compounded multiplier so long tech chains give strong but
  * survivable advantages. A raw 20× becomes roughly 5×; 1× stays 1×.
  */
-function damped(multiplier: number): number {
-  return multiplier <= 1 ? multiplier : Math.pow(multiplier, 0.55);
+function damped(multiplier: number, exponent: number = 0.55): number {
+  return multiplier <= 1 ? multiplier : Math.pow(multiplier, exponent);
 }
+
+/**
+ * Research is damped more gently than the rest.
+ *
+ * The others are compressed hard for a good reason: a realm with thirty
+ * compounding military or production bonuses would be unstoppable. Research is
+ * not that kind of advantage — it buys the *right to keep playing the tree*, and
+ * at 0,55 the whole tree returned barely 3,3x, against costs that climb in orders
+ * of magnitude. A realm that has invested its entire history in scholarship
+ * should feel it.
+ */
+const RESEARCH_DAMPING = 0.78;
 
 /** Everything a technology can grant when it completes. */
 export interface TechUnlocks {
@@ -175,6 +228,18 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
     description: 'Rebanhos que te seguem são melhores que rebanhos que você persegue.',
     discovery: 'domesticou o gado'
   },
+  sailing: {
+    id: 'sailing',
+    name: 'Navegação',
+    track: 'craft',
+    era: 'stone',
+    icon: '⛵',
+    cost: 40,
+    requires: ['stone_tools'],
+    unlocks: { buildings: ['harbor'], features: ['maritime_trade', 'colonisation'], modifiers: { trade: 1.3 } },
+    description: 'Canoas e ancoradouros de madeira. O mar deixa de ser um muro e se torna uma estrada.',
+    discovery: 'aprendeu a navegar pelas águas costeiras'
+  },
 
   // ========================= BRONZE AGE =========================
   pottery: {
@@ -272,27 +337,15 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   },
   currency: {
     id: 'currency',
-    name: 'Moeda',
-    track: 'craft',
+    name: 'Moeda e Câmbio',
+    track: 'politics',
     era: 'iron',
     icon: '🪙',
-    cost: 340,
+    cost: 280,
     requires: ['mathematics', 'mining'],
     unlocks: { buildings: ['market'], features: ['currency', 'trade_routes'], modifiers: { trade: 1.5 } },
     description: 'Moeda cunhada. A riqueza deixa de ser grãos no celeiro e se torna um número.',
     discovery: 'cunhou sua primeira moeda'
-  },
-  sailing: {
-    id: 'sailing',
-    name: 'Navegação',
-    track: 'craft',
-    era: 'iron',
-    icon: '⛵',
-    cost: 320,
-    requires: ['pottery', 'mathematics'],
-    unlocks: { buildings: ['harbor'], features: ['maritime_trade', 'colonisation'], modifiers: { trade: 1.3 } },
-    description: 'O mar deixa de ser um muro e se torna uma estrada.',
-    discovery: 'aprendeu a navegar além da vista da terra'
   },
   roads: {
     id: 'roads',
@@ -746,8 +799,47 @@ export class ResearchState {
   /** Techs permanently barred by an exclusive choice already made. */
   public forbidden: Set<string> = new Set();
 
+  /**
+   * Diffusion discount per technology, 0..1, refreshed once a year by the
+   * civilization engine from the realms this one has actually met.
+   *
+   * Derived, so it is not serialised — the first yearly tick after a load fills it
+   * in again. Held here rather than recomputed at each call site so the interface
+   * shows the player the same cost the simulation is charging.
+   */
+  public diffusion: Map<string, number> = new Map();
+
   public knows(techId: string): boolean {
     return this.known.has(techId);
+  }
+
+  public diffusionOf(techId: string): number {
+    return this.diffusion.get(techId) ?? 0;
+  }
+
+  /** Cost of a technology to *this* realm, contact and all. */
+  public costOf(tech: TechDefinition, cityCount: number): number {
+    return techCost(tech, cityCount, this.diffusionOf(tech.id));
+  }
+
+  /**
+   * Recomputes the discounts from the realms this one knows about.
+   *
+   * `peers` is every realm in contact; only their known sets are read, so a realm
+   * learns nothing from a civilisation it has never met — which is the whole point.
+   */
+  public refreshDiffusion(peers: Iterable<ResearchState>): void {
+    const counts = new Map<string, number>();
+    for (const peer of peers) {
+      for (const id of peer.known) {
+        if (this.known.has(id)) continue;
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+    }
+    this.diffusion.clear();
+    for (const [id, peersKnowing] of counts) {
+      this.diffusion.set(id, Math.min(MAX_DIFFUSION_DISCOUNT, peersKnowing * DIFFUSION_PER_PEER));
+    }
   }
 
   public knowsFeature(feature: TechFeature): boolean {
@@ -787,7 +879,7 @@ export class ResearchState {
     // and make a single advanced realm unstoppable. Diminishing returns keep the
     // ordering — more technology is always better — without the runaway.
     total.production = damped(total.production);
-    total.research = damped(total.research);
+    total.research = damped(total.research, RESEARCH_DAMPING);
     total.growth = damped(total.growth);
     total.trade = damped(total.trade);
     total.military = damped(total.military);

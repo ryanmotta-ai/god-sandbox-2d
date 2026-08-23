@@ -20,7 +20,7 @@
  */
 import { BUILDINGS, type BuildingCategory } from '../../civ/Building';
 import { GOODS, ALL_GOODS, type GoodId } from '../../civ/Goods';
-import { TECHNOLOGIES, TECH_ERAS, demandCreatedBy, techCost, type TechEra, type TechCapability } from '../../civ/TechTree';
+import { TECHNOLOGIES, TECH_ERAS, demandCreatedBy, type TechEra, type TechCapability } from '../../civ/TechTree';
 import { activeLawDefinitions, type LawDefinition } from '../../civ/Laws';
 import { SOCIAL_FACTIONS, type FactionState, type SocialFactionId, type SocietyProfile } from '../../civ/Society';
 import type { CulturalProfile } from '../../civ/Culture';
@@ -960,7 +960,7 @@ function computeTechnology(kingdom: Kingdom): TechnologyState {
     eraName: TECH_ERAS[kingdom.operatingEra]?.name ?? kingdom.operatingEra,
     known: research.known.size,
     current: currentDef
-      ? { id: currentDef.id, name: currentDef.name, progress: research.progress, cost: techCost(currentDef, kingdom.cityIds.size) }
+      ? { id: currentDef.id, name: currentDef.name, progress: research.progress, cost: research.costOf(currentDef, kingdom.cityIds.size) }
       : null,
     output: research.output,
     capacity: kingdom.technologicalCapacity(),

@@ -6,7 +6,7 @@
  * already produced by the economy, infrastructure and equipment systems.
  */
 import {
-  ALL_TECH_IDS, TECH_ERAS, TECHNOLOGIES, demandCreatedBy, techCost,
+  ALL_TECH_IDS, TECH_ERAS, TECHNOLOGIES, demandCreatedBy,
   type TechDefinition, type TechEra, type TechFeature, type TechTrack
 } from '../../civ/TechTree';
 import { BUILDINGS, type BuildingCategory, type BuildingType } from '../../civ/Building';
@@ -272,7 +272,9 @@ function buildTechnologyViews(kingdom: Kingdom): TechnologyView[] {
   const cityCount = kingdom.cityIds.size;
   return ALL_TECH_IDS.map(id => {
     const definition = TECHNOLOGIES[id];
-    const cost = techCost(definition, cityCount);
+    // The realm's own price, discounted by what its neighbours already know, so
+    // the screen agrees with what research is actually being charged.
+    const cost = kingdom.research.costOf(definition, cityCount);
     const progress = kingdom.research.current === id ? kingdom.research.progress : 0;
     const unlocks = unlocksFor(definition);
     const prerequisites = definition.requires.map(req => ({

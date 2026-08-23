@@ -5,7 +5,7 @@ import {
   GoodId, GOODS, ALL_GOODS, RAW_GOODS, CRAFTED_GOODS, STRATEGIC_GOODS,
   productionRecipesFor
 } from './Goods';
-import { TECHNOLOGIES, TechDefinition, techCost, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
+import { TECHNOLOGIES, TechDefinition, type ResearchState, techCost, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
 import { GOVERNMENTS, chooseGovernment, isRevolution, GovernmentType } from './Government';
 import { WorldMarket, mintCurrency } from './Economy';
 import { TradeNetwork, transportCostPerUnit } from './Trade';
@@ -1874,6 +1874,22 @@ export class CivilizationEngine {
   // ============================================================
 
   private tickResearch(kingdom: Kingdom, world: CivWorld): void {
+    /**
+     * What the neighbours already know makes it cheaper to learn.
+     *
+     * Read from the realms this one has actually met, so a civilisation cut off
+     * behind an ocean pays the full price and a crossroads realm pays a fraction.
+     * Refreshed here, once a year, immediately before the year's research is
+     * spent — so a technology that spread across the world last year is cheaper
+     * this year, and the interface charges what the simulation charges.
+     */
+    const peers: ResearchState[] = [];
+    for (const otherId of kingdom.knownKingdoms) {
+      const other = world.kingdoms.get(otherId);
+      if (other && other.id !== kingdom.id) peers.push(other.research);
+    }
+    kingdom.research.refreshDiffusion(peers);
+
     let output = 0;
     for (const cityId of kingdom.cityIds) {
       output += world.cities.get(cityId)?.researchOutput ?? 0;
@@ -1899,7 +1915,7 @@ export class CivilizationEngine {
     }
 
     kingdom.research.progress += output;
-    if (kingdom.research.progress < techCost(tech, kingdom.cityIds.size)) return;
+    if (kingdom.research.progress < kingdom.research.costOf(tech, kingdom.cityIds.size)) return;
 
     // Discovery.
     kingdom.research.complete(tech.id);
@@ -2003,8 +2019,10 @@ export class CivilizationEngine {
     let bestScore = -Infinity;
 
     for (const tech of available) {
-      // Cheaper is better, all else being equal.
-      let score = 1000 / Math.max(1, techCost(tech, kingdom.cityIds.size));
+      // Cheaper is better, all else being equal — and a technology the
+      // neighbours already have is cheaper, so realms naturally follow the pack
+      // instead of each blazing an unaffordable trail of its own.
+      let score = 1000 / Math.max(1, kingdom.research.costOf(tech, kingdom.cityIds.size));
 
       const mods = tech.unlocks.modifiers;
       if (mods) {
@@ -2033,12 +2051,10 @@ export class CivilizationEngine {
 
       // Coastal realms chase the sea and the technologies needed to reach it.
       if (hasCoastalCity) {
-        if (tech.id === 'sailing') score += 32;
+        if (tech.id === 'sailing') score += 40;
         if (tech.unlocks.features?.includes('maritime_trade')) score += 24;
         if (!kingdom.research.knows('sailing')) {
-          if (tech.id === 'mathematics') score += 18;
-          if (tech.id === 'pottery') score += 14;
-          if (tech.id === 'writing') score += 10;
+          if (tech.id === 'stone_tools') score += 20;
         }
       }
 

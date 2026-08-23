@@ -73,6 +73,28 @@ const table = SCENARIOS.map(scenario => {
 });
 console.table(table);
 
+// ------------------------------------------------------- diffusion, the lever
+// A follower in a world of N realms in contact pays less for what the pack has.
+console.log('=== efeito da difusao: anos ate o moderno, para a cidade de 80 hab ===');
+const follower = SCENARIOS[1];
+console.table([0, 1, 2, 3, 5, 8].map(peers => {
+  const discount = Math.min(0.6, peers * 0.12);
+  let carried = 1;
+  let total = 0;
+  for (const era of ERAS) {
+    const cost = Object.values(TECHNOLOGIES)
+      .filter(t => t.era === era)
+      .reduce((sum, t) => sum + techCost(t, follower.cities, discount), 0);
+    total += cost / researchPerYear(follower.pop, follower.prosperity, follower.buildings, carried);
+    carried = multiplierAfter[era];
+  }
+  return {
+    vizinhosQueJaSabem: peers,
+    desconto: Math.round(discount * 100) + '%',
+    anosAteOModerno: Math.round(total)
+  };
+}));
+
 // ------------------------------------------------------------ the two curves
 const costGrowth = eraCost('modern', 3) / Math.max(1, eraCost('stone', 3) / 7) / 7;
 console.log(`\ncusto medio por tecnologia, pedra -> moderno: x${Math.round(
