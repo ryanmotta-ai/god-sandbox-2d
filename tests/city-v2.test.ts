@@ -57,7 +57,18 @@ const matureStructure = UrbanPlanner.structure(city, map, 17);
 const candidates = UrbanPlanner.findBuildingSites(city, BUILDINGS.house, map, 17, 8);
 assert.ok(candidates.length > 0);
 const firstExpansionDistance = Math.hypot(candidates[0].x - city.x, candidates[0].y - city.y);
-assert.ok(firstExpansionDistance > 4.2, `later housing should form an outer expansion, got radius ${firstExpansionDistance.toFixed(2)}`);
+// The planner's own boundary for "still inside the old ring" is
+// historicalRadius + .5, and anything past it is a new ring. This was written
+// as a flat 4.2, which carried some slack from the visual-clearance filter:
+// that filter forbade any two buildings from standing next to each other, so
+// it happened to shove new work further out than the ring rule asked for. It
+// was also what kept every settlement at a quarter of its own density, so it
+// now applies to monuments only. The assertion names the real boundary.
+const oldRing = Math.max(...oldHouses.map(b => Math.hypot(b.x - city.x, b.y - city.y)));
+assert.ok(
+  firstExpansionDistance > oldRing + .5,
+  `later housing should form an outer expansion beyond the ${oldRing.toFixed(2)} core, got radius ${firstExpansionDistance.toFixed(2)}`
+);
 assert.ok(candidates[0].historicalGrowthScore > -20, 'the chosen expansion should agree with the historical ring score');
 
 const newHouse = occupy(map, city, 'house', candidates[0].x, candidates[0].y, 81, city.currentUrbanGeneration);

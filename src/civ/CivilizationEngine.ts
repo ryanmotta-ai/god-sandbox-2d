@@ -30,7 +30,7 @@ import {
   avgEffectiveRoadLevel, repairInfrastructure
 } from './Infrastructure';
 import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadEngineering';
-import { UrbanPlanner } from './UrbanPlanner';
+import { UrbanPlanner, type UrbanStreetClass } from './UrbanPlanner';
 import { perfProfiler } from '../perf/PerformanceProfiler';
 import { buildingArchitecturalStamp, refreshArchitecturalProfile } from './ArchitecturalProfile';
 import { FortificationPlanner } from './FortificationPlanner';
@@ -65,6 +65,8 @@ export interface CivWorld {
 
 /** Food a single citizen eats per year. */
 /** Share of a tax levy the crown keeps as goods; the rest is sold for coin. */
+/** How far from a building the street plan is worth paving. */
+const STREET_SERVICE_REACH = 2;
 const TAX_KEPT_IN_KIND = 0.5;
 /**
  * How hard neighbours resent each other over land. This is the strongest term
@@ -278,6 +280,7 @@ export class CivilizationEngine {
     this.consumeGoods(city, world);
     this.runConstruction(city, world, kingdom);
     this.repairCityInfrastructure(city, world);
+    this.paveStreetPlan(city, world);
     this.expandTerritory(city, world, techMods.territory + (gov?.expansion ?? 8) + expansionCulture + (lawEffects?.expansion ?? 0));
 
     const fortification = FortificationPlanner.tickCity(city, kingdom, world);
@@ -1132,6 +1135,79 @@ export class CivilizationEngine {
   /** Repairs buildings and roads damaged in war, spending real materials. */
   private repairCityInfrastructure(city: City, world: CivWorld): void {
     repairInfrastructure(city, world.tileMap);
+  }
+
+  /**
+   * Lays a little of the street plan each year.
+   *
+   * `plannedStreetAt` has always drawn a full grid for every settlement: two
+   * high streets crossing at the centre and secondaries every block, staggered
+   * by the city's own irregularity so it never reads as graph paper. Nothing
+   * ever paved any of it. The plan existed only as a hint about where a
+   * building ought to sit, so a town of a hundred buildings owned a dozen road
+   * tiles and read as a heap of roofs rather than a place with streets.
+   *
+   * Paving goes one tile at a time and only ever outward from ground the
+   * network already touches, so a city's streets are connected by construction
+   * and are a record of how long it has been growing rather than something that
+   * arrives whole. Materials come out of the city's own stores like any other
+   * works; a dirt track is cheap, which is why a poor village still gets lanes.
+   */
+  private paveStreetPlan(city: City, world: CivWorld): void {
+    const map = world.tileMap;
+    const structure = UrbanPlanner.structure(city, map, this.citySurveyRadius(city));
+    const level = this.roadGradeFor(city, world);
+
+    const paved = new Set<string>();
+    for (const key of structure.streets.keys()) paved.add(`${Math.floor(key / map.height)},${key % map.height}`);
+    // A settlement with no street at all starts from its own centre.
+    if (paved.size === 0) paved.add(`${Math.floor(city.x)},${Math.floor(city.y)}`);
+
+    // A street serves buildings. Without this the plan was paved out to the
+    // whole survey radius, which laid avenues across empty fields and turned
+    // two fifths of a city's ground into road. Only the stretches within reach
+    // of something built get laid, so the grid arrives with the neighbourhood
+    // rather than ahead of it.
+    const served = new Set<string>();
+    for (const building of city.buildings.values()) {
+      const bx = Math.round(building.x), by = Math.round(building.y);
+      for (let dx = -STREET_SERVICE_REACH; dx <= STREET_SERVICE_REACH; dx++) {
+        for (let dy = -STREET_SERVICE_REACH; dy <= STREET_SERVICE_REACH; dy++) served.add(`${bx + dx},${by + dy}`);
+      }
+    }
+
+    const budget = Math.min(5, 1 + Math.floor(city.population / 45));
+    for (let laid = 0; laid < budget; laid++) {
+      let best: { x: number; y: number; streetClass: UrbanStreetClass; fromX: number; fromY: number; score: number } | null = null;
+
+      for (const lot of structure.lots.values()) {
+        if (!lot.plannedStreet || !served.has(`${lot.x},${lot.y}`)) continue;
+        const tile = map.getTile(lot.x, lot.y);
+        if (!tile || tile.buildingId || tile.roadLevelEffective > 0) continue;
+
+        let fromX = 0, fromY = 0, touches = false;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          if (!paved.has(`${lot.x + dx},${lot.y + dy}`)) continue;
+          fromX = lot.x + dx; fromY = lot.y + dy; touches = true; break;
+        }
+        if (!touches) continue;
+
+        // High streets first, and inner work before outer, so the centre is
+        // laid out before the edges rather than a ring appearing in a field.
+        const score = (lot.plannedStreet === 'primary' ? 60 : 0) - Math.hypot(lot.x - city.x, lot.y - city.y);
+        if (!best || score > best.score) best = { x: lot.x, y: lot.y, streetClass: lot.plannedStreet, fromX, fromY, score };
+      }
+
+      if (!best) return;
+
+      const survey = surveyRoad(map, best.fromX, best.fromY, best.x, best.y, level, 200);
+      if (survey.path.length === 0) return;
+      // Out of materials this year is not a failure, only a delay: the same
+      // tile is still the best candidate next year.
+      if (layRoad(city, map, survey, level).tilesLaid === 0) return;
+      UrbanPlanner.recordStreetPath(city, map, survey.path, best.streetClass);
+      paved.add(`${best.x},${best.y}`);
+    }
   }
 
   /** Rare state transition cleanup, bounded to the affected city's indexed citizens. */

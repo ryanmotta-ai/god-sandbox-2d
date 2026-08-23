@@ -24,12 +24,18 @@ function fakeMap(size: number): TileMap {
   const grid: Tile[][] = Array.from({ length: size }, (_, x) =>
     Array.from({ length: size }, (_, y) => new Tile(x, y, TerrainType.GRASS, 0.5))
   );
+  // `getTile` is how most of RenderSnapshot reads the map. It was survivable to
+  // leave it off this mock only because every caller sat behind a condition the
+  // fake map never met (no roads, rails or borders); the first unconditional
+  // call brought the whole snapshot build down. A mock that claims `as TileMap`
+  // should answer like one.
   return {
     width: size,
     height: size,
     grid,
-    terrainVersion: 1
-  } as TileMap;
+    terrainVersion: 1,
+    getTile: (x: number, y: number) => (x >= 0 && y >= 0 && x < size && y < size ? grid[x][y] : null)
+  } as unknown as TileMap;
 }
 
 const map = fakeMap(96);

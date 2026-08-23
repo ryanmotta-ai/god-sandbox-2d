@@ -200,3 +200,58 @@ export function resolveMasterAssetUrl(entry: MasterAssetEntry): string | undefin
 const MASTER_ASSETS_BY_ID = new Map(MASTER_ASSET_MANIFEST.assets.map(entry => [entry.id, entry]));
 export function masterAssetEntry(id: string): MasterAssetEntry | undefined { return MASTER_ASSETS_BY_ID.get(id); }
 export function masterAssetAtlasKey(id: string): string { return `asset:${id}`; }
+
+/**
+ * Which building type each art family stands in for.
+ *
+ * The library was loaded, decoded and packed into the atlas under `asset:<id>`,
+ * and nothing ever asked for that key: `masterAssetAtlasKey` had exactly one
+ * occurrence in the whole codebase, its own definition. Seventy-two pieces of
+ * artwork sat in GPU memory while the renderer drew generated stand-ins over
+ * the top of them.
+ *
+ * It matters most because this pack is the one that covers the eras the city
+ * manifest does not: thirty-three iron pieces, thirty-eight industrial and six
+ * modern, against the city pack's nine, two and none. Everything a settlement
+ * built after the classical age was falling back to procedural art for want of
+ * a key.
+ *
+ * Only building families are mapped here. Units, weather, flora, water and
+ * lighting also live in this library and need consumers of their own, which do
+ * not exist yet.
+ */
+const MASTER_FAMILY_TO_BUILDING: Record<string, string> = {
+  house: 'house', cabin: 'house', mansion: 'house', apartment: 'house', plantation_house: 'house',
+  shop: 'market', market: 'market', trade_post: 'market', tavern: 'market',
+  warehouse: 'granary', barn: 'granary', greenhouse: 'farm', orchard: 'farm', vineyard: 'farm',
+  workshop: 'workshop', watermill: 'workshop', foundry: 'smithy',
+  factory: 'factory', textile_mill: 'factory', power_plant: 'factory',
+  refinery: 'refinery', oil_well: 'oil_well',
+  shipyard: 'harbor', dock: 'harbor', pier: 'harbor', lighthouse: 'harbor',
+  chapel: 'temple', cathedral: 'temple', monastery: 'temple', shrine: 'temple', mission: 'temple',
+  school: 'library', university: 'academy', hospital: 'academy',
+  courthouse: 'palace', civic: 'town_center', plaza: 'town_center',
+  monument: 'monument', fountain: 'monument',
+  wall: 'wall', palisade: 'wall', gatehouse: 'wall', wall_tower: 'wall',
+  fortress: 'keep', frontier_fort: 'keep', outpost: 'keep'
+};
+
+/**
+ * The key the world renderer actually asks for, or null when this asset is not
+ * a building. Mirrors `buildingAtlasKey` in the atlas: type, era, level, damage.
+ */
+export function masterBuildingAtlasKey(entry: MasterAssetEntry): string | null {
+  const type = MASTER_FAMILY_TO_BUILDING[entry.family];
+  if (!type) return null;
+  // 'any' and 'primitive' have no counterpart among the game's eras, and the
+  // remaining states (abandoned, foundation, construction, emissive, effect)
+  // are not damage levels the renderer asks for.
+  if (entry.era === 'any' || entry.era === 'primitive') return null;
+  const damage = entry.state === 'normal' ? 'healthy'
+    : entry.state === 'damaged' ? 'damaged'
+    : entry.state === 'ruined' ? 'ruined'
+    : null;
+  if (!damage) return null;
+  const level = entry.size === 'large' || entry.size === 'landmark' ? 3 : entry.size === 'medium' ? 2 : 1;
+  return `building:${type}:${entry.era}:${level}:${damage}`;
+}
