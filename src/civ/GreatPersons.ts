@@ -1,13 +1,47 @@
 import { Entity } from '../entities/Entity';
 import { Kingdom } from './Kingdom';
 import { City } from './City';
-import { Building, BuildingType } from './Building';
+import { Building, BuildingType, BUILDINGS } from './Building';
 import { chronicle } from './Chronicle';
 import { events } from '../core/EventBus';
 import { rng, nextId } from '../core/Random';
 import { LEGENDARY_ITEMS } from '../entities/Equipment';
 import { TileMap } from '../world/TileMap';
+import { TERRAINS, TerrainType } from '../world/Biomes';
+import { UrbanPlanner } from './UrbanPlanner';
 import type { DiplomacyManager } from './Diplomacy';
+
+/** The same survey a settlement of this size uses for its own construction. */
+function wonderSurveyRadius(city: City): number {
+  const tierBonus = ({ camp: 0, hamlet: 1, village: 2, town: 4, city: 6, metropolis: 8 } as Record<string, number>)[city.tier] ?? 0;
+  return Math.min(22, 7 + tierBonus + Math.floor(Math.sqrt(Math.max(0, city.population)) / 2));
+}
+
+/**
+ * Somewhere, anywhere, rather than on top of the last wonder.
+ *
+ * The planner refuses a site when a monument cannot clear the buildings already
+ * standing, which for a tightly built city is a real possibility. A wonder is a
+ * once-in-a-lifetime gift, so it is worth walking outward for open ground before
+ * giving up on it — but never worth stacking.
+ */
+function nearestFreeGround(city: City, tileMap: TileMap): { x: number; y: number } | null {
+  const cx = Math.floor(city.x), cy = Math.floor(city.y);
+  for (let radius = 2; radius <= 12; radius++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        if (Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
+        const tile = tileMap.getTile(cx + dx, cy + dy);
+        if (!tile || tile.buildingId || tile.roadLevelEffective > 0 || tile.railLevelEffective > 0) continue;
+        const terrain = TERRAINS[tile.type];
+        if (terrain.isWater || !terrain.isWalkable || tile.type === TerrainType.LAVA || tile.type === TerrainType.MOUNTAIN) continue;
+        if (tile.cityId && tile.cityId !== city.id) continue;
+        return { x: cx + dx, y: cy + dy };
+      }
+    }
+  }
+  return null;
+}
 
 export type GreatPersonType = 'scholar' | 'builder' | 'hero' | 'diplomat';
 
@@ -231,13 +265,33 @@ export class GreatPersonManager {
 
         const monument = rng.pick(remaining);
         const bId = nextId('wonder');
-        const building = new Building(bId, monument.type, city.x + 1, city.y + 1, city.id);
+
+        // A wonder is sited like any other building. It used to be dropped on
+        // the tile diagonally off the town hall — always that one tile — so
+        // every wonder a city ever raised stacked on the same square: the
+        // colosseum, the monument, the great library and the grand aqueduct all
+        // standing in each other, one tile of roofs where four landmarks should
+        // be, and only the last one drawn. The planner already knows where a
+        // city keeps ground for its monuments, so ask it.
+        const site = UrbanPlanner.findBuildingSites(city, BUILDINGS[monument.type], tileMap, wonderSurveyRadius(city), 1)[0]
+          ?? nearestFreeGround(city, tileMap);
+        if (!site) {
+          kingdom.treasury.add('gold', 250);
+          chronicle.log(
+            year,
+            'great_person',
+            `${e.title} não encontrou terreno em ${city.name} digno de um monumento, e doou ao tesouro de ${kingdom.name}.`
+          );
+          break;
+        }
+
+        const building = new Building(bId, monument.type, site.x, site.y, city.id);
         city.buildings.set(bId, building);
         city.markBuildingTopologyChanged();
 
-        // Mark tile
-        const tile = tileMap.getTile(city.x + 1, city.y + 1);
-        if (tile) { tile.buildingId = bId; tileMap.markRenderDirty(tile.x, tile.y); }
+        const tile = tileMap.getTile(site.x, site.y);
+        if (tile) { tile.buildingId = bId; tile.cityId = city.id; tileMap.markRenderDirty(tile.x, tile.y); }
+        UrbanPlanner.recordConstruction(city, tileMap, bId);
 
         kingdom.economy.stability = Math.min(1.0, kingdom.economy.stability + 0.25);
 
