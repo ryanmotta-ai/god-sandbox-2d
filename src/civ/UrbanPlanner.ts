@@ -7,7 +7,7 @@ import { tileResourceToGood } from '../world/Tile';
 import { hashString, hashToUnit } from '../core/Random';
 import { outerFortification, pointInsideFortification, type FortificationLine } from './FortificationPlanner';
 import { districtAt } from './UrbanDistricts';
-import { getCityBlueprint } from './CityBlueprints';
+import { blueprintPlotAt, blueprintStreetAt, withinBlueprint } from './CityBlueprints';
 
 /**
  * Where a building goes.
@@ -192,7 +192,16 @@ export const PLANNER_WEIGHTS = {
   /** Subtracted per tile of new road the site would need. */
   roadExtensionPerTile: 7,
   /** Flat penalty for a site with no road anywhere in reach. */
-  isolation: 34
+  isolation: 34,
+  /**
+   * The hand-drawn plan, in the same currency as everything above it. Sized to
+   * beat the ordinary run of urban scoring — so a plan is followed — without
+   * beating terrain, resources or the hard validity filters, which is why a
+   * plot on a swamp still loses to open ground beside it.
+   */
+  blueprintPlot: 90,
+  blueprintAffinity: 52,
+  blueprintMismatch: 46
 };
 
 /**
@@ -364,19 +373,17 @@ function plannedStreetAt(city: City, stage: UrbanGrowthStage, blockSize: number,
   const distance = Math.hypot(dx, dy);
   if (distance > radius) return null;
 
-  // Blueprint street lookup
-  if (city.blueprintId) {
-    const bp = getCityBlueprint(city.blueprintId);
-    const bpStreet = bp.streetMap.get(`${dx},${dy}`);
-    if (bpStreet) {
-      if (!bpStreet.minStage || stage === 'city' || stage === 'great_city' || (bpStreet.minStage === 'village' && stage !== 'camp')) {
-        return bpStreet.streetClass;
-      }
-    }
-    return null;
-  }
+  // The hand-drawn plan owns every tile it covers — including the ones where it
+  // says there is deliberately no street, which is how a plan keeps a green or
+  // the middle of a block open. Only past the edge of the drawing does the
+  // procedural grid take over, and it has to: the drawing reaches fifteen tiles
+  // and a metropolis surveys twenty-two, so the outlying farm lanes are still
+  // laid the old way. Reading the plan as "no street anywhere it did not draw
+  // one" is what silently deleted the grid from every city in the game, since
+  // `blueprintId` is never empty and the drawings only went out five tiles.
+  if (withinBlueprint(dx, dy)) return blueprintStreetAt(city, dx, dy, stage);
 
-  // The two axes are the historical high streets for non-blueprint cities.
+  // The two axes are the historical high streets beyond the drawn plan.
   if (dx === 0 || dy === 0) return 'primary';
   if (stage === 'camp') return null;
   const irregularity = city.architecturalProfile?.urbanForm.irregularity ?? .35;
@@ -567,6 +574,20 @@ function roadDistance(tileMap: TileMap, x: number, y: number, limit: number): nu
   return limit + 1;
 }
 
+/** Distance in tiles to the nearest tile carrying rail, up to `limit`. */
+function railDistance(tileMap: TileMap, x: number, y: number, limit: number): number {
+  for (let r = 0; r <= limit; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        if (r > 0 && Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+        const tile = tileMap.getTile(x + dx, y + dy);
+        if (tile && tile.railLevelEffective > 0) return r;
+      }
+    }
+  }
+  return limit + 1;
+}
+
 /**
  * How well the neighbours suit this building, and how badly they clash.
  *
@@ -687,9 +708,23 @@ function scoreUrbanForm(ctx: CityContext, type: BuildingType, profile: UrbanProf
   }
   score += Math.min(18, nearbyUrban * 5); // continuity, not isolated dots
 
-  if (lot.nearRail) {
-    if (profile.affinity === 'industrial' || profile.affinity === 'logistics' || profile.affinity === 'extraction') score += 30;
-    else if (profile.affinity === 'residential' || profile.affinity === 'civic') score -= 32;
+  // Rail pulls production and pushes housing away, and the pull has to reach
+  // further than the shove. A hand-drawn plan settles the industrial quarter
+  // before any track is laid, and it usually draws that quarter symmetrically —
+  // so with attraction that only fired on an adjacent tile, two identical works
+  // plots either side of the centre were a coin toss and the tracks lost it.
+  // Graded over three tiles, the siding side wins, which is the whole point of
+  // a siding. Housing stays a flat shove: a cottage three tiles off the line is
+  // fine, one against it is not.
+  const railReach = railDistance(tileMap, x, y, 3);
+  if (profile.affinity === 'industrial' || profile.affinity === 'logistics' || profile.affinity === 'extraction') {
+    if (railReach <= 3) score += 44 - railReach * 10;
+  } else if (lot.nearRail && (profile.affinity === 'residential' || profile.affinity === 'civic')) {
+    // Sized against the plan, not against the old scale. A drawn housing plot
+    // is worth well over a hundred points now, so the old shove of 32 no longer
+    // moved anyone off the ballast — a cottage would take the trackside plot and
+    // leave the identical plot one block back empty.
+    score -= 68;
   }
   if (lot.coastal) {
     if (profile.affinity === 'logistics') score += 36;
@@ -976,19 +1011,26 @@ export class UrbanPlanner {
     const urbanFormScore = scoreUrbanForm(ctx, def.type, profile, tileMap, x, y);
     const historicalGrowthScore = scoreHistoricalGrowth(ctx, profile, x, y);
 
-    // Blueprint slot affinity bonus
+    // What the hand-drawn plan makes of this tile.
+    //
+    // A plot is worth a lot to the building it was drawn for, something to a
+    // building of the right kind, and *costs* a building of the wrong kind. The
+    // penalty is the half that matters: without it a plot is worth nothing to
+    // the wrong tenant and nothing to no tenant at all, so a row of cottages
+    // squats the forum and the monument ends up in the tanneries — which is
+    // precisely what a plan exists to prevent.
+    //
+    // Geology still owns extraction. A seam is where it is, and no drawing
+    // moves it, so a mine is never judged against the plan.
     let blueprintBonus = 0;
-    if (ctx.city.blueprintId) {
-      const bp = getCityBlueprint(ctx.city.blueprintId);
-      const dx = x - Math.floor(ctx.centerX);
-      const dy = y - Math.floor(ctx.centerY);
-      const slot = bp.slotMap.get(`${dx},${dy}`);
-      if (slot) {
-        if (slot.preferredBuildings?.includes(def.type)) {
-          blueprintBonus += 180 + slot.importance * 15;
-        } else if (slot.affinity === profile.affinity) {
-          blueprintBonus += 130 + slot.importance * 10;
-        }
+    if (profile.affinity !== 'extraction') {
+      const plot = blueprintPlotAt(ctx.city, x - Math.floor(ctx.centerX), y - Math.floor(ctx.centerY));
+      if (plot) {
+        blueprintBonus = plot.prefer.includes(def.type)
+          ? PLANNER_WEIGHTS.blueprintPlot + plot.importance * 6
+          : plot.affinity === profile.affinity
+            ? PLANNER_WEIGHTS.blueprintAffinity + plot.importance * 3
+            : -(PLANNER_WEIGHTS.blueprintMismatch + plot.importance * 5);
       }
     }
 
@@ -1082,6 +1124,18 @@ export class UrbanPlanner {
       approaches.push({ x, y, planned: cache.lots.get(key)?.plannedStreet ?? null });
     }
     if (approaches.length === 0) return null;
+
+    // A building already fronting a *planned* street gets no bespoke lane. The
+    // street works will lay that tile in a year or two anyway, and a surveyed
+    // connector cutting across town to reach it does real damage: the survey
+    // knows about relief and water but nothing about the plan, so it happily
+    // paves the cathedral plot on its way past. Measured over grown cities that
+    // was most of the plots the plan lost. The building waits for its street,
+    // which is what a building on a planned street is supposed to do.
+    if (approaches.some(approach => approach.planned !== null)) {
+      const front = approaches.find(approach => approach.planned !== null)!;
+      return { fromX: front.x, fromY: front.y, toX: front.x, toY: front.y, streetClass: front.planned!, alreadyConnected: true };
+    }
 
     let best: { approach: typeof approaches[number]; streetX: number; streetY: number; streetClass: UrbanStreetClass; distance: number } | null = null;
     for (const approach of approaches) for (const [key, streetClass] of cache.streets) {

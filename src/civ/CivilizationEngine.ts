@@ -37,7 +37,7 @@ import { buildingArchitecturalStamp, refreshArchitecturalProfile } from './Archi
 import { FortificationPlanner } from './FortificationPlanner';
 import { UrbanDistrictPlanner, urbanContextAt } from './UrbanDistricts';
 import { UrbanLifecycleManager, type UrbanLifecycleResult } from './UrbanLifecycle';
-import { pickBestBlueprintForSite } from './CityBlueprints';
+import { assignCityBlueprint } from './CityBlueprints';
 
 /**
  * The yearly heartbeat of civilization.
@@ -4356,7 +4356,7 @@ export class CivilizationEngine {
     const expeditionCost = Math.min(80, metropole.economy.treasury * 0.16);
     metropole.economy.treasury -= expeditionCost;
     const capital = new City(nextId('city'), this.generateSettlementName(parent, world), parent.species, site.x, site.y, parent.founderName, world.year);
-    capital.blueprintId = pickBestBlueprintForSite(world.tileMap, site.x, site.y, metropole);
+    assignCityBlueprint(capital, world.tileMap, metropole);
     const colony = new Kingdom(nextId('king'), this.generateColonialName(metropole, capital.name, world), parent.species, metropole.color, capital.id, world.year);
     colony.establishColony(metropole.id, site.access);
     colony.government = metropole.government;
@@ -4554,7 +4554,7 @@ export class CivilizationEngine {
         city.founderName,
         world.year
       );
-      colony.blueprintId = pickBestBlueprintForSite(world.tileMap, site.x, site.y, kingdom);
+      assignCityBlueprint(colony, world.tileMap, kingdom);
       colony.kingdomId = kingdom.id;
       colony.parentCityId = city.id;
       colony.population = settlers;

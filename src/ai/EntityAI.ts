@@ -28,7 +28,7 @@ import {
   DemographicsAccumulator, emptyDemographics, familyAdvantage, inheritFamilyMarks,
   inheritOrigin, pruneAncestors, rootedness, settleEstate, uproot, type Demographics
 } from '../civ/Generations';
-import { pickBestBlueprintForSite } from '../civ/CityBlueprints';
+import { assignCityBlueprint } from '../civ/CityBlueprints';
 import type { Profession } from '../entities/Needs';
 import {
   CultureRegistry, CultureCensus, assimilate, considerEmergence, inheritCulture
@@ -2667,7 +2667,7 @@ if (e.kingdomId) {
       const cityId = nextId('city');
       const cityName = `${e.name}ton`;
       const city = new City(cityId, cityName, e.species, tile.x, tile.y, e.name, this.currentYear);
-      city.blueprintId = pickBestBlueprintForSite(tileMap, tile.x, tile.y);
+      assignCityBlueprint(city, tileMap);
       city.population = 1;
       this.cities.set(cityId, city);
       this.citySpatialHash.insert(city);
