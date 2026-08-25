@@ -6,6 +6,7 @@ import { rng } from '../src/core/Random';
 import { AirSystem, airServiceAvailable } from '../src/civ/AirSystem';
 import { caravanTypeFor } from '../src/civ/CaravanSystem';
 import type { TradeRoute } from '../src/civ/Trade';
+import type { GoodId } from '../src/civ/Goods';
 
 rng.setSeed(20260805);
 
@@ -123,7 +124,98 @@ function pair(distance: number): { a: City; b: City; routes: Map<string, TradeRo
 }
 
 // ============================================================
-// 5. What is on the road tells you the age of the realm
+// 5. Freight actually lands, and comes out of the other city's stockpile
+// ============================================================
+{
+  const { a, b, routes, cities, kingdoms } = pair(60);
+  a.addBuilding('airport', a.x, a.y);
+  b.addBuilding('airport', b.x, b.y);
+  const air = new AirSystem();
+  const good = 'tools' as GoodId;
+
+  // One end holds the surplus, so there is a gradient to fly down.
+  a.stock.add(good, 200);
+  const before = a.stock.get(good) + b.stock.get(good);
+
+  const demanded: number[] = [];
+  const market = { reportDemand: (_g: GoodId, n: number) => demanded.push(n) };
+
+  for (let tick = 0; tick < 7200; tick++) air.updateFlights(routes, cities, kingdoms, market);
+
+  assert.ok(air.yearlyFlights > 0, 'a year of service has to fly something');
+  assert.ok(air.yearlyFreight > 0, 'and freight has to actually arrive, not just be counted');
+  assert.equal(
+    a.stock.get(good) + b.stock.get(good), before,
+    'freight moves between stockpiles; it is not created or destroyed in the air'
+  );
+  assert.ok(demanded.length > 0, 'the market has to hear the demand, as it does for rail');
+  assert.ok(
+    demanded.every(n => n >= 1), 'an empty flight must not be reported as a delivery'
+  );
+  // Calibration guard: air is the premium option, not a second railway. Rail
+  // moves 10 per good per city pair per year; a year of flights must stay in
+  // that neighbourhood rather than an order of magnitude above it.
+  assert.ok(
+    air.yearlyFreight < 60,
+    `air freight is meant to be low-volume, got ${air.yearlyFreight} in one year`
+  );
+  // Booked tonnage must equal net movement. The departure city is simply
+  // whichever end the aircraft is parked at, so without a scarcity gradient the
+  // return leg re-exports the outbound delivery and the year's figure counts
+  // the same crates several times over while nothing actually goes anywhere.
+  assert.equal(
+    air.yearlyFreight, b.stock.get(good),
+    'every unit booked has to have actually ended up at the far end'
+  );
+  assert.equal(200 - a.stock.get(good), b.stock.get(good), 'and left the near one');
+}
+
+// ============================================================
+// 6. A city will not let an air link strip its own stockpile
+// ============================================================
+{
+  const { a, b, routes, cities, kingdoms } = pair(60);
+  a.addBuilding('airport', a.x, a.y);
+  b.addBuilding('airport', b.x, b.y);
+  const air = new AirSystem();
+  const good = 'tools' as GoodId;
+
+  // Only a trickle at each end: everything here is under the floor.
+  a.stock.add(good, 3);
+  b.stock.add(good, 3);
+  for (let tick = 0; tick < 7200; tick++) air.updateFlights(routes, cities, kingdoms);
+
+  assert.equal(a.stock.get(good), 3, 'the shipper keeps its floor');
+  assert.equal(b.stock.get(good), 3, 'and so does the other end');
+  assert.equal(air.yearlyFreight, 0, 'nothing was above the floor, so nothing flew as freight');
+  assert.ok(air.yearlyFlights > 0, 'the aircraft still flew — empty, which is a real outcome');
+}
+
+// ============================================================
+// 7. Passenger service makes both ends wealthier, and only by a little
+// ============================================================
+{
+  const { a, b, routes, cities, kingdoms } = pair(60);
+  a.addBuilding('airport', a.x, a.y);
+  b.addBuilding('airport', b.x, b.y);
+  // No tradeable good on the route, so every departure is a passenger service.
+  routes.get('r')!.good = null as never;
+  const air = new AirSystem();
+  const startA = a.prosperity, startB = b.prosperity;
+
+  for (let tick = 0; tick < 7200; tick++) air.updateFlights(routes, cities, kingdoms);
+
+  assert.ok(air.yearlyPassengers > 0, 'passengers have to be carried');
+  assert.ok(a.prosperity > startA, 'the departure end gains');
+  assert.ok(b.prosperity > startB, 'and so does the arrival end');
+  assert.ok(
+    a.prosperity - startA < 0.1,
+    `one year of flights must not settle a city's prosperity, gained ${a.prosperity - startA}`
+  );
+}
+
+// ============================================================
+// 8. What is on the road tells you the age of the realm
 // ============================================================
 {
   assert.equal(caravanTypeFor('stone', 4), 'donkey');

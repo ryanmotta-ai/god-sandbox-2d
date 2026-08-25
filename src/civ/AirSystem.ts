@@ -4,6 +4,11 @@ import { City } from './City';
 import { Kingdom } from './Kingdom';
 import { rng } from '../core/Random';
 
+/** The only thing air freight needs from the wider economy. */
+export interface AirMarket {
+  reportDemand(good: GoodId, amount: number): void;
+}
+
 /**
  * Air freight and air travel, once a realm has aerodromes at both ends.
  *
@@ -80,6 +85,43 @@ const TURNAROUND_TICKS = 240;
 /** Below this, the two cities are close enough that flying is absurd. */
 const MIN_AIR_DISTANCE = 12;
 
+/**
+ * How much of a route's volume one departure carries.
+ *
+ * Calibrated against the railway rather than invented: rail moves
+ * BASE_THROUGHPUT (10) of a good per city pair per year, in bulk. A 60-tile air
+ * service turns round roughly twenty times in a 7200-tick year, so carrying a
+ * tenth of the route volume each time would put two hundred units a year in the
+ * air and make the railway pointless. Air freight is the premium, low-volume,
+ * fast option — a unit or two a flight — which is both the real shape of it and
+ * what keeps the ground routes worth running.
+ */
+const AIR_LOAD_FRACTION: readonly [min: number, max: number] = [0.02, 0.06];
+
+/** A city keeps this much of a good back rather than flying it out. */
+const AIR_SURPLUS_FLOOR = 4;
+
+/**
+ * How much more of a good the shipper needs before a flight is worth loading.
+ *
+ * Freight flies toward scarcity. Without a gradient the return leg re-exports
+ * whatever the outbound leg just delivered — the departure city is simply
+ * whichever end the aircraft happens to be sitting at — and a service spends
+ * the year shuttling the same crates back and forth, booking tonnage both ways
+ * for no net movement at all. Comfortably above a single load, so a delivery
+ * cannot flip the gradient and start the whole thing oscillating.
+ */
+const AIR_MIN_GRADIENT = 8;
+
+/**
+ * Prosperity a single full passenger flight is worth to each end.
+ *
+ * Prosperity accumulates rather than being recomputed each year, so this has to
+ * stay small: twenty flights a year at a few hundred passengers each should be
+ * felt over a decade, not settle the matter in one.
+ */
+const PASSENGER_PROSPERITY_PER_1K = 0.004;
+
 /** An airport below half health cannot work its runway. */
 function workingAirport(city: City): boolean {
   for (const b of city.buildings.values()) {
@@ -111,7 +153,8 @@ export class AirSystem {
   public updateFlights(
     routes: Map<string, TradeRoute>,
     cities: Map<string, City>,
-    kingdoms: Map<string, Kingdom>
+    kingdoms: Map<string, Kingdom>,
+    market?: AirMarket
   ): void {
     const served = new Set<string>();
 
@@ -127,7 +170,7 @@ export class AirSystem {
         flight = this.open(route, from, to, kingdoms);
         this.flights.set(route.id, flight);
       }
-      this.fly(flight, from, to, route);
+      this.fly(flight, from, to, route, market);
     }
 
     // A service stops the moment its route closes or an airport is knocked out.
@@ -185,7 +228,7 @@ export class AirSystem {
     return {
       payload: 'cargo',
       cargo: route.good,
-      load: Math.max(1, Math.round(route.volume * rng.range(0.1, 0.3)))
+      load: Math.max(1, Math.round(route.volume * rng.range(AIR_LOAD_FRACTION[0], AIR_LOAD_FRACTION[1])))
     };
   }
 
@@ -198,7 +241,7 @@ export class AirSystem {
    * from progress rather than stored, so it can never drift out of step with
    * where the aircraft actually is.
    */
-  private fly(flight: Flight, from: City, to: City, route: TradeRoute): void {
+  private fly(flight: Flight, from: City, to: City, route: TradeRoute, market?: AirMarket): void {
     // Airports move when a city is refounded elsewhere; keep the ends current.
     flight.startX = from.x;
     flight.startY = from.y;
@@ -219,12 +262,12 @@ export class AirSystem {
       flight.progress = 1;
       flight.direction = -1;
       flight.turnaround = TURNAROUND_TICKS;
-      this.arrive(flight, route, to);
+      this.arrive(flight, route, from, to, market);
     } else if (flight.progress <= 0) {
       flight.progress = 0;
       flight.direction = 1;
       flight.turnaround = TURNAROUND_TICKS;
-      this.arrive(flight, route, from);
+      this.arrive(flight, route, to, from, market);
     }
 
     const t = flight.progress;
@@ -258,10 +301,55 @@ export class AirSystem {
    * flies freight for ever, and the airport never sees a passenger — which is
    * both wrong and dull to watch.
    */
-  private arrive(flight: Flight, route: TradeRoute, at: City): void {
+  private arrive(flight: Flight, route: TradeRoute, origin: City, at: City, market?: AirMarket): void {
     this.yearlyFlights++;
-    if (flight.payload === 'passengers') this.yearlyPassengers += flight.load;
-    else this.yearlyFreight += flight.load;
+    if (flight.payload === 'passengers') this.carryPassengers(flight, origin, at);
+    else this.unload(flight, origin, at, market);
     Object.assign(flight, this.manifest(route, at));
+  }
+
+  /**
+   * Puts the freight where the flight took it.
+   *
+   * This is the whole point of an air service and it was missing: the system
+   * counted tonnage into a yearly total that only the chronicle ever read, so
+   * an airport cost stone, steel, fuel and ten jobs and moved nothing. Freight
+   * now leaves the departure stockpile and lands in the arrival one, through
+   * the same take/add/ledger path the railway uses, so both ends show it in
+   * their trade figures and the market hears the demand.
+   *
+   * A city keeps a floor back for itself, so an air link cannot strip the place
+   * that built the runway. Below that floor the aircraft flies empty, which is
+   * a real outcome and worth being able to see.
+   */
+  private unload(flight: Flight, origin: City, destination: City, market?: AirMarket): void {
+    if (!flight.cargo) return;
+    if (origin.stock.get(flight.cargo) - destination.stock.get(flight.cargo) < AIR_MIN_GRADIENT) return;
+    const surplus = Math.floor(origin.stock.get(flight.cargo) - AIR_SURPLUS_FLOOR);
+    const amount = Math.min(flight.load, surplus);
+    if (amount < 1) return;
+
+    const moved = origin.stock.take(flight.cargo, amount);
+    const delivered = destination.stock.add(flight.cargo, moved);
+    // The arrival can be full; what will not fit goes back on the apron.
+    if (delivered < moved) origin.stock.add(flight.cargo, moved - delivered);
+    origin.ledger.recordExported(flight.cargo, delivered);
+    destination.ledger.recordImported(flight.cargo, delivered);
+    market?.reportDemand(flight.cargo, delivered);
+    this.yearlyFreight += delivered;
+  }
+
+  /**
+   * What a passenger service is worth to the two places it joins.
+   *
+   * There is no passenger cargo to deliver, so the effect has to be on the
+   * cities themselves: being reachable by air makes a place wealthier, at both
+   * ends and by the same amount, because the route works in both directions.
+   */
+  private carryPassengers(flight: Flight, origin: City, destination: City): void {
+    this.yearlyPassengers += flight.load;
+    const worth = PASSENGER_PROSPERITY_PER_1K * (flight.load / 1000);
+    origin.prosperity = Math.min(1, origin.prosperity + worth);
+    destination.prosperity = Math.min(1, destination.prosperity + worth);
   }
 }

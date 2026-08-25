@@ -547,7 +547,7 @@ export class SimulationEngine {
     // Update maritime ships, overland caravans and air services
     this.naval.updateShips(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
     this.caravans.updateCaravans(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
-    this.air.updateFlights(this.trade.routes, this.cities, this.kingdoms);
+    this.air.updateFlights(this.trade.routes, this.cities, this.kingdoms, this.market);
 
     // Process deaths
     for (const dead of deadEntities) this.handleEntityDeath(dead, particles);

@@ -215,6 +215,11 @@ export interface EconomyMetrics {
   caravans: number;
   railTiles: number;
   railFreight: number;
+  /** Air service, which reads as zero until a realm has runways at both ends. */
+  airServices: number;
+  airFlights: number;
+  airFreight: number;
+  airPassengers: number;
   /** Mean price ÷ base price across goods the world actually trades, or null. */
   pricePressure: number | null;
   foodCoverage: number | null;
@@ -357,6 +362,10 @@ export function computeEconomyMetrics(ctx: GameContext): EconomyMetrics {
     caravans: sim.caravans.activeCaravans.size,
     railTiles,
     railFreight: sim.railways.yearlyFreight,
+    airServices: sim.air.flights.size,
+    airFlights: sim.air.yearlyFlights,
+    airFreight: sim.air.yearlyFreight,
+    airPassengers: sim.air.yearlyPassengers,
     pricePressure,
     foodCoverage: foodPosition?.coverage ?? null,
     industrialOutput: goods

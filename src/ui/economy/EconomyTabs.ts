@@ -120,6 +120,23 @@ export function buildOverview(m: EconomyMetrics, host: EconomyScreenHost): Child
               }
             })
           : null,
+        // Same rule as rail: no runways, no figure. A zero here would read as a
+        // grounded fleet rather than a world that has not invented flight.
+        m.airServices > 0
+          ? stat({
+              label: 'Carga aérea', value: formatCompact(m.airFreight), icon: 'crate',
+              tooltip: {
+                title: 'Carga movida por via aérea',
+                value: formatFull(Math.round(m.airFreight)),
+                description: 'Unidades entregues por voo neste ano. O avião é rápido e de pouco volume: complementa a malha terrestre, não a substitui.',
+                rows: [
+                  { label: 'Linhas em operação', value: `${m.airServices}` },
+                  { label: 'Voos no ano', value: `${m.airFlights}` },
+                  { label: 'Passageiros', value: formatFull(Math.round(m.airPassengers)) }
+                ]
+              }
+            })
+          : null,
         m.foodCoverage !== null
           ? stat({
               label: 'Abastecimento alimentar', value: formatPercent(m.foodCoverage), icon: 'agriculture',
