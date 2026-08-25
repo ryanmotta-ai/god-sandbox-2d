@@ -15,7 +15,7 @@
  * shadow thrown well behind reads as high.
  */
 
-export type AircraftKind = 'airliner' | 'freighter';
+export type AircraftKind = 'biplane' | 'airliner' | 'freighter' | 'jetliner';
 
 /** Canonical sprite size. Nose points up (−y) at rotation 0. */
 export const AIRCRAFT_PX = 32;
@@ -46,6 +46,8 @@ function r(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: nu
 
 const HULL = { dark: '#7d848c', body: '#c8cfd6', lit: '#e9eef2', pale: '#ffffff', trim: '#2f4d6b' };
 const CARGO = { dark: '#4a4033', body: '#8b7c63', lit: '#a9996e', pale: '#c4b79c', trim: '#5c6b3a' };
+/** Doped linen and varnished wood: what the early machines were actually made of. */
+const LINEN = { dark: '#8a7b5e', body: '#c6b48a', lit: '#ded0ae', trim: '#7d3b2e', strut: '#5f5340' };
 const GLASS = '#3d5b74';
 
 type Draw = (ctx: CanvasRenderingContext2D, frame: number) => void;
@@ -134,7 +136,89 @@ const drawFreighter: Draw = (ctx, f) => {
   if (f === 2) r(ctx, 15, 8, 2, 1, '#fff1a8');
 };
 
+/**
+ * A biplane: two stacked wings, an open cockpit and a single nose propeller.
+ *
+ * Deliberately the smallest silhouette of the three generations — it should
+ * read as a machine that can barely reach the next town, because that is
+ * exactly what its range says it is. The upper wing is drawn wider and the
+ * lower one shows in front of and behind it, which is the only way a stacked
+ * pair reads as two wings from directly above.
+ */
+const drawBiplane: Draw = (ctx, f) => {
+  // Lower wing, seen fore and aft of the upper one.
+  r(ctx, 7, 13, 18, 3, LINEN.dark);
+  r(ctx, 8, 20, 16, 2, LINEN.dark);
+  r(ctx, 9, 20, 14, 1, LINEN.body);
+  // Interplane struts, just visible either side of the fuselage.
+  r(ctx, 11, 16, 1, 4, LINEN.strut);
+  r(ctx, 20, 16, 1, 4, LINEN.strut);
+  // Upper wing, the broad one, sitting over everything.
+  r(ctx, 5, 15, 22, 4, LINEN.dark);
+  r(ctx, 6, 14, 20, 4, LINEN.body);
+  r(ctx, 8, 14, 16, 1, LINEN.lit);
+  r(ctx, 5, 18, 22, 1, LINEN.trim);
+  // Tail: a small fin and a plain tailplane.
+  r(ctx, 12, 24, 8, 2, LINEN.dark);
+  r(ctx, 13, 23, 6, 2, LINEN.body);
+  r(ctx, 15, 24, 2, 5, LINEN.dark);
+  // Fuselage, short and slab-sided.
+  r(ctx, 14, 6, 4, 20, LINEN.dark);
+  r(ctx, 14, 7, 3, 18, LINEN.body);
+  r(ctx, 15, 8, 1, 16, LINEN.lit);
+  r(ctx, 14, 10, 4, 1, LINEN.trim);
+  // Open cockpit, behind the wing where the pilot actually sat.
+  r(ctx, 15, 19, 2, 2, '#2a2118');
+  // Engine and the propeller disc turning in front of it.
+  r(ctx, 14, 4, 4, 3, '#4b4238');
+  r(ctx, 15, 3, 2, 2, '#6b6055');
+  if (f % 2 === 0) r(ctx, 11, 2, 10, 1, 'rgba(214, 208, 196, 0.55)');
+  else r(ctx, 15, 0, 2, 5, 'rgba(214, 208, 196, 0.4)');
+  navLights(ctx, 11, 16, f);
+};
+
+/**
+ * A jetliner: long clean tube, sharply swept wings, engines podded well
+ * forward on pylons and a swept fin. No propeller discs anywhere — the absence
+ * of them is most of what says "jet" at this size, so nothing on it blurs.
+ */
+const drawJet: Draw = (ctx, f) => {
+  // Wings, swept hard back — the leading edge rakes away from the shoulder.
+  r(ctx, 2, 16, 28, 3, HULL.dark);
+  r(ctx, 4, 15, 24, 3, HULL.body);
+  r(ctx, 7, 15, 18, 1, HULL.lit);
+  r(ctx, 2, 19, 7, 2, HULL.dark); // raked trailing edge
+  r(ctx, 23, 19, 7, 2, HULL.dark);
+  r(ctx, 2, 14, 4, 2, HULL.dark); // the sweep, carried out to the tip
+  r(ctx, 26, 14, 4, 2, HULL.dark);
+  // Engines on pylons, slung ahead of and below the wing.
+  for (const ex of [7, 22]) {
+    r(ctx, ex, 12, 3, 7, '#5b636b');
+    r(ctx, ex, 13, 3, 5, HULL.dark);
+    r(ctx, ex, 12, 3, 1, '#8fa4b5'); // the cold intake lip
+    r(ctx, ex + 1, 19, 1, 1, '#33393f');
+  }
+  // Swept tailplane.
+  r(ctx, 11, 25, 10, 2, HULL.dark);
+  r(ctx, 12, 24, 8, 2, HULL.body);
+  // Fuselage: longer and narrower than the propliner's.
+  r(ctx, 14, 2, 4, 27, HULL.dark);
+  r(ctx, 14, 3, 3, 25, HULL.body);
+  r(ctx, 15, 4, 1, 23, HULL.lit);
+  r(ctx, 15, 1, 2, 3, HULL.body); // pointed nose
+  r(ctx, 15, 4, 2, 2, GLASS);
+  for (let y = 8; y < 25; y += 2) r(ctx, 17, y, 1, 1, GLASS);
+  r(ctx, 14, 21, 4, 1, HULL.trim);
+  // Fin, swept like the wings.
+  r(ctx, 15, 25, 2, 6, HULL.dark);
+  r(ctx, 15, 26, 1, 4, HULL.trim);
+  navLights(ctx, 14, 17, f);
+  if (f === 0) r(ctx, 15, 14, 2, 1, '#fff1a8');
+};
+
 const DRAW: Record<AircraftKind, Draw> = {
+  biplane: drawBiplane,
   airliner: drawAirliner,
-  freighter: drawFreighter
+  freighter: drawFreighter,
+  jetliner: drawJet
 };

@@ -3,14 +3,21 @@ import { City } from '../src/civ/City';
 import { Kingdom, getNextKingdomColor } from '../src/civ/Kingdom';
 import { SpeciesType } from '../src/entities/Species';
 import { rng } from '../src/core/Random';
-import { AirSystem, airServiceAvailable } from '../src/civ/AirSystem';
+import { AirSystem, airServiceAvailable, aircraftGenerationFor } from '../src/civ/AirSystem';
 import { caravanTypeFor } from '../src/civ/CaravanSystem';
 import type { TradeRoute } from '../src/civ/Trade';
 import type { GoodId } from '../src/civ/Goods';
 
 rng.setSeed(20260805);
 
-function pair(distance: number): { a: City; b: City; routes: Map<string, TradeRoute>; kingdoms: Map<string, Kingdom>; cities: Map<string, City> } {
+/**
+ * Two cities a set distance apart, with a live trade route between them.
+ *
+ * Both realms are given `aviation` by default because that is the generation
+ * these cases are about: a biplane realm cannot reach across sixty tiles, and
+ * the range progression has a case of its own further down.
+ */
+function pair(distance: number, techs: string[] = ['powered_flight', 'aviation']): { a: City; b: City; routes: Map<string, TradeRoute>; kingdoms: Map<string, Kingdom>; cities: Map<string, City> } {
   const a = new City('a', 'Aeroport', SpeciesType.HUMAN, 10, 20, 'F', 1);
   const b = new City('b', 'Farfield', SpeciesType.HUMAN, 10 + distance, 20, 'F', 1);
   a.population = 900;
@@ -19,6 +26,7 @@ function pair(distance: number): { a: City; b: City; routes: Map<string, TradeRo
   const kb = new Kingdom('kb', 'B', SpeciesType.HUMAN, getNextKingdomColor(), b.id, 0);
   a.kingdomId = ka.id;
   b.kingdomId = kb.id;
+  for (const tech of techs) { ka.research.known.add(tech); kb.research.known.add(tech); }
   const route: TradeRoute = {
     id: 'r', fromCityId: a.id, toCityId: b.id, fromKingdomId: ka.id, toKingdomId: kb.id,
     kind: 'overland', good: 'tools' as never, volume: 40, maxVolume: 40,
@@ -215,7 +223,120 @@ function pair(distance: number): { a: City; b: City; routes: Map<string, TradeRo
 }
 
 // ============================================================
-// 8. What is on the road tells you the age of the realm
+// 8. A realm flies what it has learnt to build, and no further
+// ============================================================
+{
+  // A biplane realm: the runway exists, the aeroplane cannot cross the gap.
+  const early = pair(60, ['powered_flight']);
+  early.a.addBuilding('airport', early.a.x, early.a.y);
+  early.b.addBuilding('airport', early.b.x, early.b.y);
+  assert.equal(
+    aircraftGenerationFor(early.kingdoms.get('ka')!), 'biplane',
+    'powered flight alone is the biplane era'
+  );
+  assert.equal(
+    airServiceAvailable(early.a, early.b, 'biplane'), false,
+    'sixty tiles is beyond a biplane, however many runways are built'
+  );
+  const earlyAir = new AirSystem();
+  earlyAir.updateFlights(early.routes, early.cities, early.kingdoms);
+  assert.equal(earlyAir.flights.size, 0, 'so no service opens');
+
+  // The short hop it *is* for.
+  const hop = pair(20, ['powered_flight']);
+  hop.a.addBuilding('airport', hop.a.x, hop.a.y);
+  hop.b.addBuilding('airport', hop.b.x, hop.b.y);
+  const hopAir = new AirSystem();
+  hopAir.updateFlights(hop.routes, hop.cities, hop.kingdoms);
+  assert.equal(hopAir.flights.size, 1, 'a biplane opens the short hop');
+  assert.equal(hopAir.flights.get('r')!.generation, 'biplane');
+
+  // Line service reaches it; the jet reaches anything.
+  const line = pair(60);
+  line.a.addBuilding('airport', line.a.x, line.a.y);
+  line.b.addBuilding('airport', line.b.x, line.b.y);
+  const lineAir = new AirSystem();
+  lineAir.updateFlights(line.routes, line.cities, line.kingdoms);
+  assert.equal(lineAir.flights.get('r')!.generation, 'propliner', 'aviation is the line-service era');
+
+  const jet = pair(400, ['powered_flight', 'aviation', 'jet_age']);
+  jet.a.addBuilding('airport', jet.a.x, jet.a.y);
+  jet.b.addBuilding('airport', jet.b.x, jet.b.y);
+  assert.equal(aircraftGenerationFor(jet.kingdoms.get('ka')!), 'jet');
+  const jetAir = new AirSystem();
+  jetAir.updateFlights(jet.routes, jet.cities, jet.kingdoms);
+  assert.equal(jetAir.flights.size, 1, 'no distance is too far for a jet');
+}
+
+// ============================================================
+// 9. A newer aircraft is faster and lifts more over the same route
+// ============================================================
+{
+  const year = (techs: string[]) => {
+    const { a, b, routes, cities, kingdoms } = pair(40, techs);
+    a.addBuilding('airport', a.x, a.y);
+    b.addBuilding('airport', b.x, b.y);
+    a.stock.add('tools' as GoodId, 300);
+    const air = new AirSystem();
+    for (let tick = 0; tick < 7200; tick++) air.updateFlights(routes, cities, kingdoms);
+    return air;
+  };
+  const prop = year(['powered_flight', 'aviation']);
+  const jet = year(['powered_flight', 'aviation', 'jet_age']);
+
+  assert.ok(
+    jet.yearlyFlights > prop.yearlyFlights,
+    `a jet turns round more often: jet ${jet.yearlyFlights} vs propliner ${prop.yearlyFlights}`
+  );
+  assert.ok(
+    jet.yearlyPassengers > prop.yearlyPassengers,
+    'and carries more people over the year'
+  );
+}
+
+// ============================================================
+// 10. A runway is finite, so one field cannot serve every route
+// ============================================================
+{
+  const hub = new City('hub', 'Hub', SpeciesType.HUMAN, 10, 20, 'F', 1);
+  hub.population = 1200;
+  const kh = new Kingdom('kh', 'H', SpeciesType.HUMAN, getNextKingdomColor(), hub.id, 0);
+  kh.research.known.add('powered_flight'); kh.research.known.add('aviation');
+  hub.kingdomId = kh.id;
+  hub.addBuilding('airport', hub.x, hub.y);
+
+  const cities = new Map<string, City>([[hub.id, hub]]);
+  const routes = new Map<string, TradeRoute>();
+  // Six spokes, all in range, all wanting the one field at the centre.
+  for (let i = 0; i < 6; i++) {
+    const spoke = new City(`s${i}`, `Spoke${i}`, SpeciesType.HUMAN, 10, 20 + 30 + i * 4, 'F', 1);
+    spoke.population = 400;
+    spoke.kingdomId = kh.id;
+    spoke.addBuilding('airport', spoke.x, spoke.y);
+    cities.set(spoke.id, spoke);
+    routes.set(`r${i}`, {
+      id: `r${i}`, fromCityId: hub.id, toCityId: spoke.id, fromKingdomId: kh.id, toKingdomId: kh.id,
+      kind: 'overland', good: 'tools' as never, volume: 40, maxVolume: 40,
+      establishedYear: 0, totalValue: 0, active: true
+    });
+  }
+
+  const air = new AirSystem();
+  air.updateFlights(routes, cities, new Map([[kh.id, kh]]));
+  const capacity = 1 + Math.max(1, [...hub.buildings.values()].find(b => b.type === 'airport')!.level);
+  assert.equal(
+    air.flights.size, capacity,
+    `one airport works ${capacity} services, not all six spokes`
+  );
+
+  // A second field at the hub opens more of them.
+  hub.addBuilding('airport', hub.x + 1, hub.y);
+  air.updateFlights(routes, cities, new Map([[kh.id, kh]]));
+  assert.ok(air.flights.size > capacity, 'building another airport works more routes');
+}
+
+// ============================================================
+// 11. What is on the road tells you the age of the realm
 // ============================================================
 {
   assert.equal(caravanTypeFor('stone', 4), 'donkey');

@@ -472,6 +472,19 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
     discovery: 'entrou na era industrial'
   },
 
+  powered_flight: {
+    id: 'powered_flight',
+    name: 'Voo Motorizado',
+    track: 'craft',
+    era: 'industrial',
+    icon: '🛩️',
+    cost: 1600,
+    requires: ['industrialization'],
+    unlocks: { buildings: ['airport'], modifiers: { research: 1.1 } },
+    description: 'Um campo de pouso e uma máquina frágil que sai do chão. Pouca carga e pouco alcance — mas o terreno deixa de opinar.',
+    discovery: 'levantou voo pela primeira vez'
+  },
+
   // ========================= MODERN AGE =========================
   electricity: {
     id: 'electricity',
@@ -492,10 +505,23 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
     era: 'modern',
     icon: '✈️',
     cost: 2200,
-    requires: ['electricity'],
-    unlocks: { buildings: ['airport'], modifiers: { production: 1.15, research: 1.2 } },
-    description: 'Freight and passengers that ignore the ground entirely — and the aerodromes they need at both ends.',
-    discovery: 'took to the air'
+    requires: ['electricity', 'powered_flight'],
+    unlocks: { modifiers: { production: 1.15, research: 1.2 } },
+    description: 'Aviões de linha: muito mais carga, muito mais alcance. Carga e passageiros passam a ignorar o terreno de verdade.',
+    discovery: 'abriu suas linhas aéreas'
+  },
+
+  jet_age: {
+    id: 'jet_age',
+    name: 'Era do Jato',
+    track: 'craft',
+    era: 'modern',
+    icon: '✈️',
+    cost: 2800,
+    requires: ['aviation'],
+    unlocks: { modifiers: { production: 1.2, research: 1.25, growth: 1.1 } },
+    description: 'A turbina. O dobro da velocidade do avião a hélice e nenhuma distância grande o bastante para importar.',
+    discovery: 'entrou na era do jato'
   },
   mass_media: {
     id: 'mass_media',

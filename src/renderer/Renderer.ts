@@ -4836,10 +4836,13 @@ export class PixelRenderer {
     const alt = flight.altitude;
     const size = Math.max(12, tileSize * 1.5) * (0.82 + alt * 0.24);
     const angle = Math.atan2(flight.headingY, flight.headingX) + Math.PI / 2; // sprite noses up
-    const sprite = aircraftSprite(
-      flight.payload === 'cargo' ? 'freighter' : 'airliner',
-      Math.floor(this.animTimer * 14) % AIRCRAFT_FRAMES
-    );
+    // Generation first, payload second. A realm's aircraft should say what age
+    // it is in before it says what is in the hold, and from directly overhead a
+    // jet freighter and a jetliner are the same swept planform anyway.
+    const kind = flight.generation === 'biplane' ? 'biplane'
+      : flight.generation === 'jet' ? 'jetliner'
+        : flight.payload === 'cargo' ? 'freighter' : 'airliner';
+    const sprite = aircraftSprite(kind, Math.floor(this.animTimer * 14) % AIRCRAFT_FRAMES);
 
     // The shadow, cast down and to one side, further out the higher it flies.
     const throwDist = tileSize * 0.16 + alt * tileSize * 1.05;

@@ -63,18 +63,55 @@ export interface Flight {
   routeTiles: number;
   /** Ticks left on the apron before the next departure. */
   turnaround: number;
+  /** What the operating realm knew how to build when the service opened. */
+  generation: AircraftGeneration;
+}
+
+/** Which generation of aircraft a realm can put in the air. */
+export type AircraftGeneration = 'biplane' | 'propliner' | 'jet';
+
+/**
+ * What each generation is actually good for.
+ *
+ * Speed is set against a modern truck at 0.130. A propliner is roughly four
+ * times as fast door to door and flies straight rather than following a road,
+ * so over distance it is far more than four times better — that is the trade
+ * the runway is asking the player to make.
+ *
+ * Range is what makes the progression mean something beyond a bigger number. A
+ * biplane cannot cross an ocean: it opens a short hop between neighbours a
+ * lorry would take a season over, and nothing else. Line service is what turns
+ * flight into infrastructure, and the jet is what makes distance stop
+ * mattering at all.
+ */
+const GENERATION: Record<AircraftGeneration, { speed: number; capacity: number; range: number }> = {
+  biplane: { speed: 0.21, capacity: 0.35, range: 46 },
+  propliner: { speed: 0.52, capacity: 1, range: 165 },
+  jet: { speed: 1.04, capacity: 1.9, range: Infinity }
+};
+
+/** The generation a realm flies, which is simply the best one it has learnt. */
+export function aircraftGenerationFor(kingdom: Kingdom | null | undefined): AircraftGeneration {
+  if (kingdom?.research.knows('jet_age')) return 'jet';
+  if (kingdom?.research.knows('aviation')) return 'propliner';
+  return 'biplane';
 }
 
 /**
- * Cruising speed in tiles per tick.
+ * Concurrent services one city can work.
  *
- * Set against a modern truck at 0.130: an aircraft is roughly four times as
- * fast door to door, and it is straight rather than following a road, so on a
- * long route it is far more than four times better. That is the trade the
- * player is being shown — the runway costs a great deal and only pays for
- * itself over distance.
+ * An airport is a runway, an apron and a tower, and all three are finite.
+ * Without a ceiling a single field quietly becomes the hub of every route the
+ * realm has, which is the sort of thing that is invisible until someone asks
+ * why one city is doing all the trade. A bigger airport works more.
  */
-const CRUISE_SPEED = 0.52;
+function airportCapacity(city: City): number {
+  let slots = 0;
+  for (const b of city.buildings.values()) {
+    if (b.type === 'airport' && b.hp / b.maxHp > 0.5) slots += 1 + Math.max(1, b.level);
+  }
+  return slots;
+}
 
 /** Fraction of the route spent climbing, and the same again descending. */
 const CLIMB_FRACTION = 0.14;
@@ -130,10 +167,19 @@ function workingAirport(city: City): boolean {
   return false;
 }
 
-/** Whether a pair of cities can run a service between them at all. */
-export function airServiceAvailable(from: City, to: City): boolean {
+/**
+ * Whether a pair of cities can run a service between them at all.
+ *
+ * Too close and flying is absurd; too far and the aircraft of the day cannot
+ * make it. The far limit is what the realm has learnt to build, so a route can
+ * sit unflyable for an age and then open on its own the year the tech lands.
+ */
+export function airServiceAvailable(
+  from: City, to: City, generation: AircraftGeneration = 'propliner'
+): boolean {
   if (!workingAirport(from) || !workingAirport(to)) return false;
-  return Math.hypot(to.x - from.x, to.y - from.y) >= MIN_AIR_DISTANCE;
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  return distance >= MIN_AIR_DISTANCE && distance <= GENERATION[generation].range;
 }
 
 export class AirSystem {
@@ -157,20 +203,45 @@ export class AirSystem {
     market?: AirMarket
   ): void {
     const served = new Set<string>();
+    // Slots left at each field this tick. Services already running keep theirs,
+    // so a new route cannot evict an established one just by being iterated
+    // first — the ceiling decides who never opens, not who gets thrown out.
+    const free = new Map<string, number>();
+    const slotsAt = (city: City): number => {
+      let left = free.get(city.id);
+      if (left === undefined) {
+        left = airportCapacity(city);
+        free.set(city.id, left);
+      }
+      return left;
+    };
+    const takeSlots = (from: City, to: City): void => {
+      free.set(from.id, slotsAt(from) - 1);
+      free.set(to.id, slotsAt(to) - 1);
+    };
 
     for (const route of routes.values()) {
       if (!route.active) continue;
       const from = cities.get(route.fromCityId);
       const to = cities.get(route.toCityId);
-      if (!from || !to || !airServiceAvailable(from, to)) continue;
-      served.add(route.id);
+      if (!from || !to) continue;
+      const generation = aircraftGenerationFor(route.fromKingdomId ? kingdoms.get(route.fromKingdomId) : null);
+      if (!airServiceAvailable(from, to, generation)) continue;
 
-      let flight = this.flights.get(route.id);
-      if (!flight) {
-        flight = this.open(route, from, to, kingdoms);
-        this.flights.set(route.id, flight);
+      const flight = this.flights.get(route.id);
+      if (flight) {
+        served.add(route.id);
+        takeSlots(from, to);
+        this.fly(flight, from, to, route, market);
+        continue;
       }
-      this.fly(flight, from, to, route, market);
+      // A field with no apron left simply does not open the service this tick.
+      if (slotsAt(from) < 1 || slotsAt(to) < 1) continue;
+      served.add(route.id);
+      takeSlots(from, to);
+      const opened = this.open(route, from, to, kingdoms, generation);
+      this.flights.set(route.id, opened);
+      this.fly(opened, from, to, route, market);
     }
 
     // A service stops the moment its route closes or an airport is knocked out.
@@ -180,7 +251,9 @@ export class AirSystem {
   }
 
   /** Opens a service on a route, on the apron and ready to depart. */
-  private open(route: TradeRoute, from: City, to: City, kingdoms: Map<string, Kingdom>): Flight {
+  private open(
+    route: TradeRoute, from: City, to: City, kingdoms: Map<string, Kingdom>, generation: AircraftGeneration
+  ): Flight {
     const kingdom = route.fromKingdomId ? kingdoms.get(route.fromKingdomId) : null;
     return {
       id: `air_${route.id}`,
@@ -197,7 +270,8 @@ export class AirSystem {
       y: from.y,
       progress: 0,
       direction: 1,
-      ...this.manifest(route, from),
+      ...this.manifest(route, from, generation),
+      generation,
       kingdomColor: kingdom?.color ?? '#e2e8f0',
       altitude: 0,
       phase: 'takeoff',
@@ -216,19 +290,22 @@ export class AirSystem {
    * busier the city, the more of its flights carry passengers — which is the
    * shape real air service takes as a place grows.
    */
-  private manifest(route: TradeRoute, from: City): Pick<Flight, 'payload' | 'cargo' | 'load'> {
+  private manifest(
+    route: TradeRoute, from: City, generation: AircraftGeneration
+  ): Pick<Flight, 'payload' | 'cargo' | 'load'> {
+    const capacity = GENERATION[generation].capacity;
     const passengerBias = Math.min(0.65, 0.2 + from.population / 4000);
     if (!route.good || rng.chance(passengerBias)) {
       return {
         payload: 'passengers',
         cargo: null,
-        load: Math.max(20, Math.round(from.population * rng.range(0.004, 0.012)))
+        load: Math.max(8, Math.round(from.population * rng.range(0.004, 0.012) * capacity))
       };
     }
     return {
       payload: 'cargo',
       cargo: route.good,
-      load: Math.max(1, Math.round(route.volume * rng.range(AIR_LOAD_FRACTION[0], AIR_LOAD_FRACTION[1])))
+      load: Math.max(1, Math.round(route.volume * rng.range(AIR_LOAD_FRACTION[0], AIR_LOAD_FRACTION[1]) * capacity))
     };
   }
 
@@ -256,7 +333,7 @@ export class AirSystem {
       return;
     }
 
-    flight.progress += (CRUISE_SPEED / flight.routeTiles) * flight.direction;
+    flight.progress += (GENERATION[flight.generation].speed / flight.routeTiles) * flight.direction;
 
     if (flight.progress >= 1) {
       flight.progress = 1;
@@ -305,7 +382,7 @@ export class AirSystem {
     this.yearlyFlights++;
     if (flight.payload === 'passengers') this.carryPassengers(flight, origin, at);
     else this.unload(flight, origin, at, market);
-    Object.assign(flight, this.manifest(route, at));
+    Object.assign(flight, this.manifest(route, at, flight.generation));
   }
 
   /**
