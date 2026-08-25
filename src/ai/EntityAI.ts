@@ -548,6 +548,7 @@ export class SimulationEngine {
     this.naval.updateShips(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
     this.caravans.updateCaravans(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
     this.air.updateFlights(this.trade.routes, this.cities, this.kingdoms, this.market);
+    this.air.updateSorties(this.cities, this.currentYear);
 
     // Process deaths
     for (const dead of deadEntities) this.handleEntityDeath(dead, particles);
@@ -647,6 +648,7 @@ export class SimulationEngine {
       // `musterArmies` are not repeated here: they already run above, before the
       // war passes, which is the ordering the comment above exists to protect.
       this.reportAirService();
+      this.air.planSorties(this.cities, this.kingdoms, this.diplomacy);
       this.air.resetYear();
     }
   }
@@ -664,6 +666,7 @@ export class SimulationEngine {
    * to be worth a line at all.
    */
   private reportAirService(): void {
+    this.reportAirWar();
     if (this.air.yearlyFlights === 0) return;
     const anyFlight = this.air.flights.values().next().value;
     if (!this.airServiceOpened) {
@@ -691,6 +694,45 @@ export class SimulationEngine {
       this.currentYear,
       'trade',
       `Air services flew ${this.air.yearlyFlights} times this year, carrying ${Math.round(this.air.yearlyPassengers)} travellers and ${Math.round(this.air.yearlyFreight)} tonnes of freight.`
+    );
+  }
+
+  /** Whether anywhere has yet been bombed from the air, so the first time is news. */
+  private airWarOpened: boolean = false;
+
+  /**
+   * Records the year's bombing.
+   *
+   * Kept apart from the service report rather than folded into it, because a
+   * realm can be fighting an air war without running a single scheduled flight
+   * — and that report returns early when nothing is scheduled, which would have
+   * left the whole campaign invisible.
+   */
+  private reportAirWar(): void {
+    if (this.air.yearlySorties === 0) return;
+    const raid = this.air.sorties.values().next().value;
+    if (!this.airWarOpened) {
+      this.airWarOpened = true;
+      chronicle.log(
+        this.currentYear,
+        'war',
+        raid
+          ? `${raid.toCityName} was bombed from the air, by aircraft flying out of ${raid.fromCityName}. A city can no longer be defended only at its walls.`
+          : 'A city was bombed from the air for the first time.',
+        {
+          title: 'The First Raid',
+          importance: 'legendary',
+          scope: 'world',
+          tags: ['aviation', 'war']
+        }
+      );
+      return;
+    }
+    if (this.air.yearlySorties < 6) return;
+    chronicle.log(
+      this.currentYear,
+      'war',
+      `Bombers flew ${this.air.yearlySorties} sorties this year, leaving ${Math.round(this.air.yearlyBombDamage)} points of damage behind them.`
     );
   }
 

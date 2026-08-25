@@ -336,7 +336,88 @@ function pair(distance: number, techs: string[] = ['powered_flight', 'aviation']
 }
 
 // ============================================================
-// 11. What is on the road tells you the age of the realm
+// 11. A war in the air: raids fly, wreck things, and stop with the war
+// ============================================================
+{
+  const { a, b, cities, kingdoms } = pair(60);
+  a.addBuilding('airport', a.x, a.y);
+  // The target has factories and streets, but no runway of its own to defend it.
+  b.addBuilding('factory', b.x, b.y);
+  b.addBuilding('house', b.x + 1, b.y);
+  const war = { isAtWar: (k1: string, k2: string) => k1 !== k2 };
+  const air = new AirSystem();
+
+  air.planSorties(cities, kingdoms, war);
+  assert.equal(air.sorties.size, 1, 'a realm at war with a runway sends a raid');
+  const sortie = air.sorties.values().next().value!;
+  assert.equal(sortie.payload, 'bombs');
+  assert.equal(sortie.fromCityId, a.id, 'from the field');
+  assert.equal(sortie.toCityId, b.id, 'to the enemy');
+
+  const factory = [...b.buildings.values()].find(x => x.type === 'factory')!;
+  const house = [...b.buildings.values()].find(x => x.type === 'house')!;
+  const prosperityBefore = b.prosperity;
+  for (let tick = 0; tick < 7200; tick++) air.updateSorties(cities, 1900);
+
+  assert.ok(air.yearlySorties > 0, 'raids have to actually arrive');
+  assert.ok(air.yearlyBombDamage > 0, 'and do damage that is counted');
+  assert.ok(factory.hp < factory.maxHp, 'the works are what a bombing campaign goes for');
+  assert.equal(house.hp, house.maxHp, 'not the houses, while anything better is standing');
+  assert.ok(b.prosperity < prosperityBefore, 'a bombed city is poorer for it');
+
+  // Peace grounds them.
+  air.planSorties(cities, kingdoms, { isAtWar: () => false });
+  assert.equal(air.sorties.size, 0, 'peace ends the campaign');
+}
+
+// ============================================================
+// 12. The runway is the first target, and defends itself
+// ============================================================
+{
+  const undefended = pair(60);
+  undefended.a.addBuilding('airport', undefended.a.x, undefended.a.y);
+  undefended.b.addBuilding('airport', undefended.b.x, undefended.b.y);
+  undefended.b.addBuilding('factory', undefended.b.x + 1, undefended.b.y);
+  const war = { isAtWar: (k1: string, k2: string) => k1 !== k2 };
+
+  const air = new AirSystem();
+  air.planSorties(undefended.cities, undefended.kingdoms, war);
+  // Both ends have a field, so both send a raid at the other.
+  assert.equal(air.sorties.size, 2, 'a war in the air is fought both ways');
+
+  const targetField = [...undefended.b.buildings.values()].find(x => x.type === 'airport')!;
+  for (let tick = 0; tick < 2600; tick++) air.updateSorties(undefended.cities, 1900);
+  assert.ok(
+    targetField.hp < targetField.maxHp,
+    'the enemy runway is what a raid goes for before anything else'
+  );
+
+  // Same raid against a target with no fighters of its own does more harm.
+  const open = pair(60);
+  open.a.addBuilding('airport', open.a.x, open.a.y);
+  open.b.addBuilding('factory', open.b.x, open.b.y);
+  const openAir = new AirSystem();
+  openAir.planSorties(open.cities, open.kingdoms, { isAtWar: (k1: string, k2: string) => k1 !== k2 });
+  for (let tick = 0; tick < 2600; tick++) openAir.updateSorties(open.cities, 1900);
+
+  const defended = new AirSystem();
+  const guarded = pair(60);
+  guarded.a.addBuilding('airport', guarded.a.x, guarded.a.y);
+  guarded.b.addBuilding('airport', guarded.b.x, guarded.b.y);
+  guarded.b.addBuilding('factory', guarded.b.x + 1, guarded.b.y);
+  defended.planSorties(guarded.cities, guarded.kingdoms, { isAtWar: (k1: string, k2: string) => k1 !== k2 });
+  for (let tick = 0; tick < 2600; tick++) defended.updateSorties(guarded.cities, 1900);
+
+  const perSortieOpen = openAir.yearlyBombDamage / Math.max(1, openAir.yearlySorties);
+  const perSortieGuarded = defended.yearlyBombDamage / Math.max(1, defended.yearlySorties);
+  assert.ok(
+    perSortieOpen > perSortieGuarded,
+    `fighters flying from the target's own field turn most of a raid back: ${perSortieOpen} vs ${perSortieGuarded}`
+  );
+}
+
+// ============================================================
+// 13. What is on the road tells you the age of the realm
 // ============================================================
 {
   assert.equal(caravanTypeFor('stone', 4), 'donkey');

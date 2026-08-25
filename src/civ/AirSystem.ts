@@ -9,6 +9,11 @@ export interface AirMarket {
   reportDemand(good: GoodId, amount: number): void;
 }
 
+/** The only thing a bombing campaign needs to know about diplomacy. */
+export interface AirWar {
+  isAtWar(k1: string, k2: string): boolean;
+}
+
 /**
  * Air freight and air travel, once a realm has aerodromes at both ends.
  *
@@ -28,7 +33,7 @@ export interface AirMarket {
  */
 
 /** What a given flight is carrying. */
-export type FlightPayload = 'cargo' | 'passengers';
+export type FlightPayload = 'cargo' | 'passengers' | 'bombs';
 
 /** Where a flight is in its profile. Drawn differently in each. */
 export type FlightPhase = 'takeoff' | 'cruise' | 'landing';
@@ -89,6 +94,31 @@ const GENERATION: Record<AircraftGeneration, { speed: number; capacity: number; 
   propliner: { speed: 0.52, capacity: 1, range: 165 },
   jet: { speed: 1.04, capacity: 1.9, range: Infinity }
 };
+
+/**
+ * What one sortie does to a building it hits, as a fraction of that building's
+ * full health.
+ *
+ * Scaled by generation because the aeroplane is the weapon: a biplane drops a
+ * few small bombs over the side and is a nuisance, while a jet flattens a
+ * block. That spread is the reason air power reads as an era rather than as a
+ * unit, and it is what makes an enemy's runways worth going after first.
+ */
+const BOMB_DAMAGE: Record<AircraftGeneration, number> = {
+  biplane: 0.05,
+  propliner: 0.16,
+  jet: 0.3
+};
+
+/**
+ * How much of a raid gets through when the target has a working runway of its
+ * own. Fighters flew from the same fields, so an airport is both the thing
+ * worth bombing and the thing that stops the bombing.
+ */
+const INTERCEPTION_SURVIVAL = 0.45;
+
+/** What a raid costs the place underneath it, beyond the wreckage. */
+const BOMB_PROSPERITY_COST = 0.012;
 
 /** The generation a realm flies, which is simply the best one it has learnt. */
 export function aircraftGenerationFor(kingdom: Kingdom | null | undefined): AircraftGeneration {
@@ -184,16 +214,181 @@ export function airServiceAvailable(
 
 export class AirSystem {
   public flights: Map<string, Flight> = new Map();
+  /**
+   * Bombing runs, kept apart from the scheduled services.
+   *
+   * They are the same Flight and fly the same profile — which is the point,
+   * because it means the movement, the altitude, the shadow and the sprite all
+   * come for free — but they are opened by a war rather than a trade route, so
+   * mixing them into one map would have the service cleanup delete them every
+   * tick.
+   */
+  public sorties: Map<string, Flight> = new Map();
   /** Flights completed this year, for the yearly report. */
   public yearlyFlights: number = 0;
   public yearlyPassengers: number = 0;
   public yearlyFreight: number = 0;
+  public yearlySorties: number = 0;
+  /** Health destroyed by bombing this year, across every target. */
+  public yearlyBombDamage: number = 0;
+
+  /** Everything in the air, for the renderer, which does not care why it flies. */
+  public *airborne(): Generator<Flight> {
+    yield* this.flights.values();
+    yield* this.sorties.values();
+  }
 
   /** Called once a year, after the totals have been read. */
   public resetYear(): void {
     this.yearlyFlights = 0;
     this.yearlyPassengers = 0;
     this.yearlyFreight = 0;
+    this.yearlySorties = 0;
+    this.yearlyBombDamage = 0;
+  }
+
+  /**
+   * Chooses this year's targets.
+   *
+   * Run once a year rather than per tick: picking targets means scanning cities
+   * for enemies in range, and a war lasts years, so doing it 7200 times over is
+   * work for an answer that does not change. Sorties in the air keep flying;
+   * what this decides is which ones exist at all, so a raid stops when the war
+   * ends, the runway is lost, or the target is taken.
+   */
+  public planSorties(
+    cities: Map<string, City>,
+    kingdoms: Map<string, Kingdom>,
+    war: AirWar
+  ): void {
+    const wanted = new Set<string>();
+    const bases: City[] = [];
+    for (const city of cities.values()) if (city.kingdomId && workingAirport(city)) bases.push(city);
+
+    for (const base of bases) {
+      const generation = aircraftGenerationFor(kingdoms.get(base.kingdomId!));
+      const reach = GENERATION[generation].range;
+      // One raid per field, against the nearest enemy it can actually reach:
+      // a bomber force goes for what is in front of it, not the far capital.
+      let best: City | null = null;
+      let bestDistance = Infinity;
+      for (const target of cities.values()) {
+        if (!target.kingdomId || target.kingdomId === base.kingdomId) continue;
+        if (!war.isAtWar(base.kingdomId!, target.kingdomId)) continue;
+        const distance = Math.hypot(target.x - base.x, target.y - base.y);
+        if (distance < MIN_AIR_DISTANCE || distance > reach || distance >= bestDistance) continue;
+        best = target;
+        bestDistance = distance;
+      }
+      if (!best) continue;
+
+      const id = `sortie:${base.id}:${best.id}`;
+      wanted.add(id);
+      if (this.sorties.has(id)) continue;
+      const sortie = this.openSortie(base, best, kingdoms.get(base.kingdomId!) ?? null, generation);
+      this.sorties.set(id, sortie);
+    }
+
+    for (const id of [...this.sorties.keys()]) if (!wanted.has(id)) this.sorties.delete(id);
+  }
+
+  /** Moves every raid in the air, and lets the ones that arrive do their work. */
+  public updateSorties(cities: Map<string, City>, year: number): void {
+    for (const [id, sortie] of this.sorties) {
+      const base = cities.get(sortie.fromCityId);
+      const target = cities.get(sortie.toCityId);
+      if (!base || !target || !workingAirport(base)) { this.sorties.delete(id); continue; }
+      this.flySortie(sortie, base, target, year);
+    }
+  }
+
+  private openSortie(base: City, target: City, kingdom: Kingdom | null, generation: AircraftGeneration): Flight {
+    return {
+      id: `bomb_${base.id}_${target.id}`,
+      routeId: '',
+      fromCityId: base.id,
+      toCityId: target.id,
+      fromCityName: base.name,
+      toCityName: target.name,
+      startX: base.x, startY: base.y,
+      endX: target.x, endY: target.y,
+      x: base.x, y: base.y,
+      progress: 0,
+      direction: 1,
+      payload: 'bombs',
+      cargo: null,
+      load: 0,
+      generation,
+      kingdomColor: kingdom?.color ?? '#e2e8f0',
+      altitude: 0,
+      phase: 'takeoff',
+      headingX: 0, headingY: -1,
+      routeTiles: Math.max(1, Math.hypot(target.x - base.x, target.y - base.y)),
+      turnaround: TURNAROUND_TICKS
+    };
+  }
+
+  /**
+   * A raid flies the same profile as a service, and drops its load at the far
+   * end only. The return leg is empty, so an aircraft that has already bombed
+   * does not bomb its own base on the way home.
+   */
+  private flySortie(sortie: Flight, base: City, target: City, year: number): void {
+    sortie.startX = base.x; sortie.startY = base.y;
+    sortie.endX = target.x; sortie.endY = target.y;
+    sortie.routeTiles = Math.max(1, Math.hypot(target.x - base.x, target.y - base.y));
+
+    if (sortie.turnaround > 0) {
+      sortie.turnaround--;
+      sortie.altitude = 0;
+      sortie.phase = 'takeoff';
+      return;
+    }
+
+    const outbound = sortie.direction > 0;
+    sortie.progress += (GENERATION[sortie.generation].speed / sortie.routeTiles) * sortie.direction;
+    if (sortie.progress >= 1) {
+      sortie.progress = 1;
+      sortie.direction = -1;
+      sortie.turnaround = TURNAROUND_TICKS;
+      if (outbound) this.bomb(sortie, target, year);
+    } else if (sortie.progress <= 0) {
+      sortie.progress = 0;
+      sortie.direction = 1;
+      sortie.turnaround = TURNAROUND_TICKS;
+    }
+
+    this.place(sortie);
+  }
+
+  /**
+   * What a raid does when it gets there.
+   *
+   * It goes for what a bombing campaign went for — the runway that launched the
+   * last raid, then the works that build the weapons — and only hits ordinary
+   * streets when there is nothing else standing. A target with a working runway
+   * of its own gets most of the raid turned back, because the fighters flew
+   * from those same fields: an airport is at once the thing worth bombing and
+   * the thing that stops the bombing.
+   */
+  private bomb(sortie: Flight, target: City, year: number): void {
+    this.yearlySorties++;
+    const standing = [...target.buildings.values()].filter(b => b.hp > 0);
+    if (!standing.length) return;
+
+    const priority = (type: string): number =>
+      type === 'airport' ? 0 : type === 'barracks' || type === 'keep' || type === 'factory' ? 1
+        : type === 'refinery' || type === 'workshop' || type === 'smithy' || type === 'oil_well' ? 2 : 3;
+    const best = Math.min(...standing.map(b => priority(b.type)));
+    const pool = standing.filter(b => priority(b.type) === best);
+    const hit = pool[Math.floor(rng.next() * pool.length)];
+
+    const survival = workingAirport(target) ? INTERCEPTION_SURVIVAL : 1;
+    const damage = hit.maxHp * BOMB_DAMAGE[sortie.generation] * survival;
+    if (damage <= 0) return;
+    hit.applyDamage(damage, year, 'war');
+    this.yearlyBombDamage += damage;
+    target.prosperity = Math.max(0, target.prosperity - BOMB_PROSPERITY_COST * survival);
   }
 
   public updateFlights(
@@ -347,6 +542,19 @@ export class AirSystem {
       this.arrive(flight, route, to, from, market);
     }
 
+    this.place(flight);
+  }
+
+  /**
+   * Where an aircraft is, how high, and which way it points, from its progress
+   * alone.
+   *
+   * Altitude is derived rather than stored so it can never drift out of step
+   * with the position, and a raid flies the identical profile to a scheduled
+   * service — so this is shared rather than written twice, and the two can
+   * never disagree about what a climb looks like.
+   */
+  private place(flight: Flight): void {
     const t = flight.progress;
     flight.x = flight.startX + (flight.endX - flight.startX) * t;
     flight.y = flight.startY + (flight.endY - flight.startY) * t;

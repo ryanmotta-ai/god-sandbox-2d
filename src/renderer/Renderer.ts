@@ -4841,7 +4841,9 @@ export class PixelRenderer {
     // jet freighter and a jetliner are the same swept planform anyway.
     const kind = flight.generation === 'biplane' ? 'biplane'
       : flight.generation === 'jet' ? 'jetliner'
-        : flight.payload === 'cargo' ? 'freighter' : 'airliner';
+        // A bomber is the heavy airframe, not the airliner: four engines and a
+        // slab-sided hull is the shape that carries a load meant to be dropped.
+        : flight.payload === 'cargo' || flight.payload === 'bombs' ? 'freighter' : 'airliner';
     const sprite = aircraftSprite(kind, Math.floor(this.animTimer * 14) % AIRCRAFT_FRAMES);
 
     // The shadow, cast down and to one side, further out the higher it flies.
