@@ -547,6 +547,9 @@ export class SimulationEngine {
     // Update maritime ships, overland caravans and air services
     this.naval.updateShips(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
     this.caravans.updateCaravans(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
+    // The world's climate era is the flying weather; an ash-choked sky loses
+    // aircraft that a golden age would have brought home.
+    this.air.weather = this.currentEra;
     this.air.updateFlights(this.trade.routes, this.cities, this.kingdoms, this.market);
     this.air.updateSorties(this.cities, this.currentYear);
 
@@ -667,6 +670,7 @@ export class SimulationEngine {
    */
   private reportAirService(): void {
     this.reportAirWar();
+    this.reportAirLosses();
     if (this.air.yearlyFlights === 0) return;
     const anyFlight = this.air.flights.values().next().value;
     if (!this.airServiceOpened) {
@@ -694,6 +698,25 @@ export class SimulationEngine {
       this.currentYear,
       'trade',
       `Air services flew ${this.air.yearlyFlights} times this year, carrying ${Math.round(this.air.yearlyPassengers)} travellers and ${Math.round(this.air.yearlyFreight)} tonnes of freight.`
+    );
+  }
+
+  /**
+   * Records what the year cost in aircraft.
+   *
+   * Its own pass, ahead of the service and war reports, because both of those
+   * return early on a quiet year and a realm can lose a bomber in a year it
+   * flew no scheduled service at all.
+   */
+  private reportAirLosses(): void {
+    const loss = this.air.lastLoss;
+    if (this.air.yearlyLosses === 0 || !loss) return;
+    chronicle.log(
+      this.currentYear,
+      'trade',
+      this.air.yearlyLosses === 1
+        ? `An aircraft was lost this year on the ${loss.from}–${loss.to} run.`
+        : `${this.air.yearlyLosses} aircraft were lost this year, the last of them on the ${loss.from}–${loss.to} run.`
     );
   }
 

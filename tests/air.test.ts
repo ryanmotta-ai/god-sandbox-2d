@@ -7,6 +7,7 @@ import { AirSystem, airServiceAvailable, aircraftGenerationFor } from '../src/ci
 import { caravanTypeFor } from '../src/civ/CaravanSystem';
 import type { TradeRoute } from '../src/civ/Trade';
 import type { GoodId } from '../src/civ/Goods';
+import { WorldEra } from '../src/world/WeatherEras';
 
 rng.setSeed(20260805);
 
@@ -417,7 +418,62 @@ function pair(distance: number, techs: string[] = ['powered_flight', 'aviation']
 }
 
 // ============================================================
-// 13. What is on the road tells you the age of the realm
+// 13. Early flying is dangerous, and it gets safer
+// ============================================================
+{
+  const flownYear = (techs: string[], weather: WorldEra) => {
+    const { a, b, routes, cities, kingdoms } = pair(30, techs);
+    a.addBuilding('airport', a.x, a.y);
+    b.addBuilding('airport', b.x, b.y);
+    const air = new AirSystem();
+    air.weather = weather;
+    for (let tick = 0; tick < 7200 * 6; tick++) air.updateFlights(routes, cities, kingdoms);
+    return air;
+  };
+
+  const biplane = flownYear(['powered_flight'], WorldEra.GOLDEN_AGE);
+  const jet = flownYear(['powered_flight', 'aviation', 'jet_age'], WorldEra.GOLDEN_AGE);
+  assert.ok(biplane.yearlyLosses > 0, 'a biplane era has to lose aircraft');
+  assert.ok(
+    biplane.yearlyLosses > jet.yearlyLosses,
+    `flying gets safer: biplane lost ${biplane.yearlyLosses}, jet lost ${jet.yearlyLosses}`
+  );
+  assert.ok(biplane.lastLoss !== null, 'and a loss can be named for the chronicle');
+
+  // The world's climate is the weather, and ash is worse than a golden age.
+  let ashier = 0, calmer = 0;
+  for (let run = 0; run < 6; run++) {
+    ashier += flownYear(['powered_flight'], WorldEra.AGE_OF_ASHES).yearlyLosses;
+    calmer += flownYear(['powered_flight'], WorldEra.ABUNDANCE).yearlyLosses;
+  }
+  assert.ok(ashier > calmer, `a sky full of ash costs more aircraft: ${ashier} vs ${calmer}`);
+}
+
+// ============================================================
+// 14. A lost aircraft delivers nothing
+// ============================================================
+{
+  const { a, b, routes, cities, kingdoms } = pair(30, ['powered_flight']);
+  a.addBuilding('airport', a.x, a.y);
+  b.addBuilding('airport', b.x, b.y);
+  const good = 'tools' as GoodId;
+  a.stock.add(good, 300);
+  const air = new AirSystem();
+  air.weather = WorldEra.AGE_OF_ASHES;
+  for (let tick = 0; tick < 7200 * 4; tick++) air.updateFlights(routes, cities, kingdoms);
+
+  assert.ok(air.yearlyLosses > 0, 'the setup has to actually lose something');
+  // Whatever went down went down with its load: stock is still conserved
+  // between the two cities, never created, and the far end never receives
+  // more than the near end sent.
+  assert.equal(
+    300 - a.stock.get(good), b.stock.get(good),
+    'a crash must not leave phantom cargo at either end'
+  );
+}
+
+// ============================================================
+// 15. What is on the road tells you the age of the realm
 // ============================================================
 {
   assert.equal(caravanTypeFor('stone', 4), 'donkey');

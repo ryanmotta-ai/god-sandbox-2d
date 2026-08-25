@@ -3,6 +3,7 @@ import { TradeRoute } from './Trade';
 import { City } from './City';
 import { Kingdom } from './Kingdom';
 import { rng } from '../core/Random';
+import { WorldEra } from '../world/WeatherEras';
 
 /** The only thing air freight needs from the wider economy. */
 export interface AirMarket {
@@ -120,6 +121,37 @@ const INTERCEPTION_SURVIVAL = 0.45;
 /** What a raid costs the place underneath it, beyond the wreckage. */
 const BOMB_PROSPERITY_COST = 0.012;
 
+/**
+ * The chance a completed leg ends in a loss instead of an arrival.
+ *
+ * Early flying really was this dangerous, and the drop across the generations
+ * is the part worth modelling: the biplane era loses aircraft often enough that
+ * a long service is a bad idea on its own terms, without any rule saying so,
+ * while a jet is lost about once in a thousand legs. It is the same argument
+ * range makes, said a second way.
+ */
+const LOSS_RATE: Record<AircraftGeneration, number> = {
+  biplane: 0.022,
+  propliner: 0.004,
+  jet: 0.0008
+};
+
+/**
+ * What the world's climate does to that risk.
+ *
+ * A sky full of ash and a winter that lasts half the year are flying weather in
+ * the way a golden age is not, and the world already tracks exactly this. No
+ * separate storm system: the era the whole world is living through is the
+ * weather, and it grounds nothing outright — it just makes the odds worse.
+ */
+const WEATHER_RISK: Record<WorldEra, number> = {
+  [WorldEra.GOLDEN_AGE]: 1,
+  [WorldEra.ABUNDANCE]: 0.8,
+  [WorldEra.AGE_OF_ASHES]: 2.4,
+  [WorldEra.DARK_AGE]: 1.5,
+  [WorldEra.FROZEN_AGE]: 2.1
+};
+
 /** The generation a realm flies, which is simply the best one it has learnt. */
 export function aircraftGenerationFor(kingdom: Kingdom | null | undefined): AircraftGeneration {
   if (kingdom?.research.knows('jet_age')) return 'jet';
@@ -231,6 +263,11 @@ export class AirSystem {
   public yearlySorties: number = 0;
   /** Health destroyed by bombing this year, across every target. */
   public yearlyBombDamage: number = 0;
+  /** Aircraft lost this year, and the last one, so a loss can be named. */
+  public yearlyLosses: number = 0;
+  public lastLoss: { from: string; to: string; payload: FlightPayload } | null = null;
+  /** The world's climate, which is the only weather a flight has to argue with. */
+  public weather: WorldEra = WorldEra.GOLDEN_AGE;
 
   /** Everything in the air, for the renderer, which does not care why it flies. */
   public *airborne(): Generator<Flight> {
@@ -245,6 +282,25 @@ export class AirSystem {
     this.yearlyFreight = 0;
     this.yearlySorties = 0;
     this.yearlyBombDamage = 0;
+    this.yearlyLosses = 0;
+  }
+
+  /**
+   * Whether this leg ended in a loss rather than an arrival.
+   *
+   * Rolled at the arrival because that is where a leg is resolved, not because
+   * aircraft only fall out of the sky over airfields. A lost aircraft delivers
+   * nothing: whatever was aboard goes with it, which is what makes an early
+   * service a real gamble rather than a slower one.
+   */
+  private lost(flight: Flight): boolean {
+    const risk = LOSS_RATE[flight.generation] * (WEATHER_RISK[this.weather] ?? 1);
+    if (!rng.chance(risk)) return false;
+    this.yearlyLosses++;
+    this.lastLoss = {
+      from: flight.fromCityName, to: flight.toCityName, payload: flight.payload
+    };
+    return true;
   }
 
   /**
@@ -351,7 +407,16 @@ export class AirSystem {
       sortie.progress = 1;
       sortie.direction = -1;
       sortie.turnaround = TURNAROUND_TICKS;
-      if (outbound) this.bomb(sortie, target, year);
+      if (outbound) {
+        // A raid that does not arrive does no damage. The interception rule
+        // handles what the defending fighters turn back; this is everything
+        // else — the weather, the flak and the machine itself.
+        if (this.lost(sortie)) {
+          this.sorties.delete(`sortie:${sortie.fromCityId}:${sortie.toCityId}`);
+          return;
+        }
+        this.bomb(sortie, target, year);
+      }
     } else if (sortie.progress <= 0) {
       sortie.progress = 0;
       sortie.direction = 1;
@@ -588,6 +653,14 @@ export class AirSystem {
    */
   private arrive(flight: Flight, route: TradeRoute, origin: City, at: City, market?: AirMarket): void {
     this.yearlyFlights++;
+    if (this.lost(flight)) {
+      // Whatever was aboard went with it. Dropping the service here leaves the
+      // route unserved, and the next tick opens a replacement — a realm buying
+      // another aircraft, which is the right amount of consequence: expensive
+      // in lost cargo and a pause, not the permanent end of the line.
+      this.flights.delete(route.id);
+      return;
+    }
     if (flight.payload === 'passengers') this.carryPassengers(flight, origin, at);
     else this.unload(flight, origin, at, market);
     Object.assign(flight, this.manifest(route, at, flight.generation));
