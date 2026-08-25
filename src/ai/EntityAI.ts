@@ -546,7 +546,20 @@ export class SimulationEngine {
 
     // Update maritime ships, overland caravans and air services
     this.naval.updateShips(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
-    this.caravans.updateCaravans(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
+    // Overland freight moves under the hood.
+    //
+    // Nothing economic is lost: the goods are taken from one stockpile and put
+    // in the other by the trade tick itself, and a caravan never carried them —
+    // it was the picture of the haul, not the haul. What a convoy did carry was
+    // the wear. It incremented `roadTraffic` on every tile it crossed, and
+    // enough passes turned wilderness into a dirt track and then into a road.
+    // That is where the web of lines over the map came from, so standing the
+    // convoys down is also what stops the world being drawn on.
+    //
+    // CaravanSystem is left whole rather than deleted: it is the right code for
+    // a job this world may still want — short hauls between a city and its own
+    // mines, which never crossed the wilderness and never caused the problem.
+    this.caravans.standDown();
     // The world's climate era is the flying weather; an ash-choked sky loses
     // aircraft that a golden age would have brought home.
     this.air.weather = this.currentEra;

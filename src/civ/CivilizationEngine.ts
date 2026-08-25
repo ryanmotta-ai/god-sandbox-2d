@@ -1109,7 +1109,7 @@ export class CivilizationEngine {
     UrbanPlanner.recordConstruction(city, world.tileMap, building.id);
 
     // Auto-pave street connecting new building to city hall (dirt unless the
-    // kingdom has road-building tech, matching paveTradeRoad below)
+    // kingdom has road-building tech)
     this.paveRoadBetween(city, pick.spot.x, pick.spot.y, world);
     UrbanDistrictPlanner.recordConstruction(city, kingdom, world.tileMap, building, world.year);
 
@@ -1256,30 +1256,25 @@ export class CivilizationEngine {
   }
 
   /**
-   * Builds the first road between two trading cities when a trade agreement
-   * opens. Both ends contribute: the works start from each city and meet in
-   * the middle, so a rich city can carry a road most of the way to a poor one.
-   * Returns the surveyed line so the route remembers what it crosses — the
-   * capacity of that route is read straight back off these tiles.
+   * Works out the line a land route follows, without building anything on it.
+   *
+   * This used to survey and then pave, so a trade agreement anywhere — in the
+   * stone age, across forest, swamp and mountain — cut a permanent track into
+   * the world. Two realms shaking hands was enough to scar the map, and with
+   * agreements growing as the square of the number of realms, the wilderness
+   * filled up with dirt lines that nothing in the fiction had decided to build.
+   *
+   * The route still needs to know its line: distance and the ground it crosses
+   * set what the haul costs, and `route.path` is read straight back for that.
+   * So the survey stays and the works are gone. Overland trade happens without
+   * leaving a mark, the way it does in the ages before anyone can afford to
+   * make a road; the visible long-distance infrastructure of this world starts
+   * with the railway.
    */
-  private paveTradeRoad(fromCity: City, toCity: City, world: CivWorld): { x: number; y: number }[] {
+  private surveyTradeRoute(fromCity: City, toCity: City, world: CivWorld): { x: number; y: number }[] {
     const level = Math.max(this.roadGradeFor(fromCity, world), this.roadGradeFor(toCity, world));
     const survey = surveyRoad(world.tileMap, fromCity.x, fromCity.y, toCity.x, toCity.y, level);
-    if (survey.path.length === 0) return [];
-
-    const fromWorks = layRoad(fromCity, world.tileMap, survey, level);
-    this.reportRoadWorks(fromCity, fromWorks, world, `the road to ${toCity.name}`);
-    // The far end builds back toward the near one, so an unfinished road is a
-    // gap in the middle rather than a stub hanging off one city.
-    const reverse: RoadSurvey = { ...survey, path: [...survey.path].reverse() };
-    const toWorks = layRoad(toCity, world.tileMap, reverse, level);
-    this.reportRoadWorks(toCity, toWorks, world, `the road to ${fromCity.name}`);
-
-    for (const step of survey.path) {
-      const tile = world.tileMap.getTile(Math.floor(step.x), Math.floor(step.y));
-      if (tile && tile.roadLevel > 0) tile.roadTraffic = Math.max(tile.roadTraffic, 60);
-    }
-    return survey.path;
+    return survey.path.length === 0 ? [] : survey.path;
   }
 
   /** Repairs buildings and roads damaged in war, spending real materials. */
@@ -3742,7 +3737,7 @@ export class CivilizationEngine {
       }
     }
     if (!best) return;
-    const path = best.kind === 'overland' ? this.paveTradeRoad(best.from, best.to, world) : undefined;
+    const path = best.kind === 'overland' ? this.surveyTradeRoute(best.from, best.to, world) : undefined;
     const route = world.trade.openRoute({
       fromCityId: best.from.id, toCityId: best.to.id,
       fromKingdomId: seller.id, toKingdomId: buyer.id,
@@ -3888,7 +3883,7 @@ export class CivilizationEngine {
    * stripped, and taxed by wastage on the road.
    *
    * ponytail: no pathfinding — distance alone gates a shipment. Realm cities are
-   * already road-linked by `paveTradeRoad`, and routing this properly would want
+   * already linked by a surveyed route, and routing this properly would want
    * the road-capacity model the inter-realm routes use. Worth upgrading if
    * hauling should respect a blocked or ruined road.
    */
@@ -3980,7 +3975,7 @@ export class CivilizationEngine {
       // re-evaluated every year against the live condition of the road.
       // Maritime routes are capped by port capacity instead of a land path.
       const routePath = kind === 'overland'
-        ? this.paveTradeRoad(fromCity, toCity, world)
+        ? this.surveyTradeRoute(fromCity, toCity, world)
         : undefined;
 
       const route = world.trade.openRoute({

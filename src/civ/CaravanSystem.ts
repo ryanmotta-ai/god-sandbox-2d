@@ -175,12 +175,33 @@ export class CaravanSystem {
     this.renderIndex.rebuild(this.activeCaravans.values());
   }
 
+  /**
+   * Version of the road network the last sweep settled on, so a world with
+   * nothing left to decay stops being walked every year. -1 means never swept.
+   */
+  private decaySettledAt: number = -1;
+
   public decayRoadTraffic(tileMap: TileMap): void {
+    // Nothing has laid a road since the last sweep found nothing to do, so
+    // there is nothing to find this time either. The whole grid used to be
+    // walked once a year to touch a few hundred tiles, and now that no convoy
+    // wears tracks into the wilderness it would usually touch none at all.
+    if (this.decaySettledAt === tileMap.roadNetworkVersion) return;
+
     let topologyChanged = false;
+    let anyTraffic = false;
     for (let x = 0; x < tileMap.width; x++) {
       for (let y = 0; y < tileMap.height; y++) {
         const tile = tileMap.grid[x][y];
+        // A street belongs to a city, and a city maintains its own streets.
+        // Without this they rot: the traffic that used to keep them up came
+        // from convoys, and there are no convoys on the roads any more — so a
+        // town would quietly lose its pavement over a few decades. What is left
+        // unclaimed out in the wilderness still fades, which is how the tracks
+        // in an older save clear themselves once nothing walks them.
+        if (tile.cityId) continue;
         if (tile.roadTraffic > 0) {
+          anyTraffic = true;
           tile.roadTraffic = Math.floor(tile.roadTraffic * ROAD_TRAFFIC_DECAY);
 
           // Degrade road level if traffic drops too low
@@ -201,6 +222,21 @@ export class CaravanSystem {
       }
     }
     void topologyChanged;
+    if (!anyTraffic) this.decaySettledAt = tileMap.roadNetworkVersion;
+  }
+
+  /**
+   * Clears the roads of long-distance convoys, and keeps them clear.
+   *
+   * Called in place of `updateCaravans` while overland freight is invisible.
+   * It has to run rather than simply not calling anything, because a save from
+   * before the change carries convoys mid-route that would otherwise sit frozen
+   * on the map for ever.
+   */
+  public standDown(): void {
+    if (this.activeCaravans.size === 0) return;
+    this.activeCaravans.clear();
+    this.renderIndex.clear();
   }
 
   public updateCaravans(

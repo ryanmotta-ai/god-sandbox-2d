@@ -303,9 +303,22 @@ export function transportCostPerUnit(
   worldPrice: number,
   avgRoadLevel: number
 ): number {
+  // 1.5 used to be the penalty for hauling over unmade ground, and it was rare:
+  // a trade agreement laid a road, so a route was on dirt within a few years
+  // and paid 1.2. Now that overland trade leaves the wilderness alone, unmade
+  // ground is the normal condition rather than a temporary one, so the baseline
+  // is rebased onto what a route actually used to pay. Without this every land
+  // route in the world would quietly take a 25% rise it can never work off, and
+  // the ancient economy would be throttled by a change meant to be cosmetic.
+  //
+  // The road term is kept because it is still live at the ends, where a route
+  // runs through a city's own streets — and because it is what a paved highway
+  // would use if this world ever builds one. Between cities the improvement now
+  // comes from the railway, which delivers on its own account and never asks
+  // this function anything.
   return kind === 'maritime'
     ? worldPrice * distance * 0.003
-    : worldPrice * distance * 0.004 * (1.5 - 0.3 * avgRoadLevel);
+    : worldPrice * distance * 0.004 * (1.2 - 0.3 * avgRoadLevel);
 }
 
 export function describeRoute(route: TradeRoute): string {
