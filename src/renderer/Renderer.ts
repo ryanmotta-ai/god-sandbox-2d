@@ -25,7 +25,12 @@ import { PROP_SCALE, propAspect, roadProp, type RoadProp } from './RoadSprites';
 import { CARAVAN_FRAMES, CARAVAN_PX, STRIDE_TILES, caravanSprite, type CaravanView } from './CaravanSprites';
 import type { SpatialHash } from '../core/SpatialHash';
 import { perfProfiler } from '../perf/PerformanceProfiler';
-import { BUILDING_DRAW_SCALE } from './CityVisualResolver';
+import { BUILDING_DRAW_SCALE, resolveCityBuildingVisual } from './CityVisualResolver';
+import { resolveEntitySheetAnimation, resolveEntityVisualProfile } from './EntityVisualResolver';
+import { cityAssetImage, entitySheetCell, masterBuildingImage } from './SpriteImages';
+import { MASTER_ASSET_MANIFEST } from '../assets/MasterAssetManifest';
+import type { Building } from '../civ/Building';
+import { hashString, hashToUnit } from '../core/Random';
 import { getCityBlueprint } from '../civ/CityBlueprints';
 
 /**
@@ -715,6 +720,77 @@ export class PixelRenderer {
     this.ctx.fill();
   }
 
+
+  /**
+   * Draws a building from the PNG packs, returning false when neither pack has
+   * artwork for it so the caller falls back to the generated sprite.
+   *
+   * Both packs describe a sprite as a source canvas plus a normalized ground
+   * anchor, so placement is the same sum for both: put the anchor on the point
+   * the generated sprite already stands on — the horizontal centre of the plot,
+   * at the bottom edge of its tile — and let the artwork's own proportions
+   * decide the rest. That keeps a building's feet where the shadow, the lot
+   * backdrop and the health bar already expect them, whatever its aspect ratio.
+   */
+  private drawBuildingArt(
+    city: City,
+    b: Building,
+    screenPos: { x: number; y: number },
+    tileSize: number,
+    era: string,
+    hpRatio: number,
+    levelScale: number
+  ): boolean {
+    const groundX = screenPos.x + tileSize * 0.5;
+    const groundY = screenPos.y + tileSize;
+    const visual = resolveCityBuildingVisual(city, b, '');
+
+    const place = (
+      image: HTMLImageElement, widthTiles: number, heightTiles: number,
+      anchorX: number, anchorY: number, scale: number, offsetX = 0, offsetY = 0
+    ): void => {
+      const w = widthTiles * tileSize * scale;
+      const h = heightTiles * tileSize * scale;
+      this.ctx.drawImage(
+        image,
+        groundX + offsetX * tileSize - anchorX * w,
+        groundY + offsetY * tileSize - anchorY * h,
+        w, h
+      );
+    };
+
+    let drew = false;
+    if (visual.assetId) {
+      const image = cityAssetImage(visual.assetId);
+      if (image) {
+        place(image, visual.width, visual.height, visual.anchorX, visual.anchorY, visual.scale * BUILDING_DRAW_SCALE);
+        drew = true;
+      }
+    }
+    if (!drew) {
+      // The library pack carries the eras and the building types the city pack
+      // never covered — an industrial tenement, a refinery, an oil well.
+      const art = masterBuildingImage(b.type, era, b.level, hpRatio, hashToUnit(hashString(b.id), Math.floor(b.x), Math.floor(b.y)));
+      if (art) {
+        const perTile = MASTER_ASSET_MANIFEST.tilePixels;
+        place(
+          art.image, art.entry.canvas[0] / perTile, art.entry.canvas[1] / perTile,
+          art.entry.anchor[0], art.entry.anchor[1], levelScale
+        );
+        drew = true;
+      }
+    }
+    if (!drew) return false;
+
+    // Props belong to whichever building the resolver hung them on, so they
+    // ride along only once that building itself is drawn from artwork.
+    for (const deco of visual.decorations) {
+      const image = cityAssetImage(deco.assetId);
+      if (!image) continue;
+      place(image, deco.width, deco.height, deco.anchorX, deco.anchorY, BUILDING_DRAW_SCALE, deco.offsetX, deco.offsetY);
+    }
+    return true;
+  }
 
   private drawBuildingAmbientEffects(b: { id: string; type: string; x: number; y: number }, particles: ParticleManager): void {
     const last = this.buildingFxTime.get(b.id) ?? -999;
@@ -2076,7 +2152,9 @@ export class PixelRenderer {
           const drawH = tileSize * 1.15 * levelScale;
           const drawX = screenPos.x - (drawW - tileSize) * 0.5;
           const drawY = screenPos.y - tileSize * 0.15 - (drawH - tileSize * 1.15);
-          this.ctx.drawImage(sprite, drawX, drawY, drawW, drawH);
+          if (!this.drawBuildingArt(city, b, screenPos, tileSize, era, hpRatio, levelScale)) {
+            this.ctx.drawImage(sprite, drawX, drawY, drawW, drawH);
+          }
 
           this.drawBuildingAmbientEffects(b, particles);
 
@@ -2201,7 +2279,20 @@ export class PixelRenderer {
           isGreatPerson: e.isGreatPerson,
           greatPersonType: e.greatPersonType
         });
-        this.ctx.drawImage(sprite, spriteX, spriteY, spriteSize, spriteSize);
+        // The sheets carry four directions and four animations per person; the
+        // resolver already decides which sheet a given entity belongs to, and
+        // maps this renderer's wider animation set onto the four it holds.
+        const cell = entitySheetCell(
+          resolveEntityVisualProfile(e), direction, resolveEntitySheetAnimation(animation), frame
+        );
+        if (cell) {
+          this.ctx.drawImage(
+            cell.image, cell.sourceX, cell.sourceY, cell.size, cell.size,
+            spriteX, spriteY, spriteSize, spriteSize
+          );
+        } else {
+          this.ctx.drawImage(sprite, spriteX, spriteY, spriteSize, spriteSize);
+        }
 
         if (animation === 'attack' || animation === 'shoot' || animation === 'gather' || animation === 'build') {
           this.drawEntityActionEffects(e, centerX, centerY, entitySize, direction, animation, frame, particles);
