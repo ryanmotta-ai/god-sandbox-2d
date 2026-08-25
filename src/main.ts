@@ -629,6 +629,12 @@ class AethoriaGame implements GameContext {
       // player put it. `playMagic` is the closest thing to a fanfare.
       sound.playMagic();
     });
+
+    events.on('firstFlight', (d: any) => {
+      if (!this.inGame) return;
+      this.toast(`The first flight in history: ${d.from} to ${d.to}`, 'divine');
+      sound.playMagic();
+    });
   }
 
   private isPaintablePower(): boolean {
@@ -903,7 +909,8 @@ class AethoriaGame implements GameContext {
       undefined,
       undefined,
       undefined,
-      this.sim.spatialHash
+      this.sim.spatialHash,
+      this.sim.air.flights.values()
     );
     perfProfiler.record('render', performance.now() - renderStarted);
     perfProfiler.record('frame', performance.now() - frameStarted);

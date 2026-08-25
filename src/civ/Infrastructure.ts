@@ -13,7 +13,7 @@ import { rng } from '../core/Random';
  */
 
 /** Building types a besieger specifically targets — the economic arteries. */
-const STRATEGIC_BUILDINGS = ['harbor', 'port', 'factory', 'refinery', 'granary', 'market', 'workshop'];
+const STRATEGIC_BUILDINGS = ['airport', 'harbor', 'port', 'factory', 'refinery', 'granary', 'market', 'workshop'];
 
 /** Continuous effective road grade along a surveyed path (0..3). */
 export function avgEffectiveRoadLevel(path: { x: number; y: number }[] | undefined, tileMap: TileMap): number {
@@ -141,6 +141,7 @@ const REPAIR_PRIORITY: Record<string, number> = {
   town_center: 0,
   harbor: 1,
   port: 2,
+  airport: 2.5,
   granary: 3,
   farm: 4,
   pasture: 5,

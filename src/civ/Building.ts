@@ -42,6 +42,7 @@ export type BuildingType =
   | 'port'
   | 'refinery'
   | 'oil_well'
+  | 'airport'
   // Power
   | 'barracks'
   | 'keep'
@@ -258,6 +259,17 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     jobs: 12,
     craftCapacity: 5.5,
     description: 'Produção em massa. Sua produção é baseada em receitas; sem aço, borracha e combustível, as máquinas silenciam.'
+  },
+
+  airport: {
+    type: 'airport',
+    name: 'Airport',
+    icon: '✈️',
+    category: 'infrastructure',
+    maxHp: 340,
+    cost: { stone: 120, steel: 60, fuel: 30, tools: 25 },
+    jobs: 10,
+    description: 'Runway, apron and tower. Freight and passengers move between any two of these regardless of what lies between them.'
   },
 
   oil_well: {
