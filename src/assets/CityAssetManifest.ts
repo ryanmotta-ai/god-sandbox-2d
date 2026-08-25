@@ -155,9 +155,18 @@ export const CITY_ASSET_MANIFEST = {
   ] as readonly CityAssetEntry[]
 } as const;
 
-const CITY_ASSET_URLS = typeof import.meta.glob === 'function'
-  ? import.meta.glob('./city/**/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
-  : {};
+/**
+ * `import.meta.glob` is a build-time macro: the bundler replaces the call with
+ * an object literal, and at runtime `import.meta.glob` itself is undefined. A
+ * `typeof … === 'function'` guard around it therefore always took the empty
+ * branch and threw the resolved URLs away, so no city PNG ever loaded in
+ * either renderer. The try/catch keeps the manifest importable from plain Node
+ * (tests, tooling), where the call is untransformed and throws.
+ */
+let CITY_ASSET_URLS: Record<string, string> = {};
+try {
+  CITY_ASSET_URLS = import.meta.glob('./city/**/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+} catch { /* no bundler: artwork resolves only inside the app */ }
 
 /** Returns undefined for planned assets whose final PNG has not been added yet. */
 export function resolveCityAssetUrl(entry: CityAssetEntry): string | undefined {

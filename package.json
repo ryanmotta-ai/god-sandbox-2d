@@ -11,7 +11,8 @@
     "tauri:build": "tauri build",
     "test:platform": "tsx tests/platform-v1b.test.ts",
     "test:perf": "tsx tests/perf-v1.test.ts",
-    "bench:perf": "tsx tests/perf-v1.bench.ts"
+    "bench:perf": "tsx tests/perf-v1.bench.ts",
+    "test:art": "tsx tests/sprite-art.test.ts"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

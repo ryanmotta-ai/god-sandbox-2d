@@ -189,9 +189,18 @@ export const MASTER_ASSET_MANIFEST = {
   assets: INPUTS.map(asset)
 } as const;
 
-const MASTER_ASSET_URLS = typeof import.meta.glob === 'function'
-  ? import.meta.glob('./library/**/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>
-  : {};
+/**
+ * `import.meta.glob` is a build-time macro: the bundler replaces the call with
+ * an object literal, and at runtime `import.meta.glob` itself is undefined. A
+ * `typeof … === 'function'` guard around it therefore always took the empty
+ * branch and threw the resolved URLs away, so no library PNG ever loaded in
+ * either renderer. The try/catch keeps the manifest importable from plain Node
+ * (tests, tooling), where the call is untransformed and throws.
+ */
+let MASTER_ASSET_URLS: Record<string, string> = {};
+try {
+  MASTER_ASSET_URLS = import.meta.glob('./library/**/*.png', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+} catch { /* no bundler: artwork resolves only inside the app */ }
 
 export function resolveMasterAssetUrl(entry: MasterAssetEntry): string | undefined {
   return MASTER_ASSET_URLS[entry.source];
