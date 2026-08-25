@@ -10,7 +10,7 @@ import { hashString } from '../core/Random';
 import { fundUpgrade, upgradeCost } from './RoadEngineering';
 import { SpatialHash } from '../core/SpatialHash';
 
-export type CaravanType = 'donkey' | 'camel' | 'cart';
+export type CaravanType = 'donkey' | 'camel' | 'cart' | 'wagon' | 'lorry' | 'truck';
 
 export interface OverlandCaravan {
   id: string;
@@ -48,6 +48,20 @@ export interface OverlandCaravan {
  * Donkeys are the neutral generalist. Multipliers stack with the road bonus.
  */
 const TERRAIN_AFFINITY: Record<CaravanType, Partial<Record<string, number>>> = {
+  wagon: {
+    grass: 1.1, soil: 1.05, savanna: 1.05, sand: 0.7,
+    forest: 0.7, swamp: 0.45, tundra: 0.8, snow: 0.6, mountain: 0.25
+  },
+  // Anything with an engine lives on the surface under it. A lorry on a good
+  // road is transformative; a lorry in a swamp is a very heavy sledge.
+  lorry: {
+    grass: 0.75, soil: 0.7, savanna: 0.8, sand: 0.5,
+    forest: 0.45, swamp: 0.25, tundra: 0.6, snow: 0.4, mountain: 0.2
+  },
+  truck: {
+    grass: 0.6, soil: 0.55, savanna: 0.65, sand: 0.4,
+    forest: 0.35, swamp: 0.2, tundra: 0.5, snow: 0.35, mountain: 0.15
+  },
   camel: {
     sand: 1.35, savanna: 1.25, soil: 1.05, grass: 0.95,
     forest: 0.75, swamp: 0.7, tundra: 0.65, snow: 0.5, mountain: 0.35
@@ -81,8 +95,30 @@ const TERRAIN_AFFINITY: Record<CaravanType, Partial<Record<string, number>>> = {
 const CARAVAN_SPEED: Record<CaravanType, number> = {
   donkey: 0.030,
   camel: 0.038,
-  cart: 0.034
+  cart: 0.034,
+  wagon: 0.045,
+  lorry: 0.085,
+  truck: 0.130
 };
+
+/**
+ * What is on the road, given what the realm knows how to build.
+ *
+ * Traffic is the most legible clock a civilisation has: you can tell an age by
+ * what is going past. A realm that has only just left the stone age moves
+ * goods on the back of an animal; one with wheels and made roads runs carts
+ * and then covered wagons; steam puts an engine in front of the load, and the
+ * modern era puts the load in a box behind a tractor unit. Distance still
+ * decides between the two options an era offers, because it always did — the
+ * animal that can keep going is the one that goes far.
+ */
+export function caravanTypeFor(era: string, distance: number): CaravanType {
+  if (era === 'modern') return 'truck';
+  if (era === 'industrial') return 'lorry';
+  if (era === 'classical') return distance > 14 ? 'wagon' : 'cart';
+  if (era === 'iron') return distance > 10 ? 'cart' : 'donkey';
+  return distance > 15 ? 'camel' : 'donkey';
+}
 
 /** Road traffic thresholds for road evolution */
 const ROAD_UPGRADE_THRESHOLDS = {
@@ -93,6 +129,9 @@ const ROAD_UPGRADE_THRESHOLDS = {
   stone: 40,     // traffic >= 40 → Stone Road (Level 2)
   imperial: 110  // traffic >= 110 → Imperial Highway (Level 3)
 };
+
+/** Eras in order, so the more advanced of two realms can be picked out. */
+const ERA_ORDER = ['stone', 'bronze', 'iron', 'classical', 'industrial', 'modern'];
 
 /** Minimum traffic fraction to maintain a road level (below this, road degrades) */
 const ROAD_DEGRADE_FRACTION = 0.12;
@@ -188,7 +227,12 @@ export class CaravanSystem {
       // Spawn caravan if not present for this overland route
       if (!this.activeCaravans.has(route.id)) {
         const dist = Math.hypot(toCity.x - fromCity.x, toCity.y - fromCity.y);
-        const caravanType: CaravanType = dist > 15 ? 'camel' : dist > 8 ? 'cart' : 'donkey';
+        // The more advanced of the two ends sets what runs the route: a realm
+        // with lorries does not send donkeys to meet its neighbour's carts.
+        const eras = [fromKingdom, toKingdom]
+          .map(k => (k ? k.research.currentEra() : 'stone'));
+        const era = ERA_ORDER.indexOf(eras[0]) >= ERA_ORDER.indexOf(eras[1]) ? eras[0] : eras[1];
+        const caravanType: CaravanType = caravanTypeFor(era, dist);
         const landPath = SimplePathfinder.findPath(fromCity.x, fromCity.y, toCity.x, toCity.y, tileMap, 'land', 3000, hashString(route.id));
 
         // Don't spawn caravan if no valid land path exists
