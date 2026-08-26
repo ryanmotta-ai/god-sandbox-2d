@@ -229,7 +229,7 @@ export class GreatPersonManager {
         const remaining = MONUMENT_TYPES.filter(m => !alreadyBuilt.has(m.type));
         if (remaining.length === 0) {
           // Every wonder already stands. Endow the treasury instead.
-          kingdom.treasury.add('gold', 250);
+          kingdom.addGold(250);
           chronicle.log(
             year,
             'great_person',
@@ -257,7 +257,7 @@ export class GreatPersonManager {
         // settlement large enough to carry them.
         const wonderReady = city.tier !== 'camp' && city.tier !== 'hamlet' && city.hasFreeBuildingSlot();
         if (!wonderReady) {
-          kingdom.treasury.add('gold', 250);
+          kingdom.addGold(250);
           chronicle.log(
             year,
             'great_person',
@@ -279,7 +279,7 @@ export class GreatPersonManager {
         const site = UrbanPlanner.findBuildingSites(city, BUILDINGS[monument.type], tileMap, wonderSurveyRadius(city), 1)[0]
           ?? nearestFreeGround(city, tileMap);
         if (!site) {
-          kingdom.treasury.add('gold', 250);
+          kingdom.addGold(250);
           chronicle.log(
             year,
             'great_person',

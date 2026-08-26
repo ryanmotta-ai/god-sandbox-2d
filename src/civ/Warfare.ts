@@ -316,7 +316,6 @@ export class WarfareSystem {
         this.releaseMercenaryCompany(company.id, world, !canAfford ? 'inadimplência' : 'fim do contrato');
       } else {
         employer.takeGold(company.annualFee);
-        employer.treasury.take('gold', company.annualFee);
       }
     }
   }
@@ -368,7 +367,6 @@ export class WarfareSystem {
     if (kingdom.gold < company.hiringCost) return false;
 
     kingdom.takeGold(company.hiringCost);
-    kingdom.treasury.take('gold', company.hiringCost);
     company.employerKingdomId = kingdomId;
     company.contractEndYear = world.year + Math.max(1, durationYears);
     kingdom.mercenaryCompanyIds.add(company.id);
@@ -680,7 +678,6 @@ export class WarfareSystem {
 
       if (hasGold) {
         kingdom.takeGold(goldUpkeep);
-        kingdom.treasury.take('gold', goldUpkeep);
       } else {
         for (const armyId of kingdom.armyIds) {
           const army = this.armies.get(armyId);
