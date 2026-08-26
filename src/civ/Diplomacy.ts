@@ -58,6 +58,15 @@ export interface Truce {
   reason: string;
 }
 
+/**
+ * How warm two realms get on goodwill alone, with no pact between them.
+ *
+ * Sits above `COALITION_RELATION` (45) so leagues can still form, and far
+ * enough above the war grievance threshold that peaceful neighbours are
+ * genuinely at peace rather than one bad harvest from invasion.
+ */
+export const NEUTRAL_WARMTH_CEILING = 55;
+
 export class DiplomacyManager {
   // Key: "k1_id:k2_id" -> numeric relation (-100 to +100)
   private relations: Map<string, number> = new Map();
@@ -104,7 +113,30 @@ export class DiplomacyManager {
 
   public changeRelation(k1: string, k2: string, delta: number): void {
     const current = this.getRelation(k1, k2);
-    this.setRelation(k1, k2, current + delta);
+    this.setRelation(k1, k2, current + this.admissibleWarmth(k1, k2, current, delta));
+  }
+
+  /**
+   * How much of a warming delta two realms are actually allowed to feel.
+   *
+   * Goodwill alone plateaus; devotion has to be bought with a pact. Without
+   * this, every warming source in the game — kin drift, shared fear of a
+   * hegemon, two mild kings approving of each other — stacked unopposed and
+   * pinned the entire map at +99, which left no king anywhere with a grievance
+   * and produced worlds that never fought a single war.
+   *
+   * This lives here, on the one function every relation change routes through,
+   * because it was previously enforced at two call sites and missed at the
+   * third and largest one (`tickGeopolitics`) — and a ceiling you have to
+   * remember to apply is not a ceiling. Hostility is never clamped: a realm can
+   * always be hated all the way down.
+   */
+  private admissibleWarmth(k1: string, k2: string, current: number, delta: number): number {
+    if (delta <= 0 || current + delta <= NEUTRAL_WARMTH_CEILING) return delta;
+    for (const alliance of this.alliances.values()) {
+      if (alliance.members.has(k1) && alliance.members.has(k2)) return delta;
+    }
+    return Math.max(0, NEUTRAL_WARMTH_CEILING - current);
   }
 
   public isAtWar(k1: string, k2: string): boolean {

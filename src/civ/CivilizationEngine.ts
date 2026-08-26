@@ -122,7 +122,6 @@ const LOYALTY_DRIFT = 0.12;
  * The dial between a friendly world and a tense one. Below this, courts warm to
  * each other for the reasons the drift lists; above it, only an alliance does.
  */
-const NEUTRAL_WARMTH_CEILING = 55;
 /** How far from a building the street plan is worth paving. */
 const STREET_SERVICE_REACH = 2;
 /**
@@ -2798,15 +2797,10 @@ export class CivilizationEngine {
         if (!a.knownKingdoms.has(b.id)) continue;
 
         // A shared fear is worth more than an old grievance — but it buys wary
-        // cooperation, not devotion. Unclamped, this was the single biggest
-        // source of warmth in the world: every realm frightened of the same
-        // neighbour warmed to every other by up to twelve points a pass, which
-        // pinned the whole map at +99 and left no king anywhere with a grievance.
+        // cooperation, not devotion, so it is subject to the neutral ceiling in
+        // `changeRelation` like every other warming source.
         const warmth = (3 + alarm * 9) * (0.7 + (a.culture.diplomaticTrust + b.culture.diplomaticTrust) * 0.3);
-        const current = world.diplomacy.getRelation(a.id, b.id);
-        if (current < NEUTRAL_WARMTH_CEILING) {
-          world.diplomacy.changeRelation(a.id, b.id, Math.min(warmth, NEUTRAL_WARMTH_CEILING - current));
-        }
+        world.diplomacy.changeRelation(a.id, b.id, warmth);
 
         // Past mutual warmth, the fear becomes a signature.
         if (
@@ -3043,19 +3037,6 @@ export class CivilizationEngine {
         // Allies don't drift further into infatuation; their pact is stable
         // unless the negatives above pull it down (then it can dissolve).
         let finalDrift = alreadyAllied ? Math.min(0, drift) : drift;
-        /**
-         * Courts that have never done anything for each other stay polite, not
-         * devoted.
-         *
-         * Trade used to be the ceiling on this without anybody meaning it to be:
-         * an embargo or a tariff dispute pulled a relation down as fast as
-         * affinity pushed it up. With trade gone, two realms drifted to +99 just
-         * by existing near each other, so no king ever had a grievance and a
-         * world of butchers never fought a war. Warmth beyond this line has to
-         * be bought with an actual pact — which is what an alliance is, and why
-         * allies are exempt.
-         */
-        if (!alreadyAllied && relation >= NEUTRAL_WARMTH_CEILING) finalDrift = Math.min(0, finalDrift);
         if (Math.abs(finalDrift) >= 0.15) world.diplomacy.changeRelation(a.id, b.id, finalDrift);
 
         const newRelation = world.diplomacy.getRelation(a.id, b.id);
