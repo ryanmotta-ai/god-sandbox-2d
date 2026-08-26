@@ -279,6 +279,26 @@ Três coisas contraintuitivas:
   exército, a alavanca é `REGIMENT_SIZE` ou fazer `WarFronts` apontar vários
   regimentos ao mesmo setor — não a leva.
 
+**Pedra.** Duas portas: `gatherLooseStone` (coleta manual do assentamento, 0.35
+por habitante/ano) e a pedreira (12, e precisa estar **sobre** o depósito).
+Pedra **não** está em `RENEWABLE_GOODS`, então depósito extraído acaba para
+sempre e a pedreira é aposentada com `depositExhausted`.
+
+A lição aqui vale para qualquer bem: **escassez pode ser vazão, não reserva.**
+Um mundo medido tinha 28 mil de pedra no chão e havia gasto 5% em 30 anos,
+enquanto toda cidade ficava abaixo dos 30 que um quartel custa. Aumentar
+depósitos em `Deposits.ts` não teria mudado nada. Meça o chão (`resourceAmount`
+somado) e o alcance (`city.resourcesByGood.get(bem)`) antes de mexer em
+quantidade — `tests/balance-live.probe.ts` tem as duas colunas.
+
+**Cuidado com `produces` vs `extractionRate`.** Para prédio com
+`resourceMode: 'required'` o motor extrai e faz `continue` **antes** do bloco
+`produces`. Mas `produces` é o que o inspetor mostra ao jogador e o que
+`scoreBuildingSite` usa para escolher o lote. Divergiram por muito tempo: a
+pedreira anunciava 12 e extraía 7. Hoje a extração lê o valor anunciado
+primeiro, então os três concordam — mantenha assim ao adicionar prédio de
+extração.
+
 **Comida não restringe nada.** Em 80 anos nenhum assentamento ficou sob o portão
 de comida do alistamento e nenhum passou fome: 16 a 57 unidades por cabeça
 contra `FOOD_PER_CITIZEN = 1.1`, ou seja produção ~18× a necessidade. A camada
