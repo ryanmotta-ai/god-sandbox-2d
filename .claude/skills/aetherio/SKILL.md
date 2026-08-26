@@ -175,7 +175,13 @@ compilação.
    (`SPOILAGE_PER_YEAR`, flag `perishable`), não imposto.
 9. **Estado derivado não se armazena:** traço do rei vem da psique, traço do
    reino vem de governo+rei, `known` vem da era. Não crie campo espelho.
-10. **`civWorld()` é cacheado e atualizado no lugar.** É lido a cada tick;
+10. **`tickGeopolitics` e `tickRoyalCourts` estão no MESMO slot de statecraft,
+    e `musterArmies` só no slot seguinte.** Uma guerra é declarada e revista no
+    mesmo sopro, antes de qualquer convocação. Qualquer decisão que leia força
+    militar tem que distinguir "não convocou ainda" de "foi aniquilado" — foi
+    exatamente por isso que todo rei pedia paz antes da primeira batalha e um
+    mundo de 80 anos produziu uma guerra de duração zero.
+11. **`civWorld()` é cacheado e atualizado no lugar.** É lido a cada tick;
     objeto novo por tick é exatamente o lixo que a passada contínua evita.
 
 ---
@@ -186,9 +192,36 @@ Sem framework de teste. Um arquivo por cenário, `assert` puro, roda direto:
 
 ```bash
 npx tsx tests/realtime-cadence.test.ts     # um teste
-npx tsc --noEmit                           # tipos (sempre antes de commitar)
-npm run dev                                # subir o jogo
+npx tsc --noEmit                           # tipos — SÓ src/, ver aviso abaixo
+npm run dev                                # subir o jogo (porta 5190)
 ```
+
+> **`tsc` não cobre `tests/`.** O `tsconfig.json` tem `"include": ["src"]`, então
+> os 54 arquivos de teste e probe podem referenciar API deletada e o type-check
+> segue verde. Ao remover ou renomear qualquer coisa pública, faça
+> `grep -rn "<nome>" tests/` na mão — foi assim que 6 arquivos passaram a ler um
+> campo que não existia mais, um deles imprimindo `NaN` por semanas sem ninguém
+> notar.
+
+### Rodar o jogo de verdade e olhar
+
+`window.aethoria` é exposto em DEV, então dá para dirigir o jogo sem clicar em
+menu: `startNewWorld(config)` · `setSpeed(0..80)` · `focusOn(x, y, zoom)` ·
+`trackEntity(id)` · `sim` para ler o mundo. Chromium e Playwright já estão no
+ambiente (`/opt/pw-browsers/chromium-1194/chrome-linux/chrome`, playwright
+global).
+
+Duas coisas aprendidas fazendo isso:
+
+- **Em tempo real o navegador faz ~22s por ano de mundo** (orçamento de 8ms do
+  `SimulationScheduler`), mesmo a 80x. Chegar ao ano 40, quando a guerra
+  destrava, leva ~15 minutos de espera.
+- **Para adiantar, chame `sim.tickAI` em laço dentro de `page.evaluate`.** Isso
+  bloqueia a thread de JS da página, então o `requestAnimationFrame` não pinta
+  durante o avanço: paga-se render só nos quadros que se quer olhar. Uma estação
+  (1800 ticks) por chamada.
+- Editar `src/` com o `npm run dev` de pé dispara HMR e **zera
+  `window.aethoria`** — um driver tem que sobreviver a reload.
 
 Testes que valem como referência do contrato atual:
 `realtime-cadence` (cadência e conservação de carga) · `economy-gold` ·
