@@ -152,8 +152,8 @@ export interface RouteView {
 /** A mover on the map: a caravan or a ship, normalised. */
 export interface MoverView {
   id: string;
-  kind: 'caravan' | 'ship';
-  /** Caravan type or ship tier, as the simulation labels it. */
+  kind: 'caravan' | 'ship' | 'train';
+  /** Caravan type, ship tier or train locomotive/service. */
   variant: string;
   routeId: string;
   fromName: string;
@@ -264,9 +264,10 @@ export interface LogisticsMetrics {
   activeRoutes: number;
   closedRoutes: number;
   totalTradeValue: number;
-  /** Caravans and ships on the map right now. */
+  /** Caravans, ships and active physical trains on the map right now. */
   activeCaravans: number;
   activeShips: number;
+  activeTrains: number;
 }
 
 // ============================ ROAD LEVEL VOCABULARY ============================
@@ -316,7 +317,8 @@ export function computeLogisticsMetrics(ctx: GameContext): LogisticsMetrics {
     closedRoutes: routes.filter(r => !r.route.active).length,
     totalTradeValue: routes.reduce((s, r) => s + r.route.totalValue, 0),
     activeCaravans: sim.caravans.activeCaravans.size,
-    activeShips: sim.naval.activeShips.size
+    activeShips: sim.naval.activeShips.size,
+    activeTrains: sim.railways.activeTrains.size
   };
 }
 
@@ -623,6 +625,29 @@ function collectMovers(routes: RouteView[], ctx: GameContext): MoverView[] {
       x: ship.x,
       y: ship.y,
       routeClosed: route ? !route.route.active : false
+    });
+  }
+
+  for (const train of ctx.sim.railways.activeTrains.values()) {
+    const isFreight = train.service === 'freight';
+    const variant = train.trainType === 'steam' ? 'Trem a Vapor' : train.trainType === 'diesel' ? 'Trem Diesel' : 'Trem-Bala Elétrico';
+    const cargoGood = train.cargo ?? 'iron';
+    out.push({
+      id: train.id,
+      kind: 'train',
+      variant: `${variant} (${train.service === 'passenger' ? 'Passageiros' : train.service === 'military' ? 'Militar' : 'Frete'})`,
+      routeId: train.id,
+      fromName: train.direction === 1 ? train.fromCityName : train.toCityName,
+      toName: train.direction === 1 ? train.toCityName : train.fromCityName,
+      good: cargoGood,
+      goodName: isFreight ? (GOODS[cargoGood]?.name ?? cargoGood) : train.service === 'passenger' ? `${train.passengers} passageiros` : `${train.troops} tropas`,
+      amount: isFreight ? train.cargoAmount : train.service === 'passenger' ? train.passengers : train.troops,
+      progress: train.progress,
+      outbound: train.direction === 1,
+      color: train.kingdomColor,
+      x: train.x,
+      y: train.y,
+      routeClosed: false
     });
   }
 

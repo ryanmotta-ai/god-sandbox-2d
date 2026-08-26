@@ -242,7 +242,7 @@ export class TopBar {
    * seconds.
    */
   public sync(s: WorldSnapshot): void {
-    this.write('date', `Ano ${s.year} · ${s.month}/${s.day}`, this.dateEl);
+    this.write('date', `Ano ${s.year} · ${s.seasonIcon ?? '🌱'} ${s.season ?? ''} (M${s.month}/D${s.day})`, this.dateEl);
     this.write('clock', `${s.timeString}`, this.clockEl);
 
     for (const slot of STATS) {

@@ -46,6 +46,7 @@ import { SIEGE_GATE_PUSH } from '../civ/WarFronts';
 import { MilitaryLogistics } from '../civ/MilitaryLogistics';
 import { NavalSystem } from '../civ/NavalSystem';
 import { AirSystem } from '../civ/AirSystem';
+import { NavalInvasionSystem } from '../civ/NavalInvasion';
 import { CaravanSystem } from '../civ/CaravanSystem';
 import { RailwayNetwork } from '../civ/RailwayNetwork';
 import { EntityRelevanceTracker, RELEVANCE_CADENCE, shouldTickEntity, type RelevanceContext } from '../perf/EntityRelevance';
@@ -77,7 +78,11 @@ import { buildingArchitecturalStamp, refreshArchitecturalProfile } from '../civ/
 export const TICKS_PER_DAY = 600;
 /** In-world days per year — each one reads as a month on the calendar. */
 export const DAYS_PER_YEAR = 12;
-export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_YEAR;
+export const DAYS_PER_SEASON = 3;
+export const SEASONS_PER_YEAR = 4;
+export const TICKS_PER_SEASON = TICKS_PER_DAY * DAYS_PER_SEASON; // 1800 ticks (3 months / 1 season)
+export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_YEAR; // 7200 ticks (1 full year)
+export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
 /**
  * Tiles moved per tick, per point of species baseSpeed.
@@ -117,7 +122,7 @@ const FLEE_THRESHOLD = 0.25; // Flee when HP below 25%
 const HAND_GATHERABLE: GoodId[] = [...MINEABLE_GOODS, ...QUARRY_GOODS];
 
 /** How far past its housing a settlement will still bear children at all. */
-const OVERCROWDING_LIMIT = 1.4;
+const OVERCROWDING_LIMIT = 1.85;
 /** Grievance a distant realm needs before it will consider war. */
 const WAR_GRIEVANCE_BASE = -14;
 /**
@@ -206,6 +211,8 @@ export class SimulationEngine {
   /** Active maritime ships and naval trade routes. */
   public naval: NavalSystem = new NavalSystem();
   public air: AirSystem = new AirSystem();
+  /** Armies at sea. Trade hulls carry goods; these carry people. */
+  public invasions: NavalInvasionSystem = new NavalInvasionSystem();
   /** Active overland caravans. */
   public caravans: CaravanSystem = new CaravanSystem();
   /** Railways: track, freight and AI line construction. Derived from tiles. */
@@ -228,6 +235,8 @@ export class SimulationEngine {
   public ecology: EcologySystem = new EcologySystem();
 
   public currentYear: number = 1;
+  public currentSeasonIndex: number = 0;
+  public currentSeason: Season = 'spring';
   private yearTickCounter: number = 0;
   public timeOfDay: 'dawn' | 'day' | 'dusk' | 'night' = 'day';
 
@@ -249,6 +258,11 @@ export class SimulationEngine {
   private readonly regionalEntityScratch: Entity[] = [];
   private readonly regionalQueryScratch: Entity[] = [];
   private readonly regionalEntityIds = new Set<string>();
+  private readonly queryScratch: Entity[] = [];
+  private readonly threatScratch: Entity[] = [];
+  private readonly enemyScratch: Entity[] = [];
+  private readonly flockScratch: Entity[] = [];
+  private readonly stepResultScratch = { x: 0, y: 0, blocked: false };
 
   /**
    * The climatic era in force, mirrored from `EraManager`.
@@ -373,6 +387,16 @@ export class SimulationEngine {
 
     for (const e of tickCandidates) {
       if (e.hp <= 0) { deadEntities.push(e); continue; }
+      /**
+       * Anyone at sea is the fleet's business until they are put ashore.
+       *
+       * This has to come before everything below, and in particular before the
+       * anti-water rule a few lines down, which teleports any entity standing on
+       * water back to the nearest land — it would pluck an entire invasion off
+       * its own hulls the tick after it sailed. `NavalInvasionSystem` moves them
+       * with the fleet and hands them back when they land or drown.
+       */
+      if (e.aboardFleetId) continue;
       const currentTile = tileMap.getTile(Math.floor(e.x), Math.floor(e.y));
       let relevance = this.performanceFeatures.entityLOD ? this.relevanceTracker.classify(e, relevanceContext, this.simulationTick) : 'hot';
       // Environmental hazards and active combat can never be abstracted.
@@ -469,10 +493,11 @@ export class SimulationEngine {
 
         // Flocking Separation: gentle push so characters walk alongside each other instead of stacking
         if (isHumanoid && relevance === 'hot') {
-          const neighbors = this.spatialHash.queryRadius(e.x, e.y, 0.4);
+          const neighbors = this.spatialHash.queryRadius(e.x, e.y, 0.4, this.flockScratch);
           const myFx = Math.cos(e.facingAngle);
           const myFy = Math.sin(e.facingAngle);
-          for (const other of neighbors) {
+          for (let ni = 0; ni < neighbors.length; ni++) {
+            const other = neighbors[ni];
             if (other.id !== e.id && other.species === e.species && other.hp > 0) {
               const sepDx = e.x - other.x;
               const sepDy = e.y - other.y;
@@ -546,6 +571,7 @@ export class SimulationEngine {
 
     // Update maritime ships, overland caravans and air services
     this.naval.updateShips(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
+    this.invasions.update(this.cities, this.entitiesById, this.diplomacy, tileMap, particles, this.currentYear);
     // Overland freight moves under the hood.
     //
     // Nothing economic is lost: the goods are taken from one stockpile and put
@@ -565,6 +591,7 @@ export class SimulationEngine {
     this.air.weather = this.currentEra;
     this.air.updateFlights(this.trade.routes, this.cities, this.kingdoms, this.market);
     this.air.updateSorties(this.cities, this.currentYear);
+    this.railways.updateTrains(this.cities, this.kingdoms, tileMap, particles, this.currentYear, this.market);
 
     // Process deaths
     for (const dead of deadEntities) this.handleEntityDeath(dead, particles);
@@ -584,15 +611,25 @@ export class SimulationEngine {
     // year is far too coarse for hunger to steer anybody's behaviour.
     if (this.yearTickCounter % TICKS_PER_DAY === 0) this.tickDay();
 
-    if (this.yearTickCounter >= TICKS_PER_YEAR) {
-      this.yearTickCounter = 0;
-      this.currentYear++;
-      this.tickAge();
+    if (this.yearTickCounter % TICKS_PER_SEASON === 0) {
+      const isNewYear = this.yearTickCounter >= TICKS_PER_YEAR;
+      if (isNewYear) {
+        this.yearTickCounter = 0;
+        this.currentYear++;
+        this.tickAge();
+      }
+
+      this.currentSeasonIndex = Math.floor(((this.yearTickCounter % TICKS_PER_YEAR) || 0) / TICKS_PER_SEASON);
+      this.currentSeason = (['spring', 'summer', 'autumn', 'winter'] as const)[this.currentSeasonIndex] ?? 'spring';
+
+      this.tickPregnancies();
       this.tickFamilies(tileMap);
       perfProfiler.measure('lives', () => this.tickLives());
       this.tickWildlife(tileMap);
       perfProfiler.measure('economy', () => this.civ.tickYear({
         year: this.currentYear,
+        season: this.currentSeason,
+        seasonFraction: 0.25,
         cities: this.cities,
         kingdoms: this.kingdoms,
         entities: this.entities,
@@ -615,22 +652,16 @@ export class SimulationEngine {
        * has just finished deciding.
        */
       /**
-       * Diplomacy is a yearly matter, and now runs on the same clock as
-       * everything else.
-       *
-       * It used to be driven per frame from main.ts, so every pair of realms
-       * was reconsidered 720 times a year. The gentle yearly pull back toward
-       * neutral became about 360 points a year, which pinned every relation —
-       * hostile *and* friendly — inside a narrow band around zero: nobody could
-       * accumulate enough hatred to declare war, and nobody could reach the +62
-       * an alliance needs either. It also meant every headless run in tests/
-       * simulated a diplomacy the player never experienced, because main.ts was
-       * the only caller and the tests never went through main.ts.
+       * Diplomacy and statecraft run quarterly (every 3 months), keeping realms
+       * reactive to wars, treaties and border friction throughout the year.
        */
       this.tickSuccession();
       this.diplomacy.tickDiplomacy([...this.kingdoms.keys()], this.currentYear);
       this.tickGeopolitics();
       this.musterArmies();
+      // After the levy, so a realm decides who sails with this quarter's army
+      // rather than last year's.
+      this.invasions.tickYear(this.kingdoms, this.cities, this.entities, this.diplomacy, tileMap, this.currentYear);
 
       const warWorld = {
         year: this.currentYear,
@@ -642,12 +673,6 @@ export class SimulationEngine {
       };
       /**
        * War is fought after it is declared, not before.
-       *
-       * These four passes used to run above the block that declares wars and
-       * raises levies, so a war declared in a given year found its fronts
-       * already measured, its logistics already costed and its battles already
-       * resolved. Nothing happened until the following year, and the troops it
-       * called up arrived a year after that.
        */
       perfProfiler.measure('fronts', () => this.fronts.tickYear(warWorld));
       perfProfiler.measure('logistics', () => this.logistics.tickYear({
@@ -660,12 +685,12 @@ export class SimulationEngine {
         ...warWorld,
         fronts: this.fronts
       }));
-      // Air service closes the year after the war passes. `tickGeopolitics` and
-      // `musterArmies` are not repeated here: they already run above, before the
-      // war passes, which is the ordering the comment above exists to protect.
+      // Air service and sorties update quarterly.
       this.reportAirService();
       this.air.planSorties(this.cities, this.kingdoms, this.diplomacy);
-      this.air.resetYear();
+      if (isNewYear) {
+        this.air.resetYear();
+      }
     }
   }
 
@@ -822,18 +847,20 @@ export class SimulationEngine {
       needs.comfort += (comfortTarget - needs.comfort) * 0.3;
 
       // Safety follows what is nearby and whether the realm is at war.
-      const threats = this.spatialHash.queryRadius(e.x, e.y, 7)
-        .filter(o => this.isEnemy(e, o) || this.isFaunaThreat(o)).length;
+      const nearbyDay = this.spatialHash.queryRadius(e.x, e.y, 7, this.queryScratch);
+      let threats = 0;
+      let neighbours = 0;
+      for (let ni = 0; ni < nearbyDay.length; ni++) {
+        const o = nearbyDay[ni];
+        if (this.isEnemy(e, o) || this.isFaunaThreat(o)) threats++;
+        if (o.id !== e.id && o.hp > 0 && SPECIES_DEFINITIONS[o.species].isHumanoid) neighbours++;
+      }
       const safetyTarget = Math.max(5, 88 - threats * 22);
       needs.safety += (safetyTarget - needs.safety) * 0.35;
 
       // Company. Loneliness accrues on its own and is only paid off by other
       // people being nearby, which is what makes an isolated frontier settler
       // measurably worse off than a townsman without needing a second system.
-      // The 7-tile query above is reused rather than repeated — the same sweep
-      // that counts threats also counts neighbours.
-      const neighbours = this.spatialHash.queryRadius(e.x, e.y, 7)
-        .filter(o => o.id !== e.id && o.hp > 0 && SPECIES_DEFINITIONS[o.species].isHumanoid).length;
       const company = Math.min(4, neighbours) * 9;
       needs.social = Math.max(0, Math.min(100, needs.social - SOCIAL_DECAY_PER_DAY + company));
 
@@ -1125,7 +1152,7 @@ export class SimulationEngine {
     return { hour, minute, timeString, periodLabel, icon };
   }
 
-  public getCalendarDate(): { month: number; day: number; year: number } {
+  public getCalendarDate(): { month: number; day: number; year: number; season: string; seasonIcon: string } {
     // Each in-world day is one month of the year. The day-of-month is read off
     // the progress through that day, so the displayed date advances smoothly
     // instead of jumping once per month.
@@ -1133,7 +1160,11 @@ export class SimulationEngine {
     const month = Math.min(12, Math.floor((dayInYear / DAYS_PER_YEAR) * 12) + 1);
     const dayProgress = (this.yearTickCounter % TICKS_PER_DAY) / TICKS_PER_DAY;
     const day = Math.min(30, Math.floor(dayProgress * 30) + 1);
-    return { month, day, year: this.currentYear };
+    const seasonNames = ['Primavera', 'Verão', 'Outono', 'Inverno'];
+    const seasonIcons = ['🌱', '☀️', '🍂', '❄️'];
+    const season = seasonNames[this.currentSeasonIndex] ?? 'Primavera';
+    const seasonIcon = seasonIcons[this.currentSeasonIndex] ?? '🌱';
+    return { month, day, year: this.currentYear, season, seasonIcon };
   }
 
   // ===================== FAUNA AI (ANIMALS) =====================
@@ -1170,9 +1201,8 @@ export class SimulationEngine {
   // ===================== NEW SPECIES FAUNA AI =====================
 
   private tickBoarAI(e: Entity, tileMap: TileMap, particles: ParticleManager, speed: number): void {
-    const nearbyHumanoids = this.spatialHash.queryRadius(e.x, e.y, 3).filter(other => SPECIES_DEFINITIONS[other.species].isHumanoid && other.hp > 0 && other.age >= 3);
-    if (nearbyHumanoids.length > 0) {
-      const target = nearbyHumanoids[0];
+    const target = this.spatialHash.findClosest(e.x, e.y, 3, other => SPECIES_DEFINITIONS[other.species].isHumanoid && other.hp > 0 && other.age >= 3);
+    if (target) {
       const dist = Math.hypot(target.x - e.x, target.y - e.y);
       if (dist <= COMBAT_RANGE) {
         if (e.attackCooldown <= 0) {
@@ -1182,7 +1212,7 @@ export class SimulationEngine {
           particles.spawnDamageNumber(target.x, target.y, dmg);
         }
       } else {
-        const pos = SimplePathfinder.getStepTowards(e.x, e.y, target.x, target.y, tileMap, speed * 1.3);
+        const pos = SimplePathfinder.getStepTowards(e.x, e.y, target.x, target.y, tileMap, speed * 1.3, this.stepResultScratch);
         e.x = pos.x; e.y = pos.y;
       }
     } else {
@@ -1191,9 +1221,8 @@ export class SimulationEngine {
   }
 
   private tickEagleAI(e: Entity, tileMap: TileMap, particles: ParticleManager, speed: number): void {
-    const preyList = this.spatialHash.queryRadius(e.x, e.y, 8).filter(other => (other.species === SpeciesType.DEER || other.species === SpeciesType.BOAR) && other.hp > 0);
-    if (preyList.length > 0) {
-      const prey = preyList[0];
+    const prey = this.spatialHash.findClosest(e.x, e.y, 8, other => (other.species === SpeciesType.DEER || other.species === SpeciesType.BOAR) && other.hp > 0);
+    if (prey) {
       const dist = Math.hypot(prey.x - e.x, prey.y - e.y);
       if (dist <= COMBAT_RANGE) {
         if (e.attackCooldown <= 0) {
@@ -1203,7 +1232,7 @@ export class SimulationEngine {
           particles.spawnDamageNumber(prey.x, prey.y, dmg);
         }
       } else {
-        const pos = SimplePathfinder.getStepTowards(e.x, e.y, prey.x, prey.y, tileMap, speed * 1.4);
+        const pos = SimplePathfinder.getStepTowards(e.x, e.y, prey.x, prey.y, tileMap, speed * 1.4, this.stepResultScratch);
         e.x = pos.x; e.y = pos.y;
       }
     } else {
@@ -1212,9 +1241,10 @@ export class SimulationEngine {
   }
 
   private tickMammothAI(e: Entity, tileMap: TileMap, particles: ParticleManager, speed: number): void {
-    const threats = this.spatialHash.queryRadius(e.x, e.y, 4).filter(other => SPECIES_DEFINITIONS[other.species].isHumanoid && other.hp > 0 && other.age >= 3);
-    if (e.hp < e.maxHp && threats.length > 0) {
-      const target = threats[0];
+    const target = e.hp < e.maxHp
+      ? this.spatialHash.findClosest(e.x, e.y, 4, other => SPECIES_DEFINITIONS[other.species].isHumanoid && other.hp > 0 && other.age >= 3)
+      : null;
+    if (target) {
       const dist = Math.hypot(target.x - e.x, target.y - e.y);
       if (dist <= COMBAT_RANGE) {
         if (e.attackCooldown <= 0) {
@@ -1224,7 +1254,7 @@ export class SimulationEngine {
           particles.spawnDamageNumber(target.x, target.y, dmg);
         }
       } else {
-        const pos = SimplePathfinder.getStepTowards(e.x, e.y, target.x, target.y, tileMap, speed);
+        const pos = SimplePathfinder.getStepTowards(e.x, e.y, target.x, target.y, tileMap, speed, this.stepResultScratch);
         e.x = pos.x; e.y = pos.y;
       }
     } else {
@@ -1234,20 +1264,24 @@ export class SimulationEngine {
 
   /** DEER: Peaceful herbivore. Flees from predators and humanoids. Grazes near forests. */
   private tickDeerAI(e: Entity, tileMap: TileMap, speed: number): void {
-    const nearby = this.spatialHash.queryRadius(e.x, e.y, 7);
+    const nearby = this.spatialHash.queryRadius(e.x, e.y, 7, this.queryScratch);
     
     // Check for threats — flee from predators, wolves, bears, humanoids
-    for (const other of nearby) {
-      if (other.id === e.id) continue;
-      const dist = SimplePathfinder.distance(e.x, e.y, other.x, other.y);
+    for (let i = 0; i < nearby.length; i++) {
+      const other = nearby[i];
+      if (other.id === e.id || other.hp <= 0) continue;
       const isThreat = other.species === SpeciesType.WOLF || other.species === SpeciesType.BEAR ||
                        other.species === SpeciesType.DRAGON || SPECIES_DEFINITIONS[other.species].isHumanoid;
-      if (isThreat && dist < 6) {
-        e.aiState = 'flee';
-        const pos = SimplePathfinder.fleeFrom(e.x, e.y, other.x, other.y, tileMap, speed * 1.5);
-        e.x = pos.x; e.y = pos.y;
-        e.targetX = null; e.targetY = null;
-        return;
+      if (isThreat) {
+        const dx = e.x - other.x;
+        const dy = e.y - other.y;
+        if (dx * dx + dy * dy < 36) {
+          e.aiState = 'flee';
+          const pos = SimplePathfinder.fleeFrom(e.x, e.y, other.x, other.y, tileMap, speed * 1.5, this.stepResultScratch);
+          e.x = pos.x; e.y = pos.y;
+          e.targetX = null; e.targetY = null;
+          return;
+        }
       }
     }
 
@@ -1311,28 +1345,33 @@ export class SimulationEngine {
   }
 
   private tickWolfAI(e: Entity, tileMap: TileMap, particles: ParticleManager, speed: number): void {
-    const nearby = this.spatialHash.queryRadius(e.x, e.y, 10);
+    const nearby = this.spatialHash.queryRadius(e.x, e.y, 10, this.queryScratch);
     
     // Flee if badly hurt
     if (e.hp < e.maxHp * 0.2) {
-      const threats = nearby.filter(o => SPECIES_DEFINITIONS[o.species].isHumanoid && SimplePathfinder.distance(e.x, e.y, o.x, o.y) < 5);
-      if (threats.length > 0) {
+      let threat: Entity | null = null;
+      for (let i = 0; i < nearby.length; i++) {
+        const o = nearby[i];
+        if (SPECIES_DEFINITIONS[o.species].isHumanoid && (e.x - o.x) * (e.x - o.x) + (e.y - o.y) * (e.y - o.y) < 25) {
+          threat = o;
+          break;
+        }
+      }
+      if (threat) {
         e.aiState = 'flee';
-        const pos = SimplePathfinder.fleeFrom(e.x, e.y, threats[0].x, threats[0].y, tileMap, speed * 1.3);
+        const pos = SimplePathfinder.fleeFrom(e.x, e.y, threat.x, threat.y, tileMap, speed * 1.3, this.stepResultScratch);
         e.x = pos.x; e.y = pos.y;
         return;
       }
     }
 
     // Find prey — prefer lone targets, avoid large groups.
-    // The crowd and the pack are the same for every candidate, so they are
-    // gathered once here rather than re-filtered inside the scoring loop.
     const crowd = this.adultsAmong(nearby);
-    const packMates = nearby.filter(p => p.species === SpeciesType.WOLF && p.id !== e.id);
     let bestPrey: Entity | null = null;
     let bestScore = -Infinity;
-    for (const other of nearby) {
-      if (other.id === e.id || other.species === SpeciesType.WOLF) continue;
+    for (let i = 0; i < nearby.length; i++) {
+      const other = nearby[i];
+      if (other.id === e.id || other.species === SpeciesType.WOLF || other.hp <= 0) continue;
       const isDeer = other.species === SpeciesType.DEER;
       const isHumanoid = SPECIES_DEFINITIONS[other.species].isHumanoid && other.age >= 3;
       if (!isDeer && !isHumanoid) continue;
@@ -1345,8 +1384,9 @@ export class SimulationEngine {
       score -= this.preyRisk(other, crowd, tileMap);
       // Count nearby pack members for pack hunting bonus
       let packCount = 0;
-      for (const p of packMates) {
-        if (SimplePathfinder.distance(p.x, p.y, other.x, other.y) < 8) packCount++;
+      for (let j = 0; j < nearby.length; j++) {
+        const p = nearby[j];
+        if (p.species === SpeciesType.WOLF && p.id !== e.id && (p.x - other.x) * (p.x - other.x) + (p.y - other.y) * (p.y - other.y) < 64) packCount++;
       }
       score += packCount * 2;
 
@@ -1368,7 +1408,7 @@ export class SimulationEngine {
         if (bestPrey.hp <= 0) e.kills++;
       } else {
         // Chase at higher speed
-        const pos = SimplePathfinder.getStepTowards(e.x, e.y, bestPrey.x, bestPrey.y, tileMap, speed * 1.2);
+        const pos = SimplePathfinder.getStepTowards(e.x, e.y, bestPrey.x, bestPrey.y, tileMap, speed * 1.2, this.stepResultScratch);
         e.x = pos.x; e.y = pos.y;
       }
       return;
@@ -1380,23 +1420,24 @@ export class SimulationEngine {
 
   /** BEAR: Territorial apex predator. Guards area, attacks intruders. Slow but powerful. */
   private tickBearAI(e: Entity, tileMap: TileMap, particles: ParticleManager, speed: number): void {
-    const nearby = this.spatialHash.queryRadius(e.x, e.y, 8);
+    const nearby = this.spatialHash.queryRadius(e.x, e.y, 8, this.queryScratch);
 
     // Attack anything that comes too close (territorial). Same story as the wolf:
     // judging the crowd is one scan, taken once instead of once per candidate.
     const crowd = this.adultsAmong(nearby);
     let closestIntruder: Entity | null = null;
-    let closestDist = DETECTION_RANGE;
-    for (const other of nearby) {
-      if (other.id === e.id || other.species === SpeciesType.BEAR) continue;
+    let closestDistSq = 36; // 6 tiles max
+    for (let i = 0; i < nearby.length; i++) {
+      const other = nearby[i];
+      if (other.id === e.id || other.species === SpeciesType.BEAR || other.hp <= 0) continue;
       // Bears ignore infants — too small to be worth the swipe
       if (SPECIES_DEFINITIONS[other.species]?.isHumanoid && other.age < 3) continue;
       // A bear is territorial, not suicidal: it does not charge a crowd or walk
       // into a settlement to pick a fight.
       if (this.preyRisk(other, crowd, tileMap) > 12) continue;
-      const dist = SimplePathfinder.distance(e.x, e.y, other.x, other.y);
-      if (dist < closestDist && dist < 6) {
-        closestDist = dist;
+      const dSq = (e.x - other.x) * (e.x - other.x) + (e.y - other.y) * (e.y - other.y);
+      if (dSq < closestDistSq) {
+        closestDistSq = dSq;
         closestIntruder = other;
       }
     }
@@ -1406,6 +1447,7 @@ export class SimulationEngine {
       e.targetX = closestIntruder.x;
       e.targetY = closestIntruder.y;
 
+      const closestDist = Math.sqrt(closestDistSq);
       if (closestDist <= COMBAT_RANGE && e.attackCooldown <= 0) {
         // Bear swipe — heavy damage
         const dmg = Math.max(5, e.damage - closestIntruder.defense);
@@ -1417,7 +1459,7 @@ export class SimulationEngine {
         sound.playHit();
         if (closestIntruder.hp <= 0) e.kills++;
       } else {
-        const pos = SimplePathfinder.getStepTowards(e.x, e.y, closestIntruder.x, closestIntruder.y, tileMap, speed);
+        const pos = SimplePathfinder.getStepTowards(e.x, e.y, closestIntruder.x, closestIntruder.y, tileMap, speed, this.stepResultScratch);
         e.x = pos.x; e.y = pos.y;
       }
       return;
@@ -1429,13 +1471,14 @@ export class SimulationEngine {
 
   /** DRAGON: Boss entity. Breathes fire, flies over terrain, hunts everything. */
   private tickDragonAI(e: Entity, tileMap: TileMap, particles: ParticleManager, speed: number): void {
-    const nearby = this.spatialHash.queryRadius(e.x, e.y, 16);
+    const nearby = this.spatialHash.queryRadius(e.x, e.y, 16, this.queryScratch);
 
     // Hunt the strongest nearby target
     let bestTarget: Entity | null = null;
     let bestHp = 0;
-    for (const other of nearby) {
-      if (other.id === e.id || other.species === SpeciesType.DRAGON) continue;
+    for (let i = 0; i < nearby.length; i++) {
+      const other = nearby[i];
+      if (other.id === e.id || other.species === SpeciesType.DRAGON || other.hp <= 0) continue;
       // Dragons ignore infants — too small to bother with
       if (SPECIES_DEFINITIONS[other.species]?.isHumanoid && other.age < 3) continue;
       if (other.hp > bestHp) {
@@ -1452,9 +1495,10 @@ export class SimulationEngine {
 
       if (dist <= COMBAT_RANGE * 1.5 && e.attackCooldown <= 0) {
         // Dragon fire breath — area damage
-        const hitRange = this.spatialHash.queryRadius(bestTarget.x, bestTarget.y, 2);
-        for (const victim of hitRange) {
-          if (victim.id === e.id) continue;
+        const hitRange = this.spatialHash.queryRadius(bestTarget.x, bestTarget.y, 2, this.threatScratch);
+        for (let i = 0; i < hitRange.length; i++) {
+          const victim = hitRange[i];
+          if (victim.id === e.id || victim.hp <= 0) continue;
           const dmg = Math.max(10, e.damage - victim.defense);
           victim.hp -= dmg;
           particles.spawnDamageNumber(victim.x, victim.y, dmg);
@@ -1468,7 +1512,7 @@ export class SimulationEngine {
         sound.playExplosion();
       } else {
         // Fly toward target (faster, ignores some terrain)
-        const pos = SimplePathfinder.getStepTowards(e.x, e.y, bestTarget.x, bestTarget.y, tileMap, speed * 1.5);
+        const pos = SimplePathfinder.getStepTowards(e.x, e.y, bestTarget.x, bestTarget.y, tileMap, speed * 1.5, this.stepResultScratch);
         e.x = pos.x; e.y = pos.y;
       }
       return;
@@ -1509,12 +1553,20 @@ export class SimulationEngine {
 
   /** Decide what the humanoid should be doing based on needs, threats, and personality. */
   private decideHumanoidState(e: Entity, tileMap: TileMap, particles: ParticleManager): void {
-    const nearby = this.spatialHash.queryRadius(e.x, e.y, DETECTION_RANGE);
+    const nearby = this.spatialHash.queryRadius(e.x, e.y, DETECTION_RANGE, this.queryScratch);
 
     // ===== PRIORITY 1: Flee if critically low HP =====
     if (e.hp < e.maxHp * FLEE_THRESHOLD && e.profession !== 'king') {
-      const threats = nearby.filter(o => this.isEnemy(e, o) && SimplePathfinder.distance(e.x, e.y, o.x, o.y) < 6);
-      if (threats.length > 0) {
+      let threatFound = false;
+      for (let i = 0; i < nearby.length; i++) {
+        const o = nearby[i];
+        if (o.id === e.id || o.hp <= 0) continue;
+        if (this.isEnemy(e, o)) {
+          const dSq = (e.x - o.x) * (e.x - o.x) + (e.y - o.y) * (e.y - o.y);
+          if (dSq < 36) { threatFound = true; break; }
+        }
+      }
+      if (threatFound) {
         e.aiState = 'flee';
         e.aiCooldown = 15;
         return;
@@ -1522,14 +1574,19 @@ export class SimulationEngine {
     }
 
     // ===== PRIORITY 2: Combat if enemies nearby =====
-if (e.kingdomId) {
-      const enemies = nearby.filter(o => this.isEnemy(e, o) && o.age >= 3); // Skip infants
-      if (enemies.length > 0) {
+    if (e.kingdomId) {
+      let enemyCount = 0;
+      for (let i = 0; i < nearby.length; i++) {
+        const o = nearby[i];
+        if (o.id === e.id || o.hp <= 0) continue;
+        if (this.isEnemy(e, o) && o.age >= 3) enemyCount++;
+      }
+      if (enemyCount > 0) {
         // Who stands and who runs. The observable facts still dominate — being
         // outnumbered and being empty-handed are what anyone can see — but between
         // two people reading the same odds it is disposition and history that
         // decide, so a war does not produce one uniform reaction on a whole street.
-        const stand = this.willStandGround(e, enemies.length);
+        const stand = this.willStandGround(e, enemyCount);
         if (stand) {
           e.aiState = 'attack';
           e.aiCooldown = e.profession === 'soldier' || e.profession === 'king' ? 5 : 6;
@@ -1546,14 +1603,19 @@ if (e.kingdomId) {
     }
 
     // Check for dangerous fauna threats
-    const faunaThreats = nearby.filter(o =>
-      (o.species === SpeciesType.WOLF || o.species === SpeciesType.BEAR || o.species === SpeciesType.DRAGON) &&
-      SimplePathfinder.distance(e.x, e.y, o.x, o.y) < 5
-    );
-    if (faunaThreats.length > 0) {
+    let faunaCount = 0;
+    for (let i = 0; i < nearby.length; i++) {
+      const o = nearby[i];
+      if (o.id === e.id || o.hp <= 0) continue;
+      if (o.species === SpeciesType.WOLF || o.species === SpeciesType.BEAR || o.species === SpeciesType.DRAGON) {
+        const dSq = (e.x - o.x) * (e.x - o.x) + (e.y - o.y) * (e.y - o.y);
+        if (dSq < 25) faunaCount++;
+      }
+    }
+    if (faunaCount > 0) {
       // A soldier always turns and fights a beast; a civilian usually runs, but a
       // brave and armed one will not, and that is a decision worth watching.
-      const stand = e.profession === 'soldier' || this.willStandGround(e, faunaThreats.length);
+      const stand = e.profession === 'soldier' || this.willStandGround(e, faunaCount);
       e.aiState = stand ? 'attack' : 'flee';
       e.aiCooldown = stand ? 5 : 12;
       return;
@@ -1891,7 +1953,7 @@ if (e.kingdomId) {
     if (household) {
       household.memberIds.add(e.id);
       household.homeBuildingId = home.id;
-      household.cityId = city.id;
+household.cityId = city.id;
     }
   }
 
@@ -1905,18 +1967,21 @@ if (e.kingdomId) {
       case 'flee': {
         e.showEmote('run', 20);
         // Find nearest threat and run away
-        const threats = this.spatialHash.queryRadius(e.x, e.y, 8)
-          .filter(o => this.isEnemy(e, o) || this.isFaunaThreat(o));
-        if (threats.length > 0) {
-          let closest = threats[0];
-          let closestDist = SimplePathfinder.distance(e.x, e.y, closest.x, closest.y);
-          for (const t of threats) {
-            const d = SimplePathfinder.distance(e.x, e.y, t.x, t.y);
-            if (d < closestDist) { closest = t; closestDist = d; }
+        const threats = this.spatialHash.queryRadius(e.x, e.y, 8, this.threatScratch);
+        let closest: Entity | null = null;
+        let closestDistSq = Infinity;
+        for (let i = 0; i < threats.length; i++) {
+          const o = threats[i];
+          if (o.id === e.id || o.hp <= 0) continue;
+          if (this.isEnemy(e, o) || this.isFaunaThreat(o)) {
+            const dSq = (e.x - o.x) * (e.x - o.x) + (e.y - o.y) * (e.y - o.y);
+            if (dSq < closestDistSq) { closest = o; closestDistSq = dSq; }
           }
+        }
+        if (closest) {
           // Terror outruns a walking pace.
           const fleeSpeed = speed * 1.35;
-          const pos = SimplePathfinder.fleeFrom(e.x, e.y, closest.x, closest.y, tileMap, fleeSpeed);
+          const pos = SimplePathfinder.fleeFrom(e.x, e.y, closest.x, closest.y, tileMap, fleeSpeed, this.stepResultScratch);
           e.x = pos.x; e.y = pos.y;
         } else {
           e.aiState = 'idle';
@@ -1926,16 +1991,17 @@ if (e.kingdomId) {
       }
 
       case 'attack': {
-        const nearby = this.spatialHash.queryRadius(e.x, e.y, DETECTION_RANGE);
+        const nearby = this.spatialHash.queryRadius(e.x, e.y, DETECTION_RANGE, this.queryScratch);
         let target: Entity | null = null;
         let targetDist = Infinity;
 
         // Auto-arm soldier with tech-tiered equipment if unequipped
         this.autoArmSoldier(e);
 
-        for (const other of nearby) {
+        for (let i = 0; i < nearby.length; i++) {
+          const other = nearby[i];
           // Skip infant targets — combatants ignore babies
-          if (other.lifeStage === 'infant') continue;
+          if (other.lifeStage === 'infant' || other.hp <= 0) continue;
           if (this.isEnemy(e, other) || this.isFaunaThreat(other)) {
             const dist = SimplePathfinder.distance(e.x, e.y, other.x, other.y);
             // An archer picks off the weakest from a distance; anyone swinging
@@ -1955,7 +2021,14 @@ if (e.kingdomId) {
           else e.showEmote('swords', 20);
 
           // General / Commander Morale Bonus
-          const hasCommanderNearby = nearby.some(o => o.kingdomId === e.kingdomId && o.profession === 'king');
+          let hasCommanderNearby = false;
+          for (let ni = 0; ni < nearby.length; ni++) {
+            const o = nearby[ni];
+            if (o.kingdomId === e.kingdomId && o.profession === 'king') {
+              hasCommanderNearby = true;
+              break;
+            }
+          }
           const moraleMult = hasCommanderNearby ? 1.25 : 1.0;
 
           // Fatigue modifier (WAR-V4)
@@ -2027,6 +2100,7 @@ if (e.kingdomId) {
 
               particles.spawnProjectile(e.x, e.y, target.x, target.y, 'spear_thrust', dmg);
               particles.spawnDamageNumber(target.x, target.y, dmg, dmg >= target.maxHp * 0.25 ? 'critical' : 'normal');
+              particles.spawnParticle(target.x, target.y, '#e2e8f0', dx * 0.05, dy * 0.05, 0.4);
               sound.playHit();
 
               if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
@@ -2035,10 +2109,13 @@ if (e.kingdomId) {
                 this.diplomacy.recordBattle(e.kingdomId, target.kingdomId, 1, 0);
               }
             } else {
-              // Standard Melee Blow
+              // MELEE SLASH / BLUDGEON
               target.hp -= dmg;
               e.attackCooldown = ATTACK_COOLDOWN;
-              particles.spawnDamageNumber(target.x, target.y, dmg, dmg >= target.maxHp * 0.25 ? 'critical' : 'normal');
+
+              const isCrit = dmg >= target.maxHp * 0.25;
+              particles.spawnDamageNumber(target.x, target.y, dmg, isCrit ? 'critical' : 'normal');
+              particles.spawnParticle(target.x, target.y, isCrit ? '#f59e0b' : '#ffffff', 0, 0, 0.25, isCrit ? 4 : 3);
               sound.playHit();
 
               if (target.hp <= 0 && e.kingdomId && target.kingdomId) {
@@ -2052,7 +2129,7 @@ if (e.kingdomId) {
             const isRangedUnit = (category === 'ranged' || category === 'siege') && targetDist < maxReach * 0.85;
             if (!isRangedUnit) {
               const attackSpeed = category === 'heavy' ? speed * 0.85 : speed;
-              const pos = SimplePathfinder.getStepTowards(e.x, e.y, target.x, target.y, tileMap, attackSpeed);
+              const pos = SimplePathfinder.getStepTowards(e.x, e.y, target.x, target.y, tileMap, attackSpeed, this.stepResultScratch);
               e.x = pos.x; e.y = pos.y;
             }
           }
@@ -2113,7 +2190,19 @@ if (e.kingdomId) {
           // FOREST tiles left woodcutters with nowhere to go.
           const deposit = this.nearestDepositOf(e, gCity, 'wood');
           const cached = deposit ?? gCity.nearestCached(TerrainType.FOREST, e.x, e.y);
-          const target = cached ?? this.findNearestTileType(e.x, e.y, TerrainType.FOREST, tileMap, 12);
+          let target = cached ?? this.findNearestTileType(e.x, e.y, TerrainType.FOREST, tileMap, 12);
+          if (!target) {
+            for (let dx = -14; dx <= 14; dx++) {
+              for (let dy = -14; dy <= 14; dy++) {
+                const tile = tileMap.getTile(Math.floor(e.x + dx), Math.floor(e.y + dy));
+                if (tile && tile.resourceType === 'wood' && tile.resourceAmount > 0) {
+                  target = { x: tile.x, y: tile.y };
+                  break;
+                }
+              }
+              if (target) break;
+            }
+          }
           if (target) { e.targetX = target.x + 0.5; e.targetY = target.y + 0.5; }
           else { e.aiState = 'wander'; e.aiCooldown = 0; break; }
         }
@@ -2394,8 +2483,10 @@ if (e.kingdomId) {
         // Walk to the nearest neighbour and stand with them. Arriving is what
         // pays off loneliness and what opens a tie — a friendship if they get on,
         // a rivalry if two abrasive people end up in the same yard.
-        const company = this.spatialHash.queryRadius(e.x, e.y, DETECTION_RANGE)
-          .find(o => o.id !== e.id && o.hp > 0 && SPECIES_DEFINITIONS[o.species].isHumanoid && o.kingdomId === e.kingdomId);
+        const company = this.spatialHash.findClosest(
+          e.x, e.y, DETECTION_RANGE,
+          o => o.id !== e.id && o.hp > 0 && SPECIES_DEFINITIONS[o.species].isHumanoid && o.kingdomId === e.kingdomId
+        );
         if (!company) { e.aiState = 'wander'; e.aiCooldown = 0; break; }
 
         if (SimplePathfinder.distance(e.x, e.y, company.x, company.y) < 1.4) {
@@ -2425,8 +2516,7 @@ if (e.kingdomId) {
           e.aiState = 'idle';
           e.targetX = null; e.targetY = null;
         } else {
-          const pos = this.moveEntityToward(e, hx, hy, tileMap, speed);
-          if (pos.blocked) { e.x = hx; e.y = hy; } // snap home if stuck
+          this.moveEntityToward(e, hx, hy, tileMap, speed);
         }
         break;
       }
@@ -2453,7 +2543,10 @@ if (e.kingdomId) {
   private moveEntityToward(e: Entity, targetX: number, targetY: number, tileMap: TileMap, speed: number): { x: number; y: number; blocked?: boolean } {
     if (e.hesitationTicks > 0) {
       e.hesitationTicks--;
-      return { x: e.x, y: e.y, blocked: false };
+      this.stepResultScratch.x = e.x;
+      this.stepResultScratch.y = e.y;
+      this.stepResultScratch.blocked = false;
+      return this.stepResultScratch;
     }
 
     e.currentSpeed += (speed - e.currentSpeed) * 0.22;
@@ -2470,7 +2563,7 @@ if (e.kingdomId) {
       aimY += (dx / dist) * e.laneOffset * laneShrink;
     }
 
-    const pos = SimplePathfinder.getStepTowards(e.x, e.y, aimX, aimY, tileMap, eased);
+    const pos = SimplePathfinder.getStepTowards(e.x, e.y, aimX, aimY, tileMap, eased, this.stepResultScratch);
     e.x = pos.x; e.y = pos.y;
     return pos;
   }
@@ -2925,14 +3018,14 @@ if (e.kingdomId) {
         const proximity = Math.min(1, Math.max(0, 1 - dist / 70));
         // War is a real danger once relations sour; proximity sharpens it.
         if (proximity <= 0) continue;
-        // A realm needs no blood feud to covet the fields next door. How much
-        // grievance it takes scales with how close the two sit: neighbours who
-        // share a fence need only to have stopped being friends, a realm across
-        // the map needs a real one. This was a flat -12 plus a clause requiring
-        // capitals within 12.6 tiles — neither reachable — so everything below
-        // it, all the aggression and confidence and border ambition, was dead
-        // code that never ran once in a two-hundred-year world.
-        if (relation > WAR_GRIEVANCE_BASE + proximity * WAR_GRIEVANCE_PROXIMITY) continue;
+
+        // Peace during the first 40 years for foundation and development
+        if (this.currentYear < 40) {
+          if (relation > -95 || !rng.chance(0.015)) continue;
+        }
+
+        const grievanceThreshold = this.currentYear >= 40 ? 6 : WAR_GRIEVANCE_BASE;
+        if (relation > grievanceThreshold + proximity * WAR_GRIEVANCE_PROXIMITY) continue;
 
         // Aggression comes from the government and the ruler's temperament.
         const aggressor = gov1.aggression >= gov2.aggression ? k1 : k2;
@@ -2953,10 +3046,11 @@ if (e.kingdomId) {
         // A realm only starts a war it believes it can win.
         const powerRatio = aggressor.computePower() / Math.max(1, defender.computePower());
         const confidence = Math.min(2, powerRatio);
-        const hostility = Math.max(0.01, -relation / 120);
-        if (rng.chance(0.10 * aggression * confidence * (1 + hostility + proximity * borderAmbition * 0.8))) {
+        const hostility = Math.max(0.01, -relation / 100);
+        const baseWarRate = this.currentYear >= 40 ? 0.24 : 0.04;
+        if (rng.chance(baseWarRate * aggression * confidence * (1 + hostility + proximity * borderAmbition * 1.2))) {
           const reason = aggressor.isEmpire ? 'Expansão Imperial'
-            : powerRatio > 1.8 ? 'Conquest'
+            : powerRatio > 1.8 ? 'Conquista Territorial'
             : relation <= -80 ? 'Vingança de Sangue'
             : 'Disputa de Fronteira';
           if (this.diplomacy.declareWar(aggressor.id, defender.id, this.currentYear, reason)) {
@@ -3054,8 +3148,8 @@ if (e.kingdomId) {
          * and a founding party of eight that posts two guards starves. Hence the
          * floor of twelve residents before the first one is spared.
          */
-        const watch = city.population >= 24 ? 2 : city.population >= 12 ? 1 : 0;
-        const levy = Math.max(2, Math.round(city.population * (conscripted ? 0.19 : 0.12)));
+        const watch = city.population >= 16 ? Math.max(2, Math.floor(city.population * 0.14)) : city.population >= 8 ? 1 : 0;
+        const levy = Math.max(4, Math.round(city.population * (conscripted ? 0.35 : 0.24)));
         // War raises the number; peace lets it fall back to the watch, or to the
         // garrison the city actually built, whichever is larger.
         const target = warring ? levy : Math.max(watch, professionals.length);
@@ -3087,15 +3181,15 @@ if (e.kingdomId) {
         // soldiers.
         // Workers that can be spared without cutting food production.
         const nonFood = civilians.filter(e => e.profession !== 'farmer' && e.profession !== 'woodcutter');
-        const pool = nonFood.length > 0 && food >= city.population * 1.2
+        const pool = nonFood.length > 0 && food >= city.population * 0.8
           ? nonFood
-          : food >= city.population * 3 ? civilians : [];
+          : food >= city.population * 1.5 ? civilians : [];
         if (pool.length === 0) continue;
 
         const priority: Record<string, number> = { none: -1, builder: 0, scout: 1, miner: 2, woodcutter: 3, farmer: 4 };
         const ordered = pool.sort((a, b) => (priority[a.profession] ?? 9) - (priority[b.profession] ?? 9));
 
-        const perYear = conscripted ? 7 : 4;
+        const perYear = conscripted ? 14 : 8;
         for (let i = 0; i < Math.min(need, perYear, ordered.length); i++) {
           const e = ordered[i];
           // A real post if one is free, the watch otherwise.
@@ -3146,7 +3240,7 @@ if (e.kingdomId) {
         for (let j = i + 1; j < single.length; j++) {
           if (single[j].partnerId) continue;
           if (!canPairWith(single[i], single[j])) continue;
-          if (!rng.chance(0.45)) continue;
+          if (!rng.chance(0.75)) continue;
           formPartnership(single[i], single[j]);
           break;
         }
@@ -3161,8 +3255,8 @@ if (e.kingdomId) {
        * other. Crowding now suppresses births steeply instead of forbidding
        * them, which keeps the pressure to build housing without the die-off.
        */
-      if (foodPerHead < 1.6 || crowding >= OVERCROWDING_LIMIT) continue;
-      const roomForChildren = crowding < 1 ? 1 : 0.15;
+      if (foodPerHead < 1.0 || crowding >= OVERCROWDING_LIMIT) continue;
+      const roomForChildren = crowding < 1 ? 1 : 0.40;
 
       const couples = new Set<string>();
       for (const parent of residents) {
@@ -3179,17 +3273,15 @@ if (e.kingdomId) {
 
         // Settlements have to actually grow: population drives the tier, the tier
         // drives building slots and territory, and those drive everything else.
-        // At the old rate a couple produced a child roughly every seven years and
-        // no settlement ever reached town size within a playable span.
-        let chance = (0.7 * city.prosperity + Math.min(0.32, foodPerHead / 20)) * roomForChildren;
+        let chance = (0.88 * city.prosperity + Math.min(0.50, foodPerHead / 12)) * roomForChildren;
 
         if (!rng.chance(chance)) continue;
 
         const father = partner.gender === 'male' ? partner : parent;
         const mother = parent.gender === 'female' ? parent : partner;
 
-        // Start Gestation / Pregnancy Phase!
-        const gestation = SPECIES_DEFINITIONS[mother.species].gestationYears ?? 1;
+        // Start Gestation / Pregnancy Phase! (3 seasons = 9 months)
+        const gestation = (SPECIES_DEFINITIONS[mother.species].gestationYears ?? 1) * 3;
         mother.isPregnant = true;
         mother.pregnancyTimer = gestation;
         mother.pregnantFatherId = father.id;
@@ -3683,6 +3775,18 @@ if (e.kingdomId) {
     return best;
   }
 
+  /** Process quarterly gestation progress and birth events. */
+  private tickPregnancies(): void {
+    for (const e of [...this.entities]) {
+      if (e.hp <= 0 || !e.isPregnant) continue;
+      e.pregnancyTimer--;
+      e.showEmote('🤰', 40);
+      if (e.pregnancyTimer <= 0) {
+        this.processBirthEvent(e);
+      }
+    }
+  }
+
   private tickAge(): void {
     const toKill: Entity[] = [];
 
@@ -3700,15 +3804,6 @@ if (e.kingdomId) {
       // at the moment of combat left every garrison standing around empty-handed
       // and made the whole military-production chain invisible.
       this.autoArmSoldier(e);
-
-      // Process Gestation & Birth Event
-      if (e.isPregnant) {
-        e.pregnancyTimer--;
-        e.showEmote('🤰', 40);
-        if (e.pregnancyTimer <= 0) {
-          this.processBirthEvent(e);
-        }
-      }
 
       if (e.traits.has(TraitId.IMMORTAL)) continue;
 
@@ -4026,7 +4121,7 @@ if (e.kingdomId) {
 
     // Boss / Hero loot drop
     if (dead.species === SpeciesType.DRAGON || dead.species === SpeciesType.BEAR || dead.profession === 'king' || dead.level >= 5) {
-      const nearbyHumanoids = this.spatialHash.queryRadius(dead.x, dead.y, 4)
+      const nearbyHumanoids = this.spatialHash.queryRadius(dead.x, dead.y, 4, this.queryScratch)
         .filter(e => SPECIES_DEFINITIONS[e.species].isHumanoid);
       if (nearbyHumanoids.length > 0) {
         const hero = rng.pick(nearbyHumanoids);

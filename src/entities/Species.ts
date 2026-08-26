@@ -76,7 +76,7 @@ export const SPECIES_DEFINITIONS: Record<SpeciesType, SpeciesConfig> = {
     gestationYears: 1,
     primaryColor: '#64748b',
     buildingStyle: 'nenhum',
-    preferredBiomes: ['forest', 'tundra']
+    preferredBiomes: ['forest', 'tundra', 'grass']
   },
   [SpeciesType.BEAR]: {
     id: SpeciesType.BEAR,
@@ -90,7 +90,7 @@ export const SPECIES_DEFINITIONS: Record<SpeciesType, SpeciesConfig> = {
     gestationYears: 1,
     primaryColor: '#78350f',
     buildingStyle: 'nenhum',
-    preferredBiomes: ['forest', 'mountain']
+    preferredBiomes: ['forest', 'mountain', 'grass']
   },
   [SpeciesType.DRAGON]: {
     id: SpeciesType.DRAGON,
@@ -104,7 +104,7 @@ export const SPECIES_DEFINITIONS: Record<SpeciesType, SpeciesConfig> = {
     gestationYears: 3,
     primaryColor: '#ef4444',
     buildingStyle: 'Ninho Volcânico',
-    preferredBiomes: ['mountain', 'savanna', 'corrupted']
+    preferredBiomes: ['mountain', 'savanna', 'corrupted', 'grass']
   },
   [SpeciesType.BOAR]: {
     id: SpeciesType.BOAR,
@@ -118,7 +118,7 @@ export const SPECIES_DEFINITIONS: Record<SpeciesType, SpeciesConfig> = {
     gestationYears: 1,
     primaryColor: '#78350f',
     buildingStyle: 'nenhum',
-    preferredBiomes: ['forest', 'savanna']
+    preferredBiomes: ['forest', 'savanna', 'grass']
   },
   [SpeciesType.EAGLE]: {
     id: SpeciesType.EAGLE,
@@ -146,6 +146,6 @@ export const SPECIES_DEFINITIONS: Record<SpeciesType, SpeciesConfig> = {
     gestationYears: 2,
     primaryColor: '#451a03',
     buildingStyle: 'nenhum',
-    preferredBiomes: ['tundra', 'snow']
+    preferredBiomes: ['tundra', 'snow', 'grass']
   }
 };

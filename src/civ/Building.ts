@@ -40,13 +40,22 @@ export type BuildingType =
   | 'aqueduct'
   | 'wall'
   | 'port'
+  | 'naval_yard'
   | 'refinery'
   | 'oil_well'
   | 'airport'
+  | 'train_station'
   // Power
   | 'barracks'
   | 'keep'
   | 'palace'
+  | 'radar_station'
+  | 'sam_site'
+  | 'missile_silo'
+  | 'drone_command'
+  // Advanced Industrial & Civil Defense
+  | 'enrichment_facility'
+  | 'bomb_shelter'
   // Historic Wonders & Monuments
   | 'monument'
   | 'great_library'
@@ -113,7 +122,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'core',
     maxHp: 500,
     cost: {},
-    housing: 5,
+    housing: 8,
     storage: 200,
     produces: { food: 2 },
     unique: true,
@@ -126,7 +135,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'core',
     maxHp: 150,
     cost: { wood: 20 },
-    housing: 4,
+    housing: 6,
     description: 'Abrigo. Cada cidadão precisa de um ou o assentamento para de crescer.'
   },
 
@@ -272,6 +281,17 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     description: 'Runway, apron and tower. Freight and passengers move between any two of these regardless of what lies between them.'
   },
 
+  train_station: {
+    type: 'train_station',
+    name: 'Estação Ferroviária',
+    icon: '🚂',
+    category: 'infrastructure',
+    maxHp: 380,
+    cost: { stone: 45, wood: 30, steel: 20, tools: 8 },
+    jobs: 6,
+    description: 'Plataformas cobertas, pátio de manobras e bilheteria. Ponto central de embarque de passageiros e transbordo de frete ferroviário.'
+  },
+
   oil_well: {
     type: 'oil_well',
     name: 'Poço de Petróleo',
@@ -306,7 +326,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'knowledge',
     maxHp: 180,
     cost: { wood: 40, stone: 30 },
-    research: 6,
+    research: 12,
     jobs: 2,
     unique: true,
     description: 'Escrita acumulada. Conhecimento que sobrevive às pessoas que o descobriram.'
@@ -318,7 +338,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'knowledge',
     maxHp: 260,
     cost: { stone: 70, wood: 40, gold: 20 },
-    research: 16,
+    research: 32,
     consumes: { food: 6 },
     jobs: 5,
     unique: true,
@@ -335,7 +355,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'knowledge',
     maxHp: 300,
     cost: { stone: 50, wood: 25, clay: 12 },
-    research: 2,
+    research: 5,
     jobs: 2,
     unique: true,
     description: 'Um lugar para fazer petições a quem estiver segurando o pincel. Onde há templo, há fé — e uma coroa que a fé sanciona suporta o que a razão não suportaria.'
@@ -411,7 +431,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'infrastructure',
     maxHp: 350,
     cost: { stone: 90, tools: 8 },
-    housing: 12,
+    housing: 16,
     produces: { food: 4 },
     unique: true,
     description: 'Água doce em escala. As cidades podem finalmente crescer além de seus poços.'
@@ -440,6 +460,27 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     description: 'Docas de águas profundas, guindastes e armazéns. Navegação a vapor e industrial avançada requerem um porto de verdade.'
   },
 
+  naval_yard: {
+    type: 'naval_yard',
+    name: 'Estaleiro Naval',
+    icon: '⚓',
+    category: 'power',
+    maxHp: 400,
+    cost: { wood: 80, stone: 45, tools: 10 },
+    consumes: { wood: 4 },
+    defense: 1.3,
+    jobs: 6,
+    requiresCoast: true,
+    unique: true,
+    // The split between this and `port` is the whole point of having two.
+    // A harbour lands fish and unloads grain; it cannot lay down a keel with a
+    // gun deck on it. Without a yard a realm can still sail — cogs, caravels,
+    // war canoes, anything a village boatwright can manage — but every rated
+    // warship in the catalogue, from the trireme to the submarine, needs the
+    // slipways, the ropewalk and the ordnance store that only this building has.
+    description: 'Carreiras, cordoaria e paiol de artilharia. Um porto comum descarrega trigo; só um estaleiro assenta a quilha de um navio de guerra.'
+  },
+
   barracks: {
     type: 'barracks',
     name: 'Quartel',
@@ -454,13 +495,13 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
   },
   keep: {
     type: 'keep',
-    name: 'Forte',
+    name: 'Castelo / Fortaleza',
     icon: '🏰',
     category: 'power',
     maxHp: 600,
     cost: { stone: 100, wood: 40, tools: 6 },
     defense: 1.8,
-    housing: 6,
+    housing: 10,
     consumes: { food: 6 },
     unique: true,
     description: 'A sede fortificada de um lorde. A forma física da autoridade feudal.'
@@ -473,10 +514,10 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     maxHp: 700,
     cost: { stone: 150, gold: 80, tools: 12 },
     defense: 1.5,
-    housing: 10,
+    housing: 16,
     fiscal: 10,
     consumes: { food: 10 },
-    research: 4,
+    research: 8,
     unique: true,
     description: 'A sede de uma coroa que governa em vez de apenas reinar.'
   },
@@ -500,7 +541,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     category: 'knowledge',
     maxHp: 900,
     cost: { stone: 150, wood: 150, gold: 80 },
-    research: 50,
+    research: 80,
     unique: true,
     description: 'Uma maravilha mundial armazenando séculos de conhecimento científico e histórico.'
   },
@@ -527,6 +568,83 @@ export const BUILDINGS: Record<BuildingType, BuildingDefinition> = {
     housing: 15,
     unique: true,
     description: 'Uma arena lendária inspirando a moral militar e sufocando a agitação civil.'
+  },
+
+  radar_station: {
+    type: 'radar_station',
+    name: 'Estação de Radar',
+    icon: '📡',
+    category: 'power',
+    maxHp: 300,
+    cost: { stone: 50, steel: 40, tools: 15, machinery: 8 },
+    consumes: { fuel: 2 },
+    defense: 1.2,
+    research: 15,
+    jobs: 4,
+    unique: true,
+    description: 'Domo de radar e antenas de varredura. Fornece alerta antecipado e guia defesas antiaéreas.'
+  },
+  sam_site: {
+    type: 'sam_site',
+    name: 'Bateria Antiaérea (SAM)',
+    icon: '🛡️',
+    category: 'power',
+    maxHp: 450,
+    cost: { stone: 60, steel: 70, machinery: 15, tools: 20 },
+    consumes: { fuel: 3 },
+    defense: 1.6,
+    jobs: 6,
+    description: 'Lançadores verticais e radares de engajamento para interceptar mísseis, drones e bombardeiros.'
+  },
+  missile_silo: {
+    type: 'missile_silo',
+    name: 'Silo de Mísseis',
+    icon: '🚀',
+    category: 'power',
+    maxHp: 750,
+    cost: { stone: 150, steel: 100, machinery: 25, fuel: 30 },
+    consumes: { fuel: 4 },
+    defense: 1.4,
+    jobs: 8,
+    unique: true,
+    description: 'Complexo subterrâneo reforçado para estocagem e lançamento de mísseis balísticos e estratégicos.'
+  },
+  drone_command: {
+    type: 'drone_command',
+    name: 'Comando de Drones',
+    icon: '🛸',
+    category: 'power',
+    maxHp: 320,
+    cost: { stone: 40, steel: 45, machinery: 12, tools: 15 },
+    consumes: { fuel: 3 },
+    defense: 1.3,
+    jobs: 5,
+    description: 'Antenas de telemetria e hangares de controle para enxames de drones e reconhecimento tático.'
+  },
+  enrichment_facility: {
+    type: 'enrichment_facility',
+    name: 'Usina de Enriquecimento',
+    icon: '☢️',
+    category: 'craft',
+    maxHp: 500,
+    cost: { stone: 120, steel: 120, machinery: 30, tools: 25 },
+    jobs: 10,
+    consumes: { uranium: 1 },
+    produces: { fuel: 12 },
+    unique: true,
+    description: 'Centrífugas e reatores de enriquecimento de urânio para matriz energética de fissão e ogivas estratégicas.'
+  },
+  bomb_shelter: {
+    type: 'bomb_shelter',
+    name: 'Abrigo Antiaéreo',
+    icon: '🪖',
+    category: 'infrastructure',
+    maxHp: 600,
+    cost: { stone: 90, steel: 40, tools: 10 },
+    housing: 22,
+    defense: 1.2,
+    unique: true,
+    description: 'Bunkers subterrâneos de concreto armado que protegem a população urbana contra bombardeios e cinzas.'
   }
 };
 

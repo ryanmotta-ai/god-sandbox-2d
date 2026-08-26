@@ -220,6 +220,55 @@ export class SoundSynth {
     osc.start();
     osc.stop(this.ctx.currentTime + 0.25);
   }
+
+  public playCannon(): void {
+    if (!this.allow('cannon', 0.08, 3)) return;
+    this.init();
+    if (!this.ctx) return;
+
+    // Dual-stage cannon sound: punchy lowpass noise + resonant deep boom
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(25, this.ctx.currentTime + 0.5);
+
+    gain.gain.setValueAtTime(0.45, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.5);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(320, this.ctx.currentTime);
+    filter.frequency.linearRampToValueAtTime(60, this.ctx.currentTime + 0.5);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.out());
+
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.5);
+  }
+
+  public playWaterSplash(): void {
+    if (!this.allow('splash', 0.06, 3)) return;
+    this.init();
+    if (!this.ctx) return;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.35);
+
+    gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.35);
+
+    osc.connect(gain);
+    gain.connect(this.out());
+
+    osc.start();
+    osc.stop(this.ctx.currentTime + 0.35);
+  }
 }
 
 export const sound = new SoundSynth();

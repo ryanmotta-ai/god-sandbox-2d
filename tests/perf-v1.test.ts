@@ -5,7 +5,7 @@ import { SpeciesType } from '../src/entities/Species';
 import { classifyEntity, EntityRelevanceTracker, shouldTickEntity } from '../src/perf/EntityRelevance';
 import { SimulationScheduler } from '../src/perf/SimulationScheduler';
 import { TileMap } from '../src/world/TileMap';
-import { TERRAINS } from '../src/world/Biomes';
+import { TERRAINS, TerrainType } from '../src/world/Biomes';
 import { SimplePathfinder } from '../src/ai/Pathfinding';
 import { RailwayNetwork } from '../src/civ/RailwayNetwork';
 import { City } from '../src/civ/City';
@@ -103,7 +103,13 @@ function landPoints(map: TileMap, count: number): Array<{ x: number; y: number }
 {
   const map = new TileMap(48, 48, 'single_continent', 5150);
   const points = landPoints(map, 12);
-  map.ignite(points[0].x, points[0].y);
+  const flammablePoint = points.find(p => {
+    const t = map.getTile(p.x, p.y);
+    return t && (TERRAINS[t.type].flammability > 0 || t.type === TerrainType.FOREST);
+  }) ?? points[0];
+  const tileToIgnite = map.getTile(flammablePoint.x, flammablePoint.y)!;
+  tileToIgnite.type = TerrainType.FOREST;
+  map.ignite(flammablePoint.x, flammablePoint.y);
   assert.ok(map.updateFireTick() >= 1);
 
   const rail = new RailwayNetwork();

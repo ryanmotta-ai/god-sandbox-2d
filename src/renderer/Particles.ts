@@ -22,7 +22,7 @@ export interface Projectile {
   targetY: number;
   speed: number;
   progress: number;
-  type: 'arrow' | 'bullet' | 'cannonball' | 'sling_stone' | 'spear_thrust' | 'magic_bolt';
+  type: 'arrow' | 'bullet' | 'cannonball' | 'sling_stone' | 'spear_thrust' | 'magic_bolt' | 'torpedo' | 'depth_charge' | 'fire_arrow' | 'carrier_plane' | 'naval_shell';
   color: string;
   damage: number;
   targetEntity?: any;
@@ -34,6 +34,7 @@ export class ParticleManager {
   private static readonly MAX_PARTICLES = 250;
   private static readonly MAX_PROJECTILES = 160;
   private pool: ObjectPool<Particle>;
+  private projectilePool: ObjectPool<Projectile>;
   public activeParticles: Particle[] = [];
   public activeProjectiles: Projectile[] = [];
   private relevanceCenter: { x: number; y: number; radius: number } | null = null;
@@ -43,6 +44,28 @@ export class ParticleManager {
       () => ({ x: 0, y: 0, vx: 0, vy: 0, color: '#fff', size: 2, alpha: 1, life: 0, maxLife: 1 }),
       (p) => { p.text = undefined; p.alpha = 1; },
       300
+    );
+    this.projectilePool = new ObjectPool<Projectile>(
+      () => ({
+        x: 0,
+        y: 0,
+        startX: 0,
+        startY: 0,
+        targetX: 0,
+        targetY: 0,
+        speed: 10,
+        progress: 0,
+        type: 'arrow',
+        color: '#fff',
+        damage: 0
+      }),
+      (proj) => {
+        proj.targetEntity = undefined;
+        proj.onImpact = undefined;
+        proj.arcHeight = undefined;
+        proj.progress = 0;
+      },
+      200
     );
   }
 
@@ -58,7 +81,9 @@ export class ParticleManager {
     }
     if (this.activeParticles.length >= ParticleManager.MAX_PARTICLES) {
       if (!important) return null;
-      const old = this.activeParticles.shift();
+      const old = this.activeParticles[0];
+      const last = this.activeParticles.pop()!;
+      if (this.activeParticles.length > 0) this.activeParticles[0] = last;
       if (old) this.pool.release(old);
     }
     return this.pool.obtain();
@@ -112,6 +137,39 @@ export class ParticleManager {
     }
   }
 
+  /**
+   * Towering vertical water geyser for heavy naval impacts, near-misses, and torpedo detonations.
+   */
+  public spawnWaterGeyser(x: number, y: number, count: number = 12): void {
+    for (let i = 0; i < count; i++) {
+      const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.9;
+      const speed = 1.2 + Math.random() * 2.6;
+      const color = Math.random() > 0.3 ? '#ffffff' : '#bae6fd';
+      this.spawnParticle(
+        x + (Math.random() - 0.5) * 0.4,
+        y + (Math.random() - 0.5) * 0.2,
+        color,
+        Math.cos(angle) * speed * 0.5,
+        Math.sin(angle) * speed,
+        0.45 + Math.random() * 0.45,
+        2.5 + Math.random() * 3.5
+      );
+    }
+    // Base foaming ring
+    for (let i = 0; i < 6; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      this.spawnParticle(
+        x,
+        y,
+        'rgba(224, 242, 254, 0.75)',
+        Math.cos(angle) * 0.6,
+        Math.sin(angle) * 0.3,
+        0.5 + Math.random() * 0.3,
+        3 + Math.random() * 2
+      );
+    }
+  }
+
   public spawnWaterWake(x: number, y: number, vx: number = 0, vy: number = 0): void {
     const foamColor = Math.random() > 0.3 ? '#f0ffff' : '#b2ebf2';
     const side = (Math.random() - 0.5) * 0.4;
@@ -124,6 +182,121 @@ export class ParticleManager {
       0.4 + Math.random() * 0.4,
       2 + Math.random() * 2.5
     );
+  }
+
+  /**
+   * Tight bubbling cavitation wake trail trailing directly behind a racing torpedo.
+   */
+  public spawnTorpedoWake(x: number, y: number, dirX: number, dirY: number): void {
+    const jitterX = (Math.random() - 0.5) * 0.15;
+    const jitterY = (Math.random() - 0.5) * 0.15;
+    this.spawnParticle(
+      x + jitterX,
+      y + jitterY,
+      'rgba(240, 253, 250, 0.85)',
+      -dirX * 0.2 + (Math.random() - 0.5) * 0.1,
+      -dirY * 0.2 + (Math.random() - 0.5) * 0.1,
+      0.35 + Math.random() * 0.3,
+      2 + Math.random() * 1.5
+    );
+  }
+
+  /**
+   * Expanding underwater shockwave ring for depth charges and torpedo concussions.
+   */
+  public spawnUnderwaterShockwave(x: number, y: number): void {
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      this.spawnParticle(
+        x,
+        y,
+        'rgba(56, 189, 248, 0.85)',
+        Math.cos(angle) * 1.4,
+        Math.sin(angle) * 0.7,
+        0.35,
+        2.5
+      );
+    }
+  }
+
+  /**
+   * Muzzle flash and burst on firing guns / broadsides.
+   */
+  public spawnMuzzleFlash(x: number, y: number, dirX: number, dirY: number, count: number = 5): void {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.atan2(dirY, dirX) + (Math.random() - 0.5) * 0.8;
+      const speed = 0.8 + Math.random() * 1.5;
+      const color = Math.random() > 0.4 ? '#fbbf24' : '#f97316';
+      this.spawnParticle(
+        x,
+        y,
+        color,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        0.12 + Math.random() * 0.1,
+        2.5 + Math.random() * 2
+      );
+    }
+  }
+
+  /**
+   * Wooden splinter debris flying outward when a wooden ship is hit.
+   */
+  public spawnShipSplinters(x: number, y: number, count: number = 6): void {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.8 + Math.random() * 1.8;
+      const color = Math.random() > 0.5 ? '#92400e' : '#b45309';
+      this.spawnParticle(
+        x,
+        y,
+        color,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed - 0.4,
+        0.4 + Math.random() * 0.3,
+        1.5 + Math.random() * 2
+      );
+    }
+  }
+
+  /**
+   * Floating wooden flotsam debris and crates bobbing on the water after a shipwreck.
+   */
+  public spawnFlotsam(x: number, y: number, count: number = 4): void {
+    for (let i = 0; i < count; i++) {
+      const offsetX = (Math.random() - 0.5) * 1.5;
+      const offsetY = (Math.random() - 0.5) * 1.5;
+      const color = Math.random() > 0.5 ? '#78350f' : '#92400e';
+      this.spawnParticle(
+        x + offsetX,
+        y + offsetY,
+        color,
+        (Math.random() - 0.5) * 0.05,
+        (Math.random() - 0.5) * 0.05,
+        2.5 + Math.random() * 2.0,
+        3 + Math.random() * 2.5
+      );
+    }
+  }
+
+  /**
+   * Iridescent dark oil slick floating on water from modern steel shipwrecks.
+   */
+  public spawnOilSlick(x: number, y: number): void {
+    for (let i = 0; i < 5; i++) {
+      const offsetX = (Math.random() - 0.5) * 1.8;
+      const offsetY = (Math.random() - 0.5) * 1.0;
+      const color = Math.random() > 0.5 ? 'rgba(30, 41, 59, 0.65)' : 'rgba(51, 65, 85, 0.55)';
+      this.spawnParticle(
+        x + offsetX,
+        y + offsetY,
+        color,
+        (Math.random() - 0.5) * 0.03,
+        (Math.random() - 0.5) * 0.03,
+        3.0 + Math.random() * 2.5,
+        5 + Math.random() * 4
+      );
+    }
   }
 
   public spawnWaterRipple(x: number, y: number): void {
@@ -172,14 +345,44 @@ export class ParticleManager {
     targetEntity?: any,
     onImpact?: (x: number, y: number, damage: number, targetEntity?: any) => void
   ): void {
-    const speed = type === 'bullet' ? 32 : type === 'cannonball' ? 10 : type === 'arrow' ? 15 : type === 'spear_thrust' ? 18 : 11;
-    const arcHeight = type === 'cannonball' ? 1.2 : type === 'arrow' ? 0.5 : type === 'sling_stone' ? 0.3 : 0;
-    const color = type === 'bullet' ? '#fde047' : type === 'cannonball' ? '#1e293b' : type === 'magic_bolt' ? '#38bdf8' : '#78350f';
+    const speed =
+      type === 'bullet' ? 32 :
+      type === 'naval_shell' ? 14 :
+      type === 'cannonball' ? 10 :
+      type === 'carrier_plane' ? 11 :
+      type === 'torpedo' ? 8.5 :
+      type === 'arrow' || type === 'fire_arrow' ? 15 :
+      type === 'spear_thrust' ? 18 :
+      type === 'depth_charge' ? 7.5 : 11;
+
+    const arcHeight =
+      type === 'cannonball' || type === 'naval_shell' ? 1.2 :
+      type === 'depth_charge' ? 1.5 :
+      type === 'arrow' || type === 'fire_arrow' ? 0.5 :
+      type === 'carrier_plane' ? 0.8 :
+      type === 'sling_stone' ? 0.3 : 0;
+
+    const color =
+      type === 'bullet' ? '#fde047' :
+      type === 'cannonball' || type === 'naval_shell' ? '#1e293b' :
+      type === 'magic_bolt' ? '#38bdf8' :
+      type === 'torpedo' ? '#94a3b8' :
+      type === 'depth_charge' ? '#334155' :
+      type === 'fire_arrow' ? '#f97316' :
+      type === 'carrier_plane' ? '#475569' : '#78350f';
 
     // Muzzle smoke flash for firearms
     if (type === 'bullet') {
       this.spawnParticle(startX, startY, 'rgba(251,191,36,0.9)', 0, 0, 0.2, 4);
-      this.spawnParticle(startX, startY, 'rgba(226,232,240,0.6)', (Math.random()-0.5)*0.3, -0.4, 0.35, 3);
+      this.spawnParticle(startX, startY, 'rgba(226,232,240,0.6)', (Math.random() - 0.5) * 0.3, -0.4, 0.35, 3);
+    } else if (type === 'cannonball' || type === 'naval_shell') {
+      const dx = targetX - startX;
+      const dy = targetY - startY;
+      const len = Math.hypot(dx, dy) || 1;
+      this.spawnMuzzleFlash(startX, startY, dx / len, dy / len, 6);
+      this.spawnGunSmoke(startX, startY, dx / len, dy / len, 8);
+    } else if (type === 'torpedo') {
+      this.spawnWaterSplash(startX, startY, 4);
     }
 
     // Projectiles carry gameplay impacts. Resolve the oldest one before making
@@ -187,22 +390,22 @@ export class ParticleManager {
     if (this.activeProjectiles.length >= ParticleManager.MAX_PROJECTILES) {
       this.triggerProjectileImpact(this.activeProjectiles[0], 0);
     }
-    this.activeProjectiles.push({
-      x: startX,
-      y: startY,
-      startX,
-      startY,
-      targetX,
-      targetY,
-      speed,
-      progress: 0,
-      type,
-      color,
-      damage,
-      targetEntity,
-      arcHeight,
-      onImpact
-    });
+    const proj = this.projectilePool.obtain();
+    proj.x = startX;
+    proj.y = startY;
+    proj.startX = startX;
+    proj.startY = startY;
+    proj.targetX = targetX;
+    proj.targetY = targetY;
+    proj.speed = speed;
+    proj.progress = 0;
+    proj.type = type;
+    proj.color = color;
+    proj.damage = damage;
+    proj.targetEntity = targetEntity;
+    proj.arcHeight = arcHeight;
+    proj.onImpact = onImpact;
+    this.activeProjectiles.push(proj);
   }
 
   private triggerProjectileImpact(proj: Projectile, index: number): void {
@@ -216,15 +419,36 @@ export class ParticleManager {
     }
 
     // Impact visual effects
-    if (proj.type === 'cannonball') {
-      this.spawnExplosion(proj.targetX, proj.targetY, '#ef4444', 25);
+    if (proj.type === 'cannonball' || proj.type === 'naval_shell') {
+      this.spawnExplosion(proj.targetX, proj.targetY, '#ef4444', 22);
+      this.spawnShipSplinters(proj.targetX, proj.targetY, 7);
+      this.spawnImpactSparks(proj.targetX, proj.targetY, 6);
+    } else if (proj.type === 'torpedo') {
+      this.spawnUnderwaterShockwave(proj.targetX, proj.targetY);
+      this.spawnWaterGeyser(proj.targetX, proj.targetY, 14);
+      this.spawnExplosion(proj.targetX, proj.targetY, '#f97316', 16);
+    } else if (proj.type === 'depth_charge') {
+      this.spawnUnderwaterShockwave(proj.targetX, proj.targetY);
+      this.spawnWaterGeyser(proj.targetX, proj.targetY, 12);
+      this.spawnExplosion(proj.targetX, proj.targetY, '#ef4444', 12);
+    } else if (proj.type === 'carrier_plane') {
+      this.spawnExplosion(proj.targetX, proj.targetY, '#f97316', 18);
+      this.spawnWaterSplash(proj.targetX, proj.targetY, 8);
+      this.spawnShipSplinters(proj.targetX, proj.targetY, 4);
+    } else if (proj.type === 'fire_arrow') {
+      this.spawnExplosion(proj.targetX, proj.targetY, '#f97316', 8);
+      this.spawnImpactSparks(proj.targetX, proj.targetY, 4);
     } else if (proj.type === 'bullet') {
       this.spawnParticle(proj.targetX, proj.targetY, '#fde047', 0, -0.2, 0.2, 3);
     } else {
       this.spawnParticle(proj.targetX, proj.targetY, '#cbd5e1', 0, -0.2, 0.2, 2);
     }
 
-    this.activeProjectiles.splice(index, 1);
+    const last = this.activeProjectiles.pop()!;
+    if (index < this.activeProjectiles.length) {
+      this.activeProjectiles[index] = last;
+    }
+    this.projectilePool.release(proj);
   }
 
   public update(dt: number): void {
@@ -233,15 +457,13 @@ export class ParticleManager {
       p.life += dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-
-      if (p.text) {
-        p.alpha = Math.max(0, 1 - p.life / p.maxLife);
-      } else {
-        p.alpha = Math.max(0, 1 - p.life / p.maxLife);
-      }
+      p.alpha = Math.max(0, 1 - p.life / p.maxLife);
 
       if (p.life >= p.maxLife) {
-        this.activeParticles.splice(i, 1);
+        const last = this.activeParticles.pop()!;
+        if (i < this.activeParticles.length) {
+          this.activeParticles[i] = last;
+        }
         this.pool.release(p);
       }
     }
@@ -265,15 +487,25 @@ export class ParticleManager {
         proj.x = proj.startX + (proj.targetX - proj.startX) * proj.progress;
         proj.y = proj.startY + (proj.targetY - proj.startY) * proj.progress;
 
-        // Parabolic arc offset: sin(t*π) peaks at t=0.5, giving a smooth
-        // rise-and-fall trajectory. The renderer uses proj.arcHeight to
-        // recompute this offset for rendering the lifted sprite vs. ground shadow.
-
         // Particle trail
         if (proj.type === 'bullet') {
           this.spawnParticle(proj.x, proj.y, 'rgba(253, 224, 71, 0.6)', 0, 0, 0.12, 2);
-        } else if (proj.type === 'cannonball') {
+        } else if (proj.type === 'cannonball' || proj.type === 'naval_shell') {
           this.spawnParticle(proj.x, proj.y, 'rgba(71, 85, 105, 0.7)', (Math.random() - 0.5) * 0.1, -0.2, 0.3, 3);
+        } else if (proj.type === 'torpedo') {
+          this.spawnTorpedoWake(
+            proj.x,
+            proj.y,
+            (proj.targetX - proj.startX) / (totalDist || 1),
+            (proj.targetY - proj.startY) / (totalDist || 1)
+          );
+        } else if (proj.type === 'fire_arrow') {
+          this.spawnParticle(proj.x, proj.y, 'rgba(249, 115, 22, 0.85)', 0, 0, 0.15, 2.5);
+          if (Math.random() > 0.6) this.spawnParticle(proj.x, proj.y, '#fbbf24', (Math.random() - 0.5) * 0.2, 0.1, 0.15, 1.5);
+        } else if (proj.type === 'carrier_plane') {
+          if (Math.random() > 0.5) {
+            this.spawnParticle(proj.x, proj.y, 'rgba(226, 232, 240, 0.45)', 0, -0.1, 0.2, 1.5);
+          }
         }
       }
     }

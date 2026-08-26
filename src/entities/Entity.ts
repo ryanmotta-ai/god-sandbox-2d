@@ -86,6 +86,14 @@ export class Entity implements HasPosition {
 
   /** Building ID this citizen is assigned to work at. */
   public workplaceId: string | null = null;
+  /**
+   * The invasion fleet this soldier is aboard, if any.
+   *
+   * Someone at sea is alive and owned by their realm, but is not standing on the
+   * map: the per-tick AI skips them, so they do not walk, forage, starve or fight
+   * until the hull either beaches them or sinks under them.
+   */
+  public aboardFleetId: string | null = null;
   /** Home position (city center ± offset), assigned when job is taken. */
   public homeX: number | null = null;
   public homeY: number | null = null;

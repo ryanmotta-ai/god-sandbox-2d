@@ -189,13 +189,20 @@ export class SimplePathfinder {
     startX: number, startY: number,
     targetX: number, targetY: number,
     tileMap: TileMap,
-    speed: number = 0.15
+    speed: number = 0.15,
+    out?: { x: number; y: number; blocked?: boolean }
   ): { x: number; y: number; blocked?: boolean } {
+    const res = out ?? { x: startX, y: startY, blocked: false };
     const dx = targetX - startX;
     const dy = targetY - startY;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist < 0.05) return { x: targetX, y: targetY, blocked: false };
+    if (dist < 0.05) {
+      res.x = targetX;
+      res.y = targetY;
+      res.blocked = false;
+      return res;
+    }
 
     // Check current tile for road speed bonus
     const currentTile = tileMap.getTile(Math.floor(startX), Math.floor(startY));
@@ -217,11 +224,10 @@ export class SimplePathfinder {
     if (tileAtNew && !TERRAINS[tileAtNew.type].isWater && TERRAINS[tileAtNew.type].isWalkable && !isFortificationBarrierId(tileAtNew.buildingId)) {
       const moveCost = TERRAINS[tileAtNew.type].moveCost;
       const costFactor = 1 / Math.max(0.5, moveCost);
-      return {
-        x: startX + moveX * costFactor,
-        y: startY + moveY * costFactor,
-        blocked: false
-      };
+      res.x = startX + moveX * costFactor;
+      res.y = startY + moveY * costFactor;
+      res.blocked = false;
+      return res;
     }
 
     // Obstacle avoidance: try sliding along one axis smoothly
@@ -231,13 +237,19 @@ export class SimplePathfinder {
     // Try horizontal slide
     const tileH = tileMap.getTile(Math.floor(slideX), Math.floor(startY));
     if (tileH && !TERRAINS[tileH.type].isWater && TERRAINS[tileH.type].isWalkable && !isFortificationBarrierId(tileH.buildingId)) {
-      return { x: slideX, y: startY, blocked: false };
+      res.x = slideX;
+      res.y = startY;
+      res.blocked = false;
+      return res;
     }
 
     // Try vertical slide
     const tileV = tileMap.getTile(Math.floor(startX), Math.floor(slideY));
     if (tileV && !TERRAINS[tileV.type].isWater && TERRAINS[tileV.type].isWalkable && !isFortificationBarrierId(tileV.buildingId)) {
-      return { x: startX, y: slideY, blocked: false };
+      res.x = startX;
+      res.y = slideY;
+      res.blocked = false;
+      return res;
     }
 
     // Try random jitter to escape stuck positions
@@ -247,12 +259,18 @@ export class SimplePathfinder {
       const jy = startY + Math.sin(angle) * speed;
       const jTile = tileMap.getTile(Math.floor(jx), Math.floor(jy));
       if (jTile && !TERRAINS[jTile.type].isWater && TERRAINS[jTile.type].isWalkable && !isFortificationBarrierId(jTile.buildingId)) {
-        return { x: jx, y: jy, blocked: false };
+        res.x = jx;
+        res.y = jy;
+        res.blocked = false;
+        return res;
       }
     }
 
     // Completely blocked by water/obstacle
-    return { x: startX, y: startY, blocked: true };
+    res.x = startX;
+    res.y = startY;
+    res.blocked = true;
+    return res;
   }
 
   /**
@@ -345,17 +363,18 @@ export class SimplePathfinder {
     myX: number, myY: number,
     threatX: number, threatY: number,
     tileMap: TileMap,
-    speed: number = 0.2
-  ): { x: number; y: number } {
+    speed: number = 0.2,
+    out?: { x: number; y: number; blocked?: boolean }
+  ): { x: number; y: number; blocked?: boolean } {
     const dx = myX - threatX;
     const dy = myY - threatY;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 0.01) {
-      return this.getStepTowards(myX, myY, myX + rng.range(-2.5, 2.5), myY + rng.range(-2.5, 2.5), tileMap, speed);
+      return this.getStepTowards(myX, myY, myX + rng.range(-2.5, 2.5), myY + rng.range(-2.5, 2.5), tileMap, speed, out);
     }
     const fleeX = myX + (dx / dist) * 8;
     const fleeY = myY + (dy / dist) * 8;
-    return this.getStepTowards(myX, myY, fleeX, fleeY, tileMap, speed);
+    return this.getStepTowards(myX, myY, fleeX, fleeY, tileMap, speed, out);
   }
 
   /**

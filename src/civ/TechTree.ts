@@ -67,12 +67,12 @@ export const TECH_ERAS: Record<TechEra, TechEraInfo> = {
  * civilisation's lifetime rather than four of them.
  */
 const ERA_COST_SCALE: Record<TechEra, number> = {
-  stone: 1,
-  bronze: 1.2,
-  iron: 1.8,
-  classical: 2.8,
-  industrial: 4.0,
-  modern: 6.0
+  stone: 0.6,
+  bronze: 0.8,
+  iron: 1.1,
+  classical: 1.6,
+  industrial: 2.2,
+  modern: 3.0
 };
 
 /**
@@ -104,8 +104,8 @@ export function techCost(tech: TechDefinition, cityCount: number = 1, diffusion:
  * one realm's privilege. Conquest transfers knowledge. And a realm that has fallen
  * behind has a way back, which is what stops a single runaway winner.
  */
-const DIFFUSION_PER_PEER = 0.12;
-const MAX_DIFFUSION_DISCOUNT = 0.6;
+const DIFFUSION_PER_PEER = 0.20;
+const MAX_DIFFUSION_DISCOUNT = 0.75;
 
 /**
  * Compresses a compounded multiplier so long tech chains give strong but
@@ -125,7 +125,7 @@ function damped(multiplier: number, exponent: number = 0.55): number {
  * of magnitude. A realm that has invested its entire history in scholarship
  * should feel it.
  */
-const RESEARCH_DAMPING = 0.78;
+const RESEARCH_DAMPING = 0.88;
 
 /** Everything a technology can grant when it completes. */
 export interface TechUnlocks {
@@ -158,7 +158,11 @@ export type TechFeature =
   | 'diplomacy_pacts'   // Formal treaties beyond war/peace
   | 'colonisation'      // Settlers can cross water
   | 'conscription'      // Larger armies
-  | 'mass_production';  // Factory output
+  | 'railways'          // Train network and locomotives
+  | 'mass_production'   // Factory output
+  | 'air_defense_grid'  // Layered SAM and interception network
+  | 'nuclear_weapons'   // Nuclear enrichment & strategic warheads
+  | 'drone_swarms';     // UAV avionics & loitering munitions
 
 export interface TechDefinition {
   id: string;
@@ -369,7 +373,7 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
     icon: '🏗️',
     cost: 480,
     requires: ['mathematics', 'masonry'],
-    unlocks: { buildings: ['aqueduct', 'port'], modifiers: { production: 1.3, growth: 1.2, territory: 3 } },
+    unlocks: { buildings: ['aqueduct', 'port', 'naval_yard'], modifiers: { production: 1.3, growth: 1.2, territory: 3 } },
     description: 'Aquedutos, guindastes e máquinas de cerco. As cidades finalmente podem crescer além de seus poços.',
     discovery: 'dominou a engenharia'
   },
@@ -455,7 +459,7 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
     icon: '🚂',
     cost: 1100,
     requires: ['engineering', 'metallurgy'],
-    unlocks: { modifiers: { production: 1.5, trade: 1.3 } },
+    unlocks: { buildings: ['train_station'], features: ['railways'], modifiers: { production: 1.5, trade: 1.3 } },
     description: 'O trabalho deixa de ser limitado por quantos braços você tem.',
     discovery: 'dominou o vapor'
   },
@@ -534,6 +538,54 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
     unlocks: { modifiers: { research: 1.3, trade: 1.2 } },
     description: 'Quem controla a transmissão controla o que as pessoas acreditam ter acontecido.',
     discovery: 'construiu um aparato de mídia de massa'
+  },
+  radar_systems: {
+    id: 'radar_systems',
+    name: 'Sistemas de Radar',
+    track: 'craft',
+    era: 'modern',
+    icon: '📡',
+    cost: 2400,
+    requires: ['electricity', 'aviation'],
+    unlocks: { buildings: ['radar_station'], features: ['air_defense_grid'] },
+    description: 'Varredura e rastreamento por ondas de rádio para detecção de aeronaves e projéteis antes do impacto visual.',
+    discovery: 'instalou seus primeiros radares de alerta antecipado'
+  },
+  rocketry: {
+    id: 'rocketry',
+    name: 'Foguetes & Balística',
+    track: 'craft',
+    era: 'modern',
+    icon: '🚀',
+    cost: 3000,
+    requires: ['gunpowder', 'jet_age'],
+    unlocks: { buildings: ['missile_silo', 'sam_site'], goods: ['missiles'] },
+    description: 'Propulsão a combustível sólido e líquido para projéteis guiados de longo alcance.',
+    discovery: 'dominou a tecnologia de foguetes e balística'
+  },
+  nuclear_fission: {
+    id: 'nuclear_fission',
+    name: 'Fissão Nuclear',
+    track: 'craft',
+    era: 'modern',
+    icon: '☢️',
+    cost: 4200,
+    requires: ['electricity', 'rocketry'],
+    unlocks: { buildings: ['enrichment_facility'], features: ['nuclear_weapons'], modifiers: { production: 1.5, research: 1.6 } },
+    description: 'A divisão do átomo: energia massiva e o poder de dissuasão estratégica absoluta.',
+    discovery: 'desvendou os segredos da fissão nuclear'
+  },
+  drone_avionics: {
+    id: 'drone_avionics',
+    name: 'Aviônica & Drones',
+    track: 'craft',
+    era: 'modern',
+    icon: '🛸',
+    cost: 3400,
+    requires: ['mass_media', 'jet_age'],
+    unlocks: { buildings: ['drone_command', 'bomb_shelter'], features: ['drone_swarms'] },
+    description: 'Veículos aéreos pilotados remotamente com sistemas de navegação autônoma e munições espreitadoras.',
+    discovery: 'implementou frotas de drones autônomos'
   },
 
   // ========================= POLITICAL TRACK =========================
@@ -700,7 +752,11 @@ const TECH_STRATEGIC_DEMAND: Record<string, Partial<Record<GoodId, number>>> = {
   steam_power: { coal: 2.2, iron: 0.9 },
   industrialization: { coal: 1.8, oil: 1.5, rubber: 1.3, steel: 1.4 },
   electricity: { copper: 1.8, oil: 1.0, uranium: 0.5 },
-  mass_media: { copper: 0.9 }
+  mass_media: { copper: 0.9 },
+  radar_systems: { copper: 1.2, steel: 0.8 },
+  rocketry: { fuel: 2.0, steel: 1.8, gunpowder: 1.2 },
+  nuclear_fission: { uranium: 2.5, steel: 1.5, fuel: 1.0 },
+  drone_avionics: { fuel: 1.2, steel: 1.0, machinery: 1.5 }
 };
 
 /**

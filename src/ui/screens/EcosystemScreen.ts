@@ -83,10 +83,7 @@ export class EcosystemScreen implements Screen {
 
             el('h4', { class: 'section-subheading', text: '🗺️ Cobertura Global de Biomas' }),
             el('div', { class: 'biomes-progress-list' }, [
-              this.biomeBar('🌲 Floresta Temperada', '45%', '#10b981'),
-              this.biomeBar('🌾 Planícies & Cultivos', '30%', '#fbbf24'),
-              this.biomeBar('⛰️ Montanhas & Rocha', '15%', '#94a3b8'),
-              this.biomeBar('🏜️ Deserto & Areia', '10%', '#f59e0b')
+              this.biomeBar('🌾 Pastagem / Planície', '100%', '#10b981')
             ])
           ]),
 

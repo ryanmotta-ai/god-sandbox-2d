@@ -193,7 +193,11 @@ const FEATURE_NAME: Record<TechFeature, string> = {
   diplomacy_pacts: 'Pactos diplomáticos formais',
   colonisation: 'Colonização ultramarina',
   conscription: 'Conscrição',
-  mass_production: 'Produção em massa'
+  railways: 'Ferrovias e locomotivas',
+  mass_production: 'Produção em massa',
+  air_defense_grid: 'Rede de Defesa Antiaérea (SAM)',
+  nuclear_weapons: 'Arsenal e Ogivas Nucleares',
+  drone_swarms: 'Enxames de Drones Autônomos'
 };
 
 /**

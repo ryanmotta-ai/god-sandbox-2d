@@ -110,12 +110,14 @@ export const URBAN_PROFILES: Partial<Record<BuildingType, UrbanProfile>> = {
   // ---- Logistics: the waterfront edge of trade. ----
   harbor: { affinity: 'logistics', prefersRoad: 0.85, centerPreference: 0.35, spacing: 1.0, densityTolerance: 0.85 },
   port: { affinity: 'logistics', prefersRoad: 0.9, centerPreference: 0.3, spacing: 1.4, densityTolerance: 0.8 },
+  naval_yard: { affinity: 'military', prefersRoad: 0.85, centerPreference: 0.25, spacing: 1.5, densityTolerance: 0.75 },
 
   // ---- Industry: its own quarter, out toward the edge. ----
   workshop: { affinity: 'industrial', prefersRoad: 0.8, centerPreference: 0.45, spacing: 0.8, densityTolerance: 0.9 },
   smithy: { affinity: 'industrial', prefersRoad: 0.8, centerPreference: 0.4, spacing: 0.9, densityTolerance: 0.85 },
   factory: { affinity: 'industrial', prefersRoad: 0.9, centerPreference: 0.2, spacing: 1.6, densityTolerance: 0.75 },
   refinery: { affinity: 'industrial', prefersRoad: 0.9, centerPreference: 0.15, spacing: 1.8, densityTolerance: 0.7 },
+  enrichment_facility: { affinity: 'industrial', prefersRoad: 0.85, centerPreference: 0.1, spacing: 2.2, densityTolerance: 0.65 },
 
   // ---- Extraction: geology decides, urbanism only breaks ties. ----
   mine: { affinity: 'extraction', prefersRoad: 0.15, centerPreference: 0.05, spacing: 1.0, densityTolerance: 0.75 },
@@ -129,6 +131,11 @@ export const URBAN_PROFILES: Partial<Record<BuildingType, UrbanProfile>> = {
 
   // ---- Military: on the roads, facing outward. ----
   barracks: { affinity: 'military', prefersRoad: 0.85, centerPreference: 0.5, spacing: 1.2, densityTolerance: 0.75 },
+  radar_station: { affinity: 'military', prefersRoad: 0.8, centerPreference: 0.3, spacing: 1.5, densityTolerance: 0.7 },
+  sam_site: { affinity: 'military', prefersRoad: 0.85, centerPreference: 0.35, spacing: 1.4, densityTolerance: 0.75 },
+  missile_silo: { affinity: 'military', prefersRoad: 0.7, centerPreference: 0.15, spacing: 2.0, densityTolerance: 0.6 },
+  drone_command: { affinity: 'military', prefersRoad: 0.85, centerPreference: 0.4, spacing: 1.3, densityTolerance: 0.75 },
+  bomb_shelter: { affinity: 'residential', prefersRoad: 0.9, centerPreference: 0.6, spacing: 1.2, densityTolerance: 0.85 },
   wall: { affinity: 'military', prefersRoad: 0.2, centerPreference: 0.05, spacing: 0.5, densityTolerance: 1.0 }
 };
 
@@ -168,7 +175,8 @@ const ATTRACTS: Partial<Record<BuildingType, BuildingType[]>> = {
   pasture: ['pasture', 'farm'],
   barracks: ['keep', 'wall', 'barracks'],
   port: ['harbor', 'market', 'factory'],
-  harbor: ['port', 'market']
+  harbor: ['port', 'market'],
+  naval_yard: ['port', 'harbor', 'barracks']
 };
 
 // ============================================================
@@ -282,7 +290,7 @@ interface NearbyBuilding {
  */
 function buildingVisualExtent(type: BuildingType): number {
   if (['palace', 'keep', 'monument', 'great_library', 'grand_aqueduct', 'colosseum'].includes(type)) return 5;
-  if (['town_center', 'quarry', 'mine', 'factory', 'library', 'academy', 'temple', 'harbor', 'bank', 'stock_exchange', 'port', 'refinery', 'barracks'].includes(type)) return 4;
+  if (['town_center', 'quarry', 'mine', 'factory', 'library', 'academy', 'temple', 'harbor', 'bank', 'stock_exchange', 'port', 'refinery', 'barracks', 'naval_yard'].includes(type)) return 4;
   if (['farm', 'granary', 'pasture', 'lumber_camp', 'workshop', 'smithy', 'aqueduct', 'collective'].includes(type)) return 3;
   return type === 'wall' || type === 'oil_well' ? 1 : 2;
 }

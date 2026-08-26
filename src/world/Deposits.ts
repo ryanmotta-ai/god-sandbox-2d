@@ -255,9 +255,12 @@ export function generateDeposits(grid: Tile[][], width: number, height: number, 
           const max = rng.range(50, 120) * (0.8 + tile.fertility * 0.5);
           setResource(tile, 'food', max * rng.range(0.6, 0.95), max);
         }
-      } else if (dampWoodland && rng.chance(0.18)) {
-        const max = rng.range(50, 130) * (0.8 + tile.fertility * 0.5);
+      } else if (dampWoodland && rng.chance(0.28)) {
+        const max = rng.range(60, 140) * (0.8 + tile.fertility * 0.5);
         setResource(tile, 'wood', max * rng.range(0.65, 1), max);
+      } else if (tile.type === TerrainType.GRASS && rng.chance(0.08)) {
+        const max = rng.range(40, 90);
+        setResource(tile, 'wood', max * rng.range(0.6, 0.95), max);
       } else if (rng.chance(0.025)) {
         const max = rng.range(30, 75);
         setResource(tile, 'wood', max * rng.range(0.6, 0.95), max);

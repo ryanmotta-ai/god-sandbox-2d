@@ -32,6 +32,8 @@ export const ALL_POWERS: PowerDefinition[] = [
   { id: 'lava', name: 'Rio de Lava', category: 'terrain', icon: 'fire', description: 'Derrama fluxo vulcânico incandescente' },
   { id: 'build_road', name: 'Pavimentar Estrada', category: 'terrain', icon: 'route', description: 'Constrói e melhora estradas' },
   { id: 'remove_road', name: 'Demolir Estrada', category: 'terrain', icon: 'close', description: 'Remove a pavimentação de estradas' },
+  { id: 'build_rail', name: 'Assentar Linha Férrea', category: 'terrain', icon: 'route', description: 'Constrói e melhora trilhos de ferrovia' },
+  { id: 'remove_rail', name: 'Demolir Linha Férrea', category: 'terrain', icon: 'close', description: 'Remove trilhos da malha ferroviária' },
 
   // NATUREZA & BIOMAS
   { id: 'fertile_soil', name: 'Pastagem Fértil', category: 'nature', icon: 'farm', description: 'Pinta campos de grama de alta fertilidade' },
@@ -117,7 +119,7 @@ function recordDivineAct(powerId: string, tx: number, ty: number, ctx?: Terrafor
   if (!ctx) return;
 
   const blessings = new Set([
-    'rain', 'fertile_soil', 'trees', 'biome_forest', 'add_land', 'spawn_ore', 'build_road', 'heal', 'bless'
+    'rain', 'fertile_soil', 'trees', 'biome_forest', 'add_land', 'spawn_ore', 'build_road', 'build_rail', 'heal', 'bless'
   ]);
   const calamities = new Set([
     'wildfire', 'earthquake', 'meteorite', 'plague', 'lava', 'remove_land', 'shallow_water',
@@ -381,6 +383,27 @@ export class PowerExecutor {
         tileMap.applyBrush(tx, ty, radius, t => {
           t.roadLevel = 0;
           t.roadTraffic = 0;
+        });
+        break;
+      case 'build_rail':
+        tileMap.applyBrush(tx, ty, radius, t => {
+          if (!TERRAINS[t.type].isWater) {
+            t.railLevel = Math.min(3, Math.max(1, t.railLevel + 1));
+            t.railDamage = 0;
+            tileMap.markRenderDirty(t.x, t.y);
+            tileMap.markRailNetworkChanged(t.x, t.y);
+          }
+        });
+        break;
+      case 'remove_rail':
+        tileMap.applyBrush(tx, ty, radius, t => {
+          if (t.railLevel > 0) {
+            t.railLevel = 0;
+            t.railDamage = 0;
+            t.railOwnerId = null;
+            tileMap.markRenderDirty(t.x, t.y);
+            tileMap.markRailNetworkChanged(t.x, t.y);
+          }
         });
         break;
 

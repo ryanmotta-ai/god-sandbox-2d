@@ -44,7 +44,8 @@ export type GoodId =
   | 'cloth'
   | 'fuel'
   | 'gunpowder'
-  | 'machinery';
+  | 'machinery'
+  | 'missiles';
 
 export type GoodTier = 'common' | 'regional' | 'strategic';
 export type GoodKind = 'raw' | 'crafted';
@@ -394,6 +395,20 @@ export const GOODS: Record<GoodId, GoodDefinition> = {
     producedBy: 'factory',
     strategic: true,
     description: 'Aço, borracha e combustível numa só peça. Uma fábrica delas supera uma província de camponeses.'
+  },
+  missiles: {
+    id: 'missiles',
+    name: 'Mísseis & Guiados',
+    icon: '🚀',
+    color: '#ef4444',
+    kind: 'crafted',
+    tier: 'strategic',
+    basePrice: 140,
+    recipe: { steel: 2, fuel: 2, machinery: 1, gunpowder: 1 },
+    requiresTech: 'rocketry',
+    producedBy: 'factory',
+    strategic: true,
+    description: 'Mísseis táticos, foguetes e munições guiadas de precisão.'
   }
 };
 
@@ -461,6 +476,9 @@ export const PRODUCTION_RECIPES: Partial<Record<GoodId, ProductionRecipe[]>> = {
   ],
   machinery: [
     { inputs: { steel: 3, rubber: 1, fuel: 1 }, output: 3.4, requiresTech: 'industrialization', label: 'industrial machinery' }
+  ],
+  missiles: [
+    { inputs: { steel: 2, fuel: 2, machinery: 1, gunpowder: 1 }, output: 2, requiresTech: 'rocketry', label: 'mísseis convencionais' }
   ]
 };
 

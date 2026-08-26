@@ -7,6 +7,7 @@ import { KingdomEconomy } from './Economy';
 import { CulturalProfile, createCulturalProfile, deserializeCulturalProfile } from './Culture';
 import { SocietyProfile, createSocietyProfile, deserializeSocietyProfile } from './Society';
 import type { City } from './City';
+import { CompactTerritory } from '../world/CompactTerritory';
 import { LawProfile, aggregateLawEffects, createLawProfile, deserializeLawProfile } from './Laws';
 
 // Kingdom emblem IDs for pixel-art badge rendering
@@ -436,18 +437,26 @@ export class Kingdom {
   }
 
   /** Center of territory for badge placement. */
-  public computeCenter(cities: Map<string, { x: number; y: number; territory: Set<string> }>): { x: number; y: number } {
+  public computeCenter(cities: Map<string, { x: number; y: number; territory: CompactTerritory | Set<string> }>): { x: number; y: number } {
     let totalX = 0;
     let totalY = 0;
     let count = 0;
     for (const cityId of this.cityIds) {
       const city = cities.get(cityId);
       if (city) {
-        for (const key of city.territory) {
-          const [tx, ty] = key.split(',').map(Number);
-          totalX += tx;
-          totalY += ty;
-          count++;
+        if (city.territory instanceof CompactTerritory) {
+          city.territory.forEachXY((tx, ty) => {
+            totalX += tx;
+            totalY += ty;
+            count++;
+          });
+        } else {
+          for (const key of city.territory) {
+            const [tx, ty] = key.split(',').map(Number);
+            totalX += tx;
+            totalY += ty;
+            count++;
+          }
         }
       }
     }

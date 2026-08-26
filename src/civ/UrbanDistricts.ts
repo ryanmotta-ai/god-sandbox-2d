@@ -237,14 +237,14 @@ function ledgerSignals(city: City): { agricultural: number; extractive: number; 
 
 function addBuildingEvidence(scores: Record<UrbanDistrictType, number>, building: Building, weight: number): void {
   const type = building.type;
-  if (type === 'house' || type === 'aqueduct' || type === 'grand_aqueduct') scores.residential_common += 1.4 * weight;
+  if (type === 'house' || type === 'aqueduct' || type === 'grand_aqueduct' || type === 'bomb_shelter') scores.residential_common += 1.4 * weight;
   if (type === 'market' || type === 'bank' || type === 'stock_exchange' || type === 'collective') scores.commercial += 1.8 * weight;
   if (type === 'workshop' || type === 'smithy') scores.artisan += 1.75 * weight;
-  if (type === 'factory' || type === 'refinery' || type === 'oil_well') scores.industrial += 2.3 * weight;
+  if (type === 'factory' || type === 'refinery' || type === 'oil_well' || type === 'enrichment_facility') scores.industrial += 2.3 * weight;
   if (type === 'town_center' || type === 'palace' || type === 'monument' || type === 'library' || type === 'academy' || type === 'great_library' || type === 'colosseum') scores.civic += 1.8 * weight;
   if (type === 'temple') scores.religious += 2.1 * weight;
   if (type === 'harbor' || type === 'port') scores.port += 2.7 * weight;
-  if (type === 'barracks' || type === 'keep' || building.fortificationRole) scores.military += 2 * weight;
+  if (type === 'barracks' || type === 'keep' || type === 'radar_station' || type === 'sam_site' || type === 'missile_silo' || type === 'drone_command' || building.fortificationRole) scores.military += 2 * weight;
   if (type === 'farm' || type === 'pasture' || type === 'granary') scores.rural += 2.1 * weight;
   if (type === 'mine' || type === 'quarry' || type === 'lumber_camp') scores.industrial += 1.25 * weight;
   if (building.originGeneration <= 1) scores.historic_core += 1.15 * weight;
@@ -414,12 +414,12 @@ function updateSpecialization(city: City, kingdom: Kingdom | null, map: TileMap,
   const scores: Record<Exclude<UrbanSpecializationType, 'mixed'>, number> = {
     agricultural: counts(['farm', 'pasture', 'granary']) * 1.35 + ledger.agricultural * 4,
     mining: counts(['mine', 'quarry', 'lumber_camp', 'oil_well']) * 1.5 + ledger.extractive * 3,
-    industrial: counts(['factory', 'refinery', 'smithy', 'workshop']) * 1.45 + ledger.industrial * 4,
+    industrial: counts(['factory', 'refinery', 'smithy', 'workshop', 'enrichment_facility']) * 1.45 + ledger.industrial * 4,
     port: counts(['harbor', 'port']) * 2.8 + ledger.trade * 2.5,
     commercial: counts(['market', 'bank', 'stock_exchange']) * 1.8 + ledger.trade * 3,
     administrative: counts(['palace', 'town_center', 'academy', 'library', 'monument']) * 1.15 + (kingdom?.capitalCityId === city.id ? 3 : 0),
     rail_hub: Math.min(7, railTiles * .2) + ledger.trade * 1.5,
-    military: counts(['barracks', 'keep', 'wall']) * .65 + (kingdom?.externalThreat ?? 0) * 3
+    military: counts(['barracks', 'keep', 'wall', 'radar_station', 'sam_site', 'missile_silo', 'drone_command']) * .65 + (kingdom?.externalThreat ?? 0) * 3
   };
   const ranked = (Object.entries(scores) as Array<[Exclude<UrbanSpecializationType, 'mixed'>, number]>).sort((a, b) => b[1] - a[1]);
   const strongest = ranked[0], runnerUp = ranked[1];

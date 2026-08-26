@@ -214,21 +214,14 @@ export class WorldGenerator {
 
   private static classifyLand(
     elevation: number,
-    temperature: number,
-    moisture: number,
-    forest: number,
-    wetland: number,
+    _temperature: number,
+    _moisture: number,
+    _forest: number,
+    _wetland: number,
     ridge: number,
-    oceanDistance: number
+    _oceanDistance: number
   ): TerrainType {
     if (ridge > 0.34 || elevation > 0.79) return TerrainType.MOUNTAIN;
-    if (temperature < -12 || (temperature < -5 && elevation > 0.58)) return TerrainType.SNOW;
-    if (temperature < 3) return TerrainType.TUNDRA;
-    if ((wetland > 0.3 || moisture > 0.8) && elevation < 0.52) return TerrainType.SWAMP;
-    if (moisture < 0.23 && temperature > 14) return TerrainType.SAND;
-    if (moisture < 0.39 && temperature > 18) return TerrainType.SAVANNA;
-    if ((forest > 0.28 && moisture > 0.43) || moisture > 0.69) return TerrainType.FOREST;
-    if (oceanDistance <= 3 && moisture > 0.48 && elevation < 0.46) return TerrainType.SOIL;
     return TerrainType.GRASS;
   }
 
@@ -408,7 +401,7 @@ export class WorldGenerator {
       if (this.isWaterType(tile.type) || tile.type === TerrainType.MOUNTAIN) continue;
       tile.moisture = Math.min(1, tile.moisture + 0.22);
       tile.fertility = Math.min(1, tile.fertility + 0.28);
-      if (tile.type === TerrainType.SAND || tile.type === TerrainType.SAVANNA) tile.type = TerrainType.GRASS;
+      tile.type = TerrainType.GRASS;
     }
   }
 

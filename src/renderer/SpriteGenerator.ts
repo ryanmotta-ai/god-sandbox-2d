@@ -219,6 +219,24 @@ export class SpriteGenerator {
   }
 
 
+  /** Fast, non-allocating string sanitizer replacing slow regex replace in hot render path. */
+  private static fastSanitize(value?: string | null): string {
+    if (!value) return 'none';
+    let res = '';
+    const len = Math.min(value.length, 42);
+    for (let i = 0; i < len; i++) {
+      const code = value.charCodeAt(i);
+      if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code === 95) {
+        res += value[i];
+      } else if (code >= 65 && code <= 90) {
+        res += String.fromCharCode(code + 32);
+      } else {
+        res += '_';
+      }
+    }
+    return res || 'none';
+  }
+
   /**
    * Simulation-aware sprite. The legacy getSpeciesSprite() remains untouched,
    * while this variant layers profession, armor and the entity's real weapon
@@ -232,7 +250,6 @@ export class SpriteGenerator {
     visual: EntitySpriteVisualState = {}
   ): HTMLCanvasElement {
     const normalizedFrame = Math.abs(frame) % 4;
-    const safe = (value?: string | null) => (value || 'none').toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 42);
     const look = humanSkinIndex(visual.appearanceSeed);
     /**
      * Who carries the colours: the soldier standing in the centre of the front
@@ -242,17 +259,7 @@ export class SpriteGenerator {
     const bearer = visual.profession === 'soldier'
       && !!visual.appearanceSeed
       && stableSlot(visual.appearanceSeed, MARCH_SLOTS) === 0;
-    const visualKey = [
-      `look${look}`,
-      safe(visual.profession),
-      safe(visual.weaponName),
-      safe(visual.weaponCategory),
-      safe(visual.armorName),
-      safe(visual.plumeColor),
-      bearer ? 'colours' : 'ranker',
-      visual.isGreatPerson ? safe(visual.greatPersonType || 'great') : 'ordinary'
-    ].join('_');
-    const key = `entity_anim_${species}_${direction}_${animation}_${normalizedFrame}_${visualKey}`;
+    const key = `entity_anim_${species}_${direction}_${animation}_${normalizedFrame}_look${look}_${this.fastSanitize(visual.profession)}_${this.fastSanitize(visual.weaponName)}_${this.fastSanitize(visual.weaponCategory)}_${this.fastSanitize(visual.armorName)}_${this.fastSanitize(visual.plumeColor)}_${bearer ? 'colours' : 'ranker'}_${visual.isGreatPerson ? this.fastSanitize(visual.greatPersonType || 'great') : 'ordinary'}`;
 
     return this.getSprite(key, (ctx) => {
       this.drawSpeciesFrame(ctx, species, direction, animation, normalizedFrame, Boolean(visual.weaponName), look);
@@ -1853,10 +1860,10 @@ export class SpriteGenerator {
     if (['town_center', 'palace', 'academy', 'great_library', 'bank', 'stock_exchange', 'monument', 'colosseum'].includes(type)) return 'civic';
     if (['house', 'manor', 'apartment'].includes(type)) return 'residential';
     if (['market', 'harbor', 'port', 'caravanserai'].includes(type)) return 'market';
-    if (['factory', 'refinery', 'oil_well', 'workshop', 'smithy', 'mine', 'quarry', 'lumberyard'].includes(type)) return 'industrial';
-    if (['barracks', 'keep', 'wall'].includes(type)) return 'military';
+    if (['factory', 'refinery', 'oil_well', 'workshop', 'smithy', 'mine', 'quarry', 'lumberyard', 'enrichment_facility'].includes(type)) return 'industrial';
+    if (['barracks', 'keep', 'wall', 'naval_yard', 'radar_station', 'sam_site', 'missile_silo', 'drone_command'].includes(type)) return 'military';
     if (['temple', 'hospital'].includes(type)) return 'faith';
-    if (['granary', 'warehouse', 'aqueduct', 'grand_aqueduct', 'well', 'bridge'].includes(type)) return 'utility';
+    if (['granary', 'warehouse', 'aqueduct', 'grand_aqueduct', 'well', 'bridge', 'bomb_shelter'].includes(type)) return 'utility';
     return 'rural';
   }
 
@@ -4359,6 +4366,32 @@ export class SpriteGenerator {
       ctx.fillStyle = '#0f172a'; ctx.fillRect(8, 15, 6, 1);
     });
 
+    // Train Station — Grand Victorian / Industrial passenger terminal with clock tower and rail platforms
+    this.getSprite('b_train_station', (ctx) => {
+      // Platform foundation & rails at bottom
+      ctx.fillStyle = '#475569'; ctx.fillRect(0, 13, 16, 3);
+      ctx.fillStyle = '#94a3b8'; ctx.fillRect(0, 14, 16, 1); // steel rail track
+      ctx.fillStyle = '#78716c'; ctx.fillRect(2, 13, 2, 3); ctx.fillRect(7, 13, 2, 3); ctx.fillRect(12, 13, 2, 3); // wooden ties
+      // Main brick / stone station building
+      ctx.fillStyle = '#78350f'; ctx.fillRect(1, 5, 14, 8);
+      ctx.fillStyle = '#92400e'; ctx.fillRect(2, 6, 12, 7);
+      ctx.fillStyle = '#b45309'; ctx.fillRect(2, 6, 12, 1); // cornice
+      // Arched station shed glass & iron roof
+      ctx.fillStyle = '#1e293b'; ctx.fillRect(1, 3, 14, 3);
+      ctx.fillStyle = '#334155'; ctx.fillRect(2, 2, 12, 2);
+      ctx.fillStyle = '#38bdf8'; ctx.fillRect(4, 3, 8, 2); // glass skylight arch
+      // Central Clock Tower
+      ctx.fillStyle = '#78350f'; ctx.fillRect(6, 0, 4, 4);
+      ctx.fillStyle = '#451a03'; ctx.fillRect(5, 0, 1, 4); ctx.fillRect(10, 0, 1, 4);
+      ctx.fillStyle = '#f8fafc'; ctx.fillRect(7, 1, 2, 2); // clock face
+      px(ctx, 7, 1, '#0f172a'); px(ctx, 8, 2, '#0f172a'); // clock hands
+      // Station entrance arches
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(3, 9, 3, 4); ctx.fillRect(7, 8, 2, 5); ctx.fillRect(10, 9, 3, 4);
+      // Warm interior glowing lamps / departure board
+      ctx.fillStyle = '#fef08a'; px(ctx, 4, 10, '#fde047'); px(ctx, 11, 10, '#fde047');
+      ctx.fillStyle = '#38bdf8'; px(ctx, 7, 9, '#38bdf8'); px(ctx, 8, 9, '#38bdf8');
+    });
+
     // Aqueduct — Roman-style arched water channel on stone piers
     this.getSprite('b_aqueduct', (ctx) => {
       // Water channel, stone-lined
@@ -4744,6 +4777,142 @@ export class SpriteGenerator {
       px(ctx, 3, 2, '#fde047'); px(ctx, 12, 2, '#fde047');
       // Imperial eagle banners above
       ctx.fillStyle = '#fbbf24'; px(ctx, 7, 0, '#fbbf24'); px(ctx, 8, 0, '#fbbf24');
+    });
+
+    // Radar Station — Early-warning radar installation with parabolic dish & control center
+    this.getSprite('b_radar_station', (ctx) => {
+      // Concrete foundation
+      ctx.fillStyle = '#334155'; ctx.fillRect(1, 12, 14, 4);
+      ctx.fillStyle = '#475569'; ctx.fillRect(2, 13, 12, 2);
+      // Technical bunker building
+      ctx.fillStyle = '#1e293b'; ctx.fillRect(3, 8, 10, 5);
+      ctx.fillStyle = '#334155'; ctx.fillRect(4, 9, 8, 3);
+      // Glowing electronics / monitors
+      px(ctx, 5, 10, '#38bdf8'); px(ctx, 6, 10, '#38bdf8');
+      px(ctx, 9, 10, '#22c55e'); px(ctx, 10, 10, '#22c55e');
+      // Steel lattice pylon
+      ctx.fillStyle = '#475569'; ctx.fillRect(7, 3, 2, 6);
+      ctx.fillStyle = '#64748b'; px(ctx, 6, 5, '#64748b'); px(ctx, 9, 5, '#64748b');
+      // Large parabolic radar dish (concave angled dish)
+      ctx.fillStyle = '#e2e8f0'; ctx.fillRect(4, 1, 8, 3);
+      ctx.fillStyle = '#94a3b8'; ctx.fillRect(5, 2, 6, 1);
+      ctx.fillStyle = '#cbd5e1'; ctx.fillRect(6, 0, 4, 1);
+      // Feed horn receiver
+      ctx.fillStyle = '#ef4444'; px(ctx, 8, 0, '#ef4444');
+      // Transceiver signal pulse
+      ctx.fillStyle = '#38bdf8'; px(ctx, 4, 0, '#38bdf8'); px(ctx, 11, 0, '#38bdf8');
+    });
+
+    // SAM Site — Surface-to-Air Missile battery with twin angled launcher canisters
+    this.getSprite('b_sam_site', (ctx) => {
+      // Reinforced launcher pad with blast apron
+      ctx.fillStyle = '#334155'; ctx.fillRect(0, 13, 16, 3);
+      ctx.fillStyle = '#475569'; ctx.fillRect(1, 14, 14, 1);
+      // Rotating turret pedestal
+      ctx.fillStyle = '#1e293b'; ctx.fillRect(4, 9, 8, 5);
+      ctx.fillStyle = '#475569'; ctx.fillRect(5, 10, 6, 3);
+      // Left angled missile launch canister (slanted upward)
+      ctx.fillStyle = '#334155'; ctx.fillRect(2, 4, 3, 6);
+      ctx.fillStyle = '#64748b'; ctx.fillRect(3, 3, 2, 7);
+      ctx.fillStyle = '#ef4444'; ctx.fillRect(3, 2, 2, 2); // Missile nosecone
+      px(ctx, 3, 1, '#f87171');
+      // Right angled missile launch canister
+      ctx.fillStyle = '#334155'; ctx.fillRect(9, 4, 3, 6);
+      ctx.fillStyle = '#64748b'; ctx.fillRect(10, 3, 2, 7);
+      ctx.fillStyle = '#ef4444'; ctx.fillRect(10, 2, 2, 2); // Missile nosecone
+      px(ctx, 10, 1, '#f87171');
+      // Central fire-control radar pod
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(6, 6, 4, 4);
+      ctx.fillStyle = '#38bdf8'; px(ctx, 7, 7, '#38bdf8'); px(ctx, 8, 7, '#38bdf8');
+    });
+
+    // Missile Silo — Subterranean blast-hardened ICBM silo with heavy hatch and hazard stripes
+    this.getSprite('b_missile_silo', (ctx) => {
+      // Deep ground foundation / blast slab
+      ctx.fillStyle = '#1e293b'; ctx.fillRect(0, 12, 16, 4);
+      ctx.fillStyle = '#334155'; ctx.fillRect(1, 13, 14, 2);
+      // Circular reinforced silo collar
+      ctx.fillStyle = '#475569'; ctx.fillRect(2, 6, 12, 7);
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(3, 7, 10, 5);
+      // Heavy hydraulic blast door hatch (slid half-open or textured)
+      ctx.fillStyle = '#64748b'; ctx.fillRect(4, 5, 8, 4);
+      // Hazard warning stripes (yellow / black diagonal look)
+      ctx.fillStyle = '#eab308'; px(ctx, 4, 5, '#eab308'); px(ctx, 6, 5, '#eab308'); px(ctx, 8, 5, '#eab308'); px(ctx, 10, 5, '#eab308');
+      ctx.fillStyle = '#1c1917'; px(ctx, 5, 5, '#1c1917'); px(ctx, 7, 5, '#1c1917'); px(ctx, 9, 5, '#1c1917'); px(ctx, 11, 5, '#1c1917');
+      // Silo exhaust vents on sides
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(1, 8, 2, 3); ctx.fillRect(13, 8, 2, 3);
+      // Central missile tip visible inside silo bore
+      ctx.fillStyle = '#f8fafc'; ctx.fillRect(7, 3, 2, 4);
+      ctx.fillStyle = '#dc2626'; ctx.fillRect(7, 1, 2, 2); // Warhead
+      px(ctx, 7, 0, '#ef4444');
+      // Red hazard beacon
+      ctx.fillStyle = '#ef4444'; px(ctx, 2, 6, '#ef4444'); px(ctx, 13, 6, '#ef4444');
+    });
+
+    // Drone Command — UCAV & UAV control hub with satellite antenna and launch catapult
+    this.getSprite('b_drone_command', (ctx) => {
+      // Concrete tarmac pad
+      ctx.fillStyle = '#475569'; ctx.fillRect(0, 13, 16, 3);
+      ctx.fillStyle = '#64748b'; ctx.fillRect(1, 14, 14, 1);
+      // Command Operations Building
+      ctx.fillStyle = '#1e293b'; ctx.fillRect(1, 7, 10, 7);
+      ctx.fillStyle = '#334155'; ctx.fillRect(2, 8, 8, 5);
+      // Glowing control screens & comms
+      ctx.fillStyle = '#38bdf8'; px(ctx, 3, 9, '#38bdf8'); px(ctx, 4, 9, '#38bdf8');
+      ctx.fillStyle = '#22c55e'; px(ctx, 6, 9, '#22c55e'); px(ctx, 7, 9, '#22c55e');
+      // White Radome (Satellite dome on roof)
+      ctx.fillStyle = '#f8fafc'; ctx.fillRect(3, 2, 5, 5);
+      ctx.fillStyle = '#cbd5e1'; ctx.fillRect(4, 1, 3, 6);
+      px(ctx, 4, 1, '#ffffff'); px(ctx, 5, 2, '#ffffff');
+      // Telemetry whip antennas
+      ctx.fillStyle = '#94a3b8'; ctx.fillRect(9, 1, 1, 6); ctx.fillRect(11, 3, 1, 4);
+      // Mini UAV Drone on roof launch rail
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(11, 7, 4, 2);
+      ctx.fillStyle = '#38bdf8'; px(ctx, 14, 7, '#38bdf8');
+      ctx.fillStyle = '#94a3b8'; px(ctx, 12, 6, '#94a3b8'); px(ctx, 12, 8, '#94a3b8'); // Wings
+    });
+
+    // Enrichment Facility — Nuclear isotope centrifuge halls & reactor containment dome
+    this.getSprite('b_enrichment_facility', (ctx) => {
+      // Heavy industrial foundation
+      ctx.fillStyle = '#3f3f46'; ctx.fillRect(0, 13, 16, 3);
+      ctx.fillStyle = '#52525b'; ctx.fillRect(1, 14, 14, 1);
+      // Main centrifuge processing plant
+      ctx.fillStyle = '#27272a'; ctx.fillRect(0, 7, 10, 7);
+      ctx.fillStyle = '#3f3f46'; ctx.fillRect(1, 8, 8, 5);
+      // Containment Dome (hemispherical reactor structure)
+      ctx.fillStyle = '#71717a'; ctx.fillRect(9, 4, 6, 10);
+      ctx.fillStyle = '#a1a1aa'; ctx.fillRect(10, 2, 4, 12);
+      ctx.fillStyle = '#d4d4d8'; ctx.fillRect(11, 1, 2, 13);
+      // Uranium / Fission radioactive glow
+      ctx.fillStyle = '#84cc16'; px(ctx, 3, 10, '#84cc16'); px(ctx, 4, 10, '#a3e635');
+      ctx.fillStyle = '#facc15'; px(ctx, 7, 10, '#facc15');
+      // Exhaust filter vents with clean steam
+      ctx.fillStyle = '#e4e4e7'; px(ctx, 2, 5, '#e4e4e7'); px(ctx, 3, 4, '#e4e4e7');
+      px(ctx, 12, 0, '#ffffff'); px(ctx, 13, 0, '#ffffff');
+      // Hazard trefoil accent
+      ctx.fillStyle = '#eab308'; px(ctx, 4, 7, '#eab308'); px(ctx, 6, 7, '#eab308');
+    });
+
+    // Bomb Shelter — Reinforced underground civil defense bunker with air filtration
+    this.getSprite('b_bomb_shelter', (ctx) => {
+      // Earthen berm mound over bunker
+      ctx.fillStyle = '#57534e'; ctx.fillRect(0, 10, 16, 6);
+      ctx.fillStyle = '#78716c'; ctx.fillRect(1, 7, 14, 7);
+      ctx.fillStyle = '#a8a29e'; ctx.fillRect(3, 5, 10, 4);
+      // Concrete reinforced entrance bulkhead
+      ctx.fillStyle = '#1c1917'; ctx.fillRect(4, 8, 8, 7);
+      ctx.fillStyle = '#44403c'; ctx.fillRect(5, 9, 6, 6);
+      // Heavy blast-door portal (dual steel doors)
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(6, 10, 4, 5);
+      ctx.fillStyle = '#334155'; ctx.fillRect(6, 10, 1, 5); ctx.fillRect(9, 10, 1, 5);
+      // Steel door handles / lock wheel
+      ctx.fillStyle = '#fbbf24'; px(ctx, 7, 12, '#fbbf24'); px(ctx, 8, 12, '#fbbf24');
+      // Overhead bunker floodlight
+      ctx.fillStyle = '#fde047'; px(ctx, 7, 9, '#fde047'); px(ctx, 8, 9, '#fde047');
+      // Air filtration exhaust pipes on berm top
+      ctx.fillStyle = '#78716c'; ctx.fillRect(2, 3, 2, 4); ctx.fillRect(12, 3, 2, 4);
+      ctx.fillStyle = '#44403c'; px(ctx, 2, 2, '#44403c'); px(ctx, 13, 2, '#44403c');
     });
 
     this.installDetailedSpeciesSprites();

@@ -52,6 +52,10 @@ import { assignCityBlueprint } from './CityBlueprints';
 
 export interface CivWorld {
   year: number;
+  /** Current season: 'spring' | 'summer' | 'autumn' | 'winter' */
+  season?: 'spring' | 'summer' | 'autumn' | 'winter';
+  /** Fraction of full year for quarterly execution (default: 0.25) */
+  seasonFraction?: number;
   /**
    * The climatic era in force. Optional so headless harnesses and older callers
    * still work — absent means a neutral climate.
@@ -107,7 +111,7 @@ const FOOD_PER_CITIZEN = 1.1;
  * technology, so no realm ever left the stone age and every downstream system
  * (jobs, crafting, trade, naval) stayed unreachable.
  */
-const RESEARCH_PER_CITIZEN = 0.75;
+const RESEARCH_PER_CITIZEN = 1.8;
 /**
  * Wild food one citizen can gather per year before agriculture.
  *
@@ -314,14 +318,15 @@ export class CivilizationEngine {
     }
     const lifecycle = UrbanLifecycleManager.tickCity(city, kingdom, world.tileMap, world.year);
     if (lifecycle.vacatedBuildingIds.length > 0) this.releaseInactiveBuildingAssignments(city, lifecycle);
+    const fraction = world.seasonFraction ?? 0.25;
     // The Grand Aqueduct's irrigation: the other half of the "+50% capacity and
     // harvest" its own description has always promised the player.
-    this.produceGoods(city, world, productionMult * city.wonderHarvestBonus(), climate.food);
-    this.consumeGoods(city, world);
+    this.produceGoods(city, world, productionMult * city.wonderHarvestBonus() * fraction, climate.food);
+    this.consumeGoods(city, world, fraction);
     this.runConstruction(city, world, kingdom);
     this.repairCityInfrastructure(city, world);
     this.paveStreetPlan(city, world);
-    this.expandTerritory(city, world, techMods.territory + (gov?.expansion ?? 8) + expansionCulture + (lawEffects?.expansion ?? 0));
+    this.expandTerritory(city, world, (techMods.territory + (gov?.expansion ?? 8) + expansionCulture + (lawEffects?.expansion ?? 0)) * fraction);
 
     const fortification = FortificationPlanner.tickCity(city, kingdom, world);
     if (fortification.built) {
@@ -587,8 +592,9 @@ export class CivilizationEngine {
   }
 
   private gatherWildWood(city: City, world: CivWorld): number {
+    const fraction = world.seasonFraction ?? 0.25;
     const byHand = this.citizensGatheringByHand(city, world, 'gather_wood');
-    let effort = Math.max(0, city.population - byHand) * HAND_WOOD_PER_CITIZEN;
+    let effort = Math.max(0, city.population - byHand) * HAND_WOOD_PER_CITIZEN * fraction;
     if (effort <= 0) return 0;
 
     let gathered = 0;
@@ -610,8 +616,9 @@ export class CivilizationEngine {
 
   /** Draws wild food from the settlement's own territory. Returns units stored. */
   private forageWildFood(city: City, world: CivWorld, foodClimate: number = 1): number {
+    const fraction = world.seasonFraction ?? 0.25;
     const byHand = this.citizensGatheringByHand(city, world, 'gather_food');
-    let effort = Math.max(0, city.population - byHand) * FORAGE_PER_CITIZEN * foodClimate;
+    let effort = Math.max(0, city.population - byHand) * FORAGE_PER_CITIZEN * foodClimate * fraction;
     if (effort <= 0) return 0;
 
     let gathered = 0;
@@ -736,7 +743,7 @@ export class CivilizationEngine {
           }
 
           const held = city.stock.get(good);
-          const target = good === 'machinery' ? Math.max(12, city.population * 0.12)
+          const target = good === 'machinery' || good === 'missiles' ? Math.max(12, city.population * 0.12)
             : good === 'fuel' || good === 'gunpowder' ? Math.max(18, city.population * 0.18)
             : Math.max(28, city.population * 0.45);
           const shortage = clamp((target - held) / Math.max(1, target), 0, 1.5);
@@ -764,9 +771,9 @@ export class CivilizationEngine {
   }
 
   /** People eat. Buildings and armies cost upkeep. Shortfall causes famine. */
-  private consumeGoods(city: City, world: CivWorld): void {
+  private consumeGoods(city: City, world: CivWorld, fraction: number = 0.25): void {
     const kingdom = city.kingdomId ? world.kingdoms.get(city.kingdomId) ?? null : null;
-    const needed = city.population * FOOD_PER_CITIZEN;
+    const needed = city.population * FOOD_PER_CITIZEN * fraction;
     world.market.reportDemand('food', needed);
 
     // Beyond bare survival, people want goods. This is what gives cloth, tools
@@ -926,8 +933,7 @@ export class CivilizationEngine {
       }
     }
 
-    for (const key of city.territory) {
-      const [x, y] = key.split(',').map(Number);
+    city.territory.forEachXY((x, y) => {
       const tile = world.tileMap.getTile(x, y);
       if (tile && tile.cityId === city.id) {
         tile.cityId = null;
@@ -935,7 +941,7 @@ export class CivilizationEngine {
         world.tileMap.markRenderDirty(tile.x, tile.y);
         tile.buildingId = null;
       }
-    }
+    });
     if (city.kingdomId) world.kingdoms.get(city.kingdomId)?.removeCity(city.id);
     world.cities.delete(city.id);
     chronicle.log(
@@ -976,11 +982,10 @@ export class CivilizationEngine {
     city.prosperity = 0.25;
     city.species = occupier.species;
 
-    for (const key of city.territory) {
-      const [x, y] = key.split(',').map(Number);
+    city.territory.forEachXY((x, y) => {
       const tile = world.tileMap.getTile(x, y);
       if (tile && tile.cityId === city.id) { tile.kingdomId = occupier.id; world.tileMap.markRenderDirty(tile.x, tile.y); }
-    }
+    });
 
     // The nearest besiegers stay behind as the new inhabitants.
     const garrison = world.entities
@@ -1104,7 +1109,7 @@ export class CivilizationEngine {
     tile.buildingId = building.id;
     tile.cityId = city.id;
     if (city.kingdomId) tile.kingdomId = city.kingdomId;
-    city.territory.add(`${pick.spot.x},${pick.spot.y}`);
+    city.territory.addXY(pick.spot.x, pick.spot.y);
     world.tileMap.markRenderDirty(tile.x, tile.y);
     UrbanPlanner.recordConstruction(city, world.tileMap, building.id);
 
@@ -1442,6 +1447,22 @@ export class CivilizationEngine {
       if (kingdom?.culture.mercantilism && kingdom.culture.mercantilism > 0.58) score += 28;
       if (city.architecturalProfile?.coastal || world.tileMap.isCoastalLand(Math.floor(city.x), Math.floor(city.y))) score += 40;
     }
+    /**
+     * A yard is worth building for the same reason a barracks is: it is the only
+     * thing that produces something the realm otherwise cannot have at all — in
+     * this case every rated warship in the catalogue. What makes it urgent is a
+     * hostile coast, so it is priced off the same threat the barracks reads, plus
+     * whether the realm has any business at sea in the first place.
+     */
+    if (type === 'naval_yard') {
+      if (!city.hasBuilding('harbor') && !city.hasBuilding('port')) return 0;
+      const threat = kingdom?.externalThreat ?? 0;
+      const navalCulture = (kingdom?.culture.militarism ?? 0.3) * 0.5 + (kingdom?.culture.mercantilism ?? 0.3) * 0.2;
+      score += 120 + threat * 220 + navalCulture * 140;
+      // An island realm has no other way to reach a war at all.
+      if (kingdom && kingdom.cityIds.size > 0) score += 60;
+    }
+
     if (type === 'port') {
       if (!city.hasBuilding('harbor')) return 0;
       score += population >= 45 ? 160 : 90;
@@ -1464,6 +1485,15 @@ export class CivilizationEngine {
       if (kingdom?.culture.mercantilism && kingdom.culture.mercantilism > 0.55) score += 30;
     }
 
+    if (type === 'train_station') {
+      if (city.hasBuilding('train_station')) return 0; // 1 station per city
+      if (population < 20) return 0;
+      const hasIndustry = city.hasBuilding('smithy') || city.hasBuilding('factory') || city.hasBuilding('refinery') || city.hasBuilding('mine');
+      const partnerStations = [...world.cities.values()].filter(c => c.id !== city.id && c.hasBuilding('train_station')).length;
+      score += 120 + (hasIndustry ? 60 : 20) + Math.min(80, partnerStations * 35);
+      if (kingdom?.research.knows('steam_power')) score += 45;
+    }
+
     if (def.research) score += def.research * 4;
 
     // Military buildings get priority when there is something to fight for:
@@ -1481,12 +1511,60 @@ export class CivilizationEngine {
       const militarism = kingdom?.culture.militarism ?? 0.3;
       score += (def.defense - 1) * (atWar ? 180 : 20 + threat * 160 + militarism * 60);
     }
-    // A standing army scales with the population that needs defending: roughly
-    // one soldier per twenty citizens, more under war or militarism.
+    // A standing army scales with the population that needs defending:
+    // prioritized to provide barracks posts for ~18% of citizens, more under militarism.
     if (type === 'barracks') {
       const soldierJobs = city.countOfType('barracks') * 4;
-      const target = Math.max(2, city.population * 0.05);
-      if (target > soldierJobs) score += (target - soldierJobs) * 70;
+      const militarism = kingdom?.culture.militarism ?? 0.3;
+      const target = Math.max(4, Math.round(city.population * (0.18 + militarism * 0.1)));
+      if (target > soldierJobs) score += (target - soldierJobs) * 130;
+    }
+
+    if (type === 'radar_station') {
+      if (city.hasBuilding('radar_station')) return 0;
+      if (population < 25) return 0;
+      const threat = kingdom?.externalThreat ?? 0;
+      score += 140 + threat * 180;
+      if (kingdom?.research.knows('radar_systems')) score += 80;
+    }
+
+    if (type === 'sam_site') {
+      if (population < 30) return 0;
+      const threat = kingdom?.externalThreat ?? 0;
+      const hasKeyAssets = city.hasBuilding('factory') || city.hasBuilding('airport') || city.hasBuilding('palace') || city.hasBuilding('enrichment_facility') || city.hasBuilding('missile_silo');
+      score += 110 + threat * 220 + (hasKeyAssets ? 90 : 20);
+      if (kingdom?.research.knows('rocketry')) score += 75;
+    }
+
+    if (type === 'missile_silo') {
+      if (city.hasBuilding('missile_silo')) return 0;
+      if (population < 40) return 0;
+      const threat = kingdom?.externalThreat ?? 0;
+      const militarism = kingdom?.culture.militarism ?? 0.3;
+      score += 130 + threat * 160 + militarism * 120;
+      if (city.stock.get('steel') >= 20 && city.stock.get('fuel') >= 15) score += 60;
+    }
+
+    if (type === 'drone_command') {
+      if (population < 25) return 0;
+      const threat = kingdom?.externalThreat ?? 0;
+      score += 100 + threat * 150;
+      if (kingdom?.research.knows('drone_avionics')) score += 90;
+    }
+
+    if (type === 'enrichment_facility') {
+      if (city.hasBuilding('enrichment_facility')) return 0;
+      if (population < 50) return 0;
+      const hasUranium = city.stock.get('uranium') > 0 || [...world.cities.values()].some(c => c.kingdomId === kingdom?.id && c.stock.get('uranium') > 0);
+      score += 160 + (hasUranium ? 140 : 20);
+      if (kingdom?.research.knows('nuclear_fission')) score += 100;
+    }
+
+    if (type === 'bomb_shelter') {
+      if (city.hasBuilding('bomb_shelter')) return 0;
+      if (population < 35) return 0;
+      const threat = kingdom?.externalThreat ?? 0;
+      score += 80 + threat * 240;
     }
 
     if (def.storage) score += city.stock.fullness() > 0.6 ? 35 : 8;
@@ -1549,7 +1627,7 @@ export class CivilizationEngine {
       if (tile.type === TerrainType.FOREST) score += 12;
       if (tileMap.getNeighbors(x, y, false).some(n => n.type === TerrainType.FOREST)) score += 8;
     }
-    if (city.territory.has(`${x},${y}`)) score += 8;
+    if (city.territory.hasXY(x, y)) score += 8;
     return score;
   }
 
@@ -1658,17 +1736,20 @@ export class CivilizationEngine {
     // border by a single step. Settlement of the land has to be something you can
     // actually watch happen.
     const claimsPerYear = 6 + Math.floor(city.population / 4);
+    const mapH = world.tileMap.height;
 
     for (let i = 0; i < claimsPerYear && city.territory.size < limit; i++) {
-      const frontier = new Map<string, { x: number; y: number; score: number }>();
-      for (const key of city.territory) {
-        const [x, y] = key.split(',').map(Number);
+      const frontier = new Map<number, { x: number; y: number; score: number }>();
+      city.territory.forEachXY((x, y) => {
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-          const tile = world.tileMap.getTile(x + dx, y + dy);
-          if (!tile) continue;
-          const tKey = `${tile.x},${tile.y}`;
-          if (city.territory.has(tKey)) continue;
-          if (TERRAINS[tile.type].isWater) continue;
+          const nx = x + dx;
+          const ny = y + dy;
+          if (city.territory.hasXY(nx, ny)) continue;
+          const tKey = nx * mapH + ny;
+          if (frontier.has(tKey)) continue;
+
+          const tile = world.tileMap.getTile(nx, ny);
+          if (!tile || TERRAINS[tile.type].isWater) continue;
           if (tile.kingdomId && tile.kingdomId !== city.kingdomId) continue;
 
           // Compactness first. A realm that chases every distant ore vein grows a
@@ -1676,7 +1757,7 @@ export class CivilizationEngine {
           // makes borders fill their own concavities and read as clean regions.
           let owned = 0;
           for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
-            if (city.territory.has(`${tile.x + ox},${tile.y + oy}`)) owned++;
+            if (city.territory.hasXY(nx + ox, ny + oy)) owned++;
           }
 
           const good = tileResourceToGood(tile.resourceType);
@@ -1690,7 +1771,7 @@ export class CivilizationEngine {
           if (tile.type === TerrainType.MOUNTAIN && !good) score -= 10;
           frontier.set(tKey, { x: tile.x, y: tile.y, score });
         }
-      }
+      });
 
       if (frontier.size === 0) break;
       const choices = [...frontier.values()].sort((a, b) => b.score - a.score);
@@ -1698,7 +1779,7 @@ export class CivilizationEngine {
       // look ragged rather than lived-in.
       const chosen = choices[rng.chance(0.92) ? 0 : Math.min(choices.length - 1, 1)];
       const tile = world.tileMap.getTile(chosen.x, chosen.y)!;
-      city.territory.add(`${tile.x},${tile.y}`);
+      city.territory.addXY(tile.x, tile.y);
       if (city.kingdomId) { tile.kingdomId = city.kingdomId; world.tileMap.markRenderDirty(tile.x, tile.y); }
     }
   }
@@ -1893,14 +1974,16 @@ export class CivilizationEngine {
       }
     }
 
+    const fraction = world.seasonFraction ?? 0.25;
     // Convert the value of the levy into coin in the treasury.
-    const income = kingdom.economy.hasCurrency
+    const rawIncome = kingdom.economy.hasCurrency
       ? kingdom.economy.fromWorldValue(taxValue)
       : taxValue;
+    const income = rawIncome * fraction;
     kingdom.economy.treasury += income;
 
     // Upkeep: armies, courts and buildings all cost.
-    const upkeep = kingdom.cityIds.size * 8 + kingdom.totalPopulation * 0.4 + (kingdom.isEmpire ? 40 : 0);
+    const upkeep = (kingdom.cityIds.size * 8 + kingdom.totalPopulation * 0.4 + (kingdom.isEmpire ? 40 : 0)) * fraction;
     const upkeepCost = kingdom.economy.hasCurrency ? kingdom.economy.fromWorldValue(upkeep) : upkeep;
     kingdom.economy.treasury -= upkeepCost;
 
@@ -1970,9 +2053,10 @@ export class CivilizationEngine {
     }
     kingdom.research.refreshDiffusion(peers);
 
+    const fraction = world.seasonFraction ?? 0.25;
     let output = 0;
     for (const cityId of kingdom.cityIds) {
-      output += world.cities.get(cityId)?.researchOutput ?? 0;
+      output += (world.cities.get(cityId)?.researchOutput ?? 0) * fraction;
     }
     // The Great Library's advertised +50% national research, which until now
     // existed only in its description.
@@ -2172,6 +2256,12 @@ export class CivilizationEngine {
           if (tech.id === 'stone_tools') score += 20;
         }
       }
+
+      // Modern strategic and military technologies: radar, rocketry, drones and nuclear fission.
+      if (tech.id === 'radar_systems') score += 12 + martial * 20;
+      if (tech.id === 'rocketry') score += 15 + martial * 25;
+      if (tech.id === 'drone_avionics') score += 12 + martial * 20;
+      if (tech.id === 'nuclear_fission') score += 14 + martial * 28;
 
       // A realm already sitting on technology it cannot operate should consolidate
       // rather than read further ahead. Chasing the next era while your factories
@@ -3378,14 +3468,13 @@ export class CivilizationEngine {
     // is the beginning of it doing better rather than worse.
     city.prosperity = clamp(city.prosperity + 0.05, 0, 1);
 
-    for (const key of city.territory) {
-      const [tx, ty] = key.split(',').map(Number);
+    city.territory.forEachXY((tx, ty) => {
       const tile = world.tileMap.getTile(tx, ty);
       if (tile && tile.cityId === city.id) {
         tile.kingdomId = to.id;
         world.tileMap.markRenderDirty(tile.x, tile.y);
       }
-    }
+    });
     for (const resident of world.entities) {
       if (resident.cityId === city.id && resident.hp > 0) resident.kingdomId = to.id;
     }
@@ -3484,6 +3573,11 @@ export class CivilizationEngine {
         drift -= proximity * Math.max(0, avgSocialWar - 0.46) * 0.30;
         drift -= Math.max(0, a.externalThreat - 0.55) * proximity * 0.25;
         drift -= Math.max(0, b.externalThreat - 0.55) * proximity * 0.25;
+        // After year 40, territorial competition and border friction push relations down faster between neighbours
+        if (world.year >= 40) {
+          drift -= proximity * 0.55;
+          drift -= proximity * borderAmbition * 0.6;
+        }
         // Allies don't drift further into infatuation; their pact is stable
         // unless the negatives above pull it down (then it can dissolve).
         let finalDrift = alreadyAllied ? Math.min(0, drift) : drift;
@@ -5197,14 +5291,13 @@ export class CivilizationEngine {
           city.kingdomId = rebelKingdomId;
 
           // Transfer tile kingdom IDs
-          for (const key of city.territory) {
-            const [tx, ty] = key.split(',').map(Number);
+          city.territory.forEachXY((tx, ty) => {
             const tile = world.tileMap.getTile(tx, ty);
             if (tile) {
               tile.kingdomId = rebelKingdomId;
               world.tileMap.markRenderDirty(tile.x, tile.y);
             }
-          }
+          });
 
           world.kingdoms.set(rebelKingdomId, rebelKingdom);
 

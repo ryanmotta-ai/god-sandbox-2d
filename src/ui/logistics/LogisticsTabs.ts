@@ -106,16 +106,16 @@ export function buildOverview(m: LogisticsMetrics, host: LogisticsScreenHost): C
           }
         }),
         stat({
-          label: 'Em movimento', value: `${m.activeCaravans + m.activeShips}`, icon: 'route',
+          label: 'Em movimento', value: `${m.activeCaravans + m.activeShips + m.activeTrains}`, icon: 'route',
           tooltip: {
             title: 'Comboios no mundo',
-            description: 'Caravanas e navios percorrendo suas rotas agora.',
+            description: 'Caravanas, navios e trens físicos percorrendo suas rotas agora.',
             rows: [
               { label: 'Caravanas', value: `${m.activeCaravans}` },
-              { label: 'Navios', value: `${m.activeShips}` }
+              { label: 'Navios', value: `${m.activeShips}` },
+              { label: 'Trens Ativos', value: `${m.activeTrains}` }
             ],
-            // The absence that shapes this whole screen, said where it matters.
-            footnote: 'A ferrovia não tem comboios: o frete é transferido direto entre estações da mesma linha.'
+            footnote: 'A ferrovia opera com locomotivas e vagões físicos transportando carga e passageiros.'
           }
         }),
         stat({
@@ -1052,7 +1052,7 @@ export function buildMovers(m: LogisticsMetrics, host: LogisticsScreenHost): Chi
     panel({
       title: 'Comboios em trânsito',
       icon: 'route',
-      subtitle: `${m.activeCaravans} caravana(s) e ${m.activeShips} navio(s)`,
+      subtitle: `${m.activeCaravans} caravana(s), ${m.activeShips} navio(s) e ${m.activeTrains} trem(ns)`,
       padded: false
     }, [
       table<MoverView>({
@@ -1060,7 +1060,7 @@ export function buildMovers(m: LogisticsMetrics, host: LogisticsScreenHost): Chi
           {
             key: 'kind', header: 'Comboio', width: '176px',
             cell: v => el('span', { class: 'ae-log-mover-cell' }, [
-              icon('route', { size: 16 }),
+              icon(v.kind === 'train' ? 'trade-route' : v.kind === 'ship' ? 'port' : 'route', { size: 16 }),
               el('span', { text: v.variant })
             ]),
             sortValue: v => v.variant

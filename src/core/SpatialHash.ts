@@ -9,7 +9,7 @@ export interface HasPosition {
 
 export class SpatialHash<T extends HasPosition> {
   private cellSize: number;
-  private grid: Map<number, Set<T>> = new Map();
+  private grid: Map<number, T[]> = new Map();
   private itemCells: Map<string, number> = new Map();
 
   constructor(cellSize: number = 8) {
@@ -33,10 +33,12 @@ export class SpatialHash<T extends HasPosition> {
     const previousKey = this.itemCells.get(item.id);
     if (previousKey === key) return;
     if (previousKey !== undefined) this.removeFromCell(item, previousKey);
-    if (!this.grid.has(key)) {
-      this.grid.set(key, new Set());
+    let cell = this.grid.get(key);
+    if (!cell) {
+      cell = [];
+      this.grid.set(key, cell);
     }
-    this.grid.get(key)!.add(item);
+    cell.push(item);
     this.itemCells.set(item.id, key);
   }
 
@@ -51,7 +53,6 @@ export class SpatialHash<T extends HasPosition> {
     const oldKey = this.itemCells.get(item.id);
     const newKey = this.getKey(item.x, item.y);
     if (oldKey !== newKey) {
-      if (oldKey !== undefined) this.removeFromCell(item, oldKey);
       this.insert(item);
     }
   }
@@ -59,8 +60,12 @@ export class SpatialHash<T extends HasPosition> {
   private removeFromCell(item: T, key: number): void {
     const cell = this.grid.get(key);
     if (!cell) return;
-    cell.delete(item);
-    if (cell.size === 0) this.grid.delete(key);
+    const idx = cell.indexOf(item);
+    if (idx !== -1) {
+      const last = cell.pop()!;
+      if (idx < cell.length) cell[idx] = last;
+    }
+    if (cell.length === 0) this.grid.delete(key);
   }
 
   public rebuild(items: Iterable<T>): void {
@@ -94,7 +99,8 @@ export class SpatialHash<T extends HasPosition> {
         const key = cx * 100000 + cy;
         const items = this.grid.get(key);
         if (items) {
-          for (const item of items) {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
             const dx = item.x - x;
             const dy = item.y - y;
             if (dx * dx + dy * dy <= rSq) {
@@ -108,6 +114,117 @@ export class SpatialHash<T extends HasPosition> {
     return result;
   }
 
+  /** Zero-allocation search for the closest item matching an optional predicate. */
+  public findClosest(x: number, y: number, radius: number, predicate?: (item: T) => boolean): T | null {
+    const minCx = Math.floor((x - radius) / this.cellSize);
+    const maxCx = Math.floor((x + radius) / this.cellSize);
+    const minCy = Math.floor((y - radius) / this.cellSize);
+    const maxCy = Math.floor((y + radius) / this.cellSize);
+
+    let closest: T | null = null;
+    let closestDistSq = radius * radius;
+
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        const items = this.grid.get(cx * 100000 + cy);
+        if (!items) continue;
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const dx = item.x - x;
+          const dy = item.y - y;
+          const dSq = dx * dx + dy * dy;
+          if (dSq <= closestDistSq && (!predicate || predicate(item))) {
+            closestDistSq = dSq;
+            closest = item;
+          }
+        }
+      }
+    }
+
+    return closest;
+  }
+
+  /** Zero-allocation check if any item matching an optional predicate exists within radius. */
+  public someNear(x: number, y: number, radius: number, predicate?: (item: T) => boolean): boolean {
+    const minCx = Math.floor((x - radius) / this.cellSize);
+    const maxCx = Math.floor((x + radius) / this.cellSize);
+    const minCy = Math.floor((y - radius) / this.cellSize);
+    const maxCy = Math.floor((y + radius) / this.cellSize);
+
+    const rSq = radius * radius;
+
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        const items = this.grid.get(cx * 100000 + cy);
+        if (!items) continue;
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const dx = item.x - x;
+          const dy = item.y - y;
+          if (dx * dx + dy * dy <= rSq && (!predicate || predicate(item))) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /** Zero-allocation count of items matching an optional predicate within radius. */
+  public countNear(x: number, y: number, radius: number, predicate?: (item: T) => boolean): number {
+    const minCx = Math.floor((x - radius) / this.cellSize);
+    const maxCx = Math.floor((x + radius) / this.cellSize);
+    const minCy = Math.floor((y - radius) / this.cellSize);
+    const maxCy = Math.floor((y + radius) / this.cellSize);
+
+    const rSq = radius * radius;
+    let count = 0;
+
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        const items = this.grid.get(cx * 100000 + cy);
+        if (!items) continue;
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const dx = item.x - x;
+          const dy = item.y - y;
+          if (dx * dx + dy * dy <= rSq && (!predicate || predicate(item))) {
+            count++;
+          }
+        }
+      }
+    }
+
+    return count;
+  }
+
+  /** Zero-allocation visitor over items within radius. Return false from callback to break early. */
+  public forEachNear(x: number, y: number, radius: number, callback: (item: T, distSq: number) => boolean | void): void {
+    const minCx = Math.floor((x - radius) / this.cellSize);
+    const maxCx = Math.floor((x + radius) / this.cellSize);
+    const minCy = Math.floor((y - radius) / this.cellSize);
+    const maxCy = Math.floor((y + radius) / this.cellSize);
+
+    const rSq = radius * radius;
+
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        const items = this.grid.get(cx * 100000 + cy);
+        if (!items) continue;
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const dx = item.x - x;
+          const dy = item.y - y;
+          const dSq = dx * dx + dy * dy;
+          if (dSq <= rSq) {
+            if (callback(item, dSq) === false) return;
+          }
+        }
+      }
+    }
+  }
+
   /** Viewport/region query used by rendering and future regional simulation. */
   public queryRect(minX: number, minY: number, maxX: number, maxY: number, result: T[] = []): T[] {
     result.length = 0;
@@ -119,7 +236,8 @@ export class SpatialHash<T extends HasPosition> {
       for (let cy = minCy; cy <= maxCy; cy++) {
         const items = this.grid.get(cx * 100000 + cy);
         if (!items) continue;
-        for (const item of items) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
           if (item.x >= minX && item.x <= maxX && item.y >= minY && item.y <= maxY) result.push(item);
         }
       }

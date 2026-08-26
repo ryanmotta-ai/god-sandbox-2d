@@ -191,6 +191,7 @@ export class SaveSystem {
         title: e.title,
         equipment: e.equipment,
         workplaceId: e.workplaceId,
+        aboardFleetId: e.aboardFleetId,
         homeX: e.homeX,
         homeY: e.homeY,
         energy: e.energy,
@@ -261,7 +262,9 @@ export class SaveSystem {
       // Freight and hulls in transit, and the supply lines feeding the fronts.
       caravans: sim.caravans.serialize(),
       naval: sim.naval.serialize(),
-      logistics: sim.logistics.serialize()
+      invasions: sim.invasions.serialize(),
+      logistics: sim.logistics.serialize(),
+      railways: sim.railways.serialize()
     };
   }
 
@@ -310,6 +313,7 @@ export class SaveSystem {
 
       // Daily routine fields (v2 compat — absent from v1 saves)
       e.workplaceId = ed.workplaceId ?? null;
+      e.aboardFleetId = ed.aboardFleetId ?? null;
       e.homeX = ed.homeX ?? null;
       e.homeY = ed.homeY ?? null;
       e.energy = ed.energy ?? 100;
@@ -405,7 +409,9 @@ export class SaveSystem {
     sim.fronts.deserialize(data.fronts);
     sim.caravans.deserialize(data.caravans);
     sim.naval.deserialize(data.naval);
+    sim.invasions.deserialize(data.invasions);
     sim.logistics.deserialize(data.logistics);
+    if (data.railways) sim.railways.deserialize(data.railways);
 
     // The dead, before anything reads a family tree.
     sim.deceasedAncestors.clear();

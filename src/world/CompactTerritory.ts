@@ -23,10 +23,9 @@ export class CompactTerritory implements Iterable<string> {
 
   public get size(): number { return this.count; }
 
-  public add(key: string): this {
-    const coordinate = parseCoordinate(key);
-    if (!coordinate) return this;
-    const [x, y] = coordinate;
+  /** Zero-allocation addition of an integer (x, y) coordinate to the territory. */
+  public addXY(x: number, y: number): boolean {
+    if (x < 0 || y < 0) return false;
     const cx = Math.floor(x / TERRITORY_CHUNK_SIZE);
     const cy = Math.floor(y / TERRITORY_CHUNK_SIZE);
     const chunkKey = cx * 65536 + cy;
@@ -40,23 +39,22 @@ export class CompactTerritory implements Iterable<string> {
     if ((rows[row] & bit) === 0) {
       rows[row] = (rows[row] | bit) >>> 0;
       this.count++;
+      return true;
     }
-    return this;
+    return false;
   }
 
-  public has(key: string): boolean {
-    const coordinate = parseCoordinate(key);
-    if (!coordinate) return false;
-    const [x, y] = coordinate;
+  /** Zero-allocation O(1) membership check for integer (x, y) coordinate. */
+  public hasXY(x: number, y: number): boolean {
+    if (x < 0 || y < 0) return false;
     const rows = this.chunks.get(Math.floor(x / TERRITORY_CHUNK_SIZE) * 65536 + Math.floor(y / TERRITORY_CHUNK_SIZE));
     if (!rows) return false;
     return (rows[y & 31] & ((1 << (x & 31)) >>> 0)) !== 0;
   }
 
-  public delete(key: string): boolean {
-    const coordinate = parseCoordinate(key);
-    if (!coordinate) return false;
-    const [x, y] = coordinate;
+  /** Zero-allocation deletion of an integer (x, y) coordinate from the territory. */
+  public deleteXY(x: number, y: number): boolean {
+    if (x < 0 || y < 0) return false;
     const chunkKey = Math.floor(x / TERRITORY_CHUNK_SIZE) * 65536 + Math.floor(y / TERRITORY_CHUNK_SIZE);
     const rows = this.chunks.get(chunkKey);
     if (!rows) return false;
@@ -65,8 +63,47 @@ export class CompactTerritory implements Iterable<string> {
     if ((rows[row] & bit) === 0) return false;
     rows[row] = (rows[row] & ~bit) >>> 0;
     this.count--;
-    if (rows.every(value => value === 0)) this.chunks.delete(chunkKey);
+    let empty = true;
+    for (let i = 0; i < TERRITORY_CHUNK_SIZE; i++) {
+      if (rows[i] !== 0) { empty = false; break; }
+    }
+    if (empty) this.chunks.delete(chunkKey);
     return true;
+  }
+
+  /** Zero-allocation visitor over all integer (x, y) coordinates in the territory. */
+  public forEachXY(callback: (x: number, y: number) => void): void {
+    for (const [chunkKey, rows] of this.chunks) {
+      const cx = Math.floor(chunkKey / 65536);
+      const cy = chunkKey % 65536;
+      const baseX = cx * TERRITORY_CHUNK_SIZE;
+      const baseY = cy * TERRITORY_CHUNK_SIZE;
+      for (let localY = 0; localY < TERRITORY_CHUNK_SIZE; localY++) {
+        let bits = rows[localY] >>> 0;
+        while (bits !== 0) {
+          const isolated = (bits & -bits) >>> 0;
+          const localX = 31 - Math.clz32(isolated);
+          callback(baseX + localX, baseY + localY);
+          bits = (bits & ~isolated) >>> 0;
+        }
+      }
+    }
+  }
+
+  public add(key: string): this {
+    const coordinate = parseCoordinate(key);
+    if (coordinate) this.addXY(coordinate[0], coordinate[1]);
+    return this;
+  }
+
+  public has(key: string): boolean {
+    const coordinate = parseCoordinate(key);
+    return coordinate ? this.hasXY(coordinate[0], coordinate[1]) : false;
+  }
+
+  public delete(key: string): boolean {
+    const coordinate = parseCoordinate(key);
+    return coordinate ? this.deleteXY(coordinate[0], coordinate[1]) : false;
   }
 
   public clear(): void { this.chunks.clear(); this.count = 0; }

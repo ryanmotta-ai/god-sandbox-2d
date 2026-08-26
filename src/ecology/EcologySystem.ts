@@ -262,7 +262,7 @@ function clamp01(value: number): number { return Math.max(0, Math.min(1, value))
 function vegetationCover(terrain: TerrainType): number {
   switch (terrain) {
     case TerrainType.FOREST: return 1;
-    case TerrainType.GRASS: return .85;
+    case TerrainType.GRASS: return .95;
     case TerrainType.SAVANNA: case TerrainType.SWAMP: return .7;
     case TerrainType.SOIL: return .45;
     case TerrainType.TUNDRA: case TerrainType.SNOW: return .2;

@@ -26,6 +26,12 @@ export class MapPreview {
   public readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
 
+  private bakedCanvas: HTMLCanvasElement | null = null;
+  private bakedCtx: CanvasRenderingContext2D | null = null;
+  private lastBakedVersion = -1;
+  private lastBakedWidth = -1;
+  private lastBakedHeight = -1;
+
   constructor(width: number, height: number, className = 'map-preview') {
     this.canvas = document.createElement('canvas');
     this.canvas.width = width;
@@ -40,6 +46,7 @@ export class MapPreview {
     this.canvas.width = width;
     this.canvas.height = height;
     this.ctx.imageSmoothingEnabled = false;
+    this.lastBakedVersion = -1;
   }
 
   public clear(): void {
@@ -58,20 +65,60 @@ export class MapPreview {
   }
 
   public drawTileMap(map: TileMap, opts: MapPreviewOptions = {}): void {
-    this.drawGrid(map.grid, map.width, map.height, opts);
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+
+    if (!this.bakedCanvas || this.bakedCanvas.width !== cw || this.bakedCanvas.height !== ch) {
+      this.bakedCanvas = document.createElement('canvas');
+      this.bakedCanvas.width = cw;
+      this.bakedCanvas.height = ch;
+      this.bakedCtx = this.bakedCanvas.getContext('2d')!;
+      this.bakedCtx.imageSmoothingEnabled = false;
+      this.lastBakedVersion = -1;
+    }
+
+    const needsBake =
+      this.lastBakedVersion !== map.terrainVersion ||
+      this.lastBakedWidth !== map.width ||
+      this.lastBakedHeight !== map.height ||
+      map.dirtyTiles.size > 0;
+
+    if (needsBake && this.bakedCtx) {
+      this.bakeBaseGrid(this.bakedCtx, map.grid, map.width, map.height, opts);
+      this.lastBakedVersion = map.terrainVersion;
+      this.lastBakedWidth = map.width;
+      this.lastBakedHeight = map.height;
+    }
+
+    this.clear();
+    if (this.bakedCanvas) {
+      this.ctx.drawImage(this.bakedCanvas, 0, 0);
+    }
+
+    this.drawDynamicOverlays(map.width, map.height, opts);
   }
 
   /** Generates a world with the given parameters and previews it without touching game state. */
   public drawGenerated(size: number, preset: GeneratorPreset, seed: number): void {
     // Preview at a capped resolution: generation cost grows with size².
     const grid = WorldGenerator.generate(size, size, preset, seed);
-    this.drawGrid(grid, size, size, {});
+    this.lastBakedVersion = -1;
+    this.clear();
+    this.bakeBaseGrid(this.ctx, grid, size, size, {});
   }
 
-  private drawGrid(grid: Tile[][], width: number, height: number, opts: MapPreviewOptions): void {
+  private bakeBaseGrid(
+    targetCtx: CanvasRenderingContext2D,
+    grid: Tile[][],
+    width: number,
+    height: number,
+    opts: MapPreviewOptions
+  ): void {
     const cw = this.canvas.width;
     const ch = this.canvas.height;
-    this.clear();
+
+    targetCtx.fillStyle = '#05070c';
+    targetCtx.fillRect(0, 0, cw, ch);
 
     const scale = Math.min(cw / width, ch / height);
     const offsetX = (cw - width * scale) / 2;
@@ -89,26 +136,35 @@ export class MapPreview {
 
         if (tile.isOnFire) color = '#f97316';
 
-        this.ctx.fillStyle = color;
-        this.ctx.fillRect(offsetX + x * scale, offsetY + y * scale, cell, cell);
-        this.drawMiniTerrainEdges(grid, width, height, x, y, offsetX + x * scale, offsetY + y * scale, cell);
+        targetCtx.fillStyle = color;
+        targetCtx.fillRect(offsetX + x * scale, offsetY + y * scale, cell, cell);
+        this.drawMiniTerrainEdges(targetCtx, grid, width, height, x, y, offsetX + x * scale, offsetY + y * scale, cell);
 
         if (opts.kingdoms && tile.kingdomId) {
           const k = opts.kingdoms.get(tile.kingdomId);
           if (k) {
-            this.ctx.fillStyle = withAlpha(k.color, 0.5);
-            this.ctx.fillRect(offsetX + x * scale, offsetY + y * scale, cell, cell);
+            targetCtx.fillStyle = withAlpha(k.color, 0.5);
+            targetCtx.fillRect(offsetX + x * scale, offsetY + y * scale, cell, cell);
           }
         }
 
         // Roads on top of everything, in the same surfaces the map uses:
         // packed earth, dressed stone, imperial flagstone.
         if (tile.roadLevel > 0) {
-          this.ctx.fillStyle = tile.roadLevel === 3 ? '#b0a798' : tile.roadLevel === 2 ? '#8a847b' : '#6d5436';
-          this.ctx.fillRect(offsetX + x * scale, offsetY + y * scale, cell, cell);
+          targetCtx.fillStyle = tile.roadLevel === 3 ? '#b0a798' : tile.roadLevel === 2 ? '#8a847b' : '#6d5436';
+          targetCtx.fillRect(offsetX + x * scale, offsetY + y * scale, cell, cell);
         }
       }
     }
+  }
+
+  private drawDynamicOverlays(width: number, height: number, opts: MapPreviewOptions): void {
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    const scale = Math.min(cw / width, ch / height);
+    const offsetX = (cw - width * scale) / 2;
+    const offsetY = (ch - height * scale) / 2;
+    const cell = Math.max(1, Math.ceil(scale));
 
     if (opts.entityDots) {
       for (const dot of opts.entityDots) {
@@ -166,6 +222,7 @@ export class MapPreview {
   }
 
   private drawMiniTerrainEdges(
+    targetCtx: CanvasRenderingContext2D,
     grid: Tile[][],
     width: number,
     height: number,
@@ -197,25 +254,26 @@ export class MapPreview {
 
       const neighborWater = this.isWater(neighbor.type);
       if (water !== neighborWater) {
-        this.ctx.fillStyle = water ? withAlpha('#f8fafc', 0.38) : withAlpha(TERRAIN_VISUALS[TerrainType.SAND].high, 0.34);
-        this.paintMiniEdge(px, py, cell, dir.edge, edgeSize);
+        targetCtx.fillStyle = water ? withAlpha('#f8fafc', 0.38) : withAlpha(TERRAIN_VISUALS[TerrainType.SAND].high, 0.34);
+        this.paintMiniEdge(targetCtx, px, py, cell, dir.edge, edgeSize);
       } else if (!water && tile.height - neighbor.height > 0.08) {
-        this.ctx.fillStyle = 'rgba(0,0,0,0.18)';
-        this.paintMiniEdge(px, py, cell, dir.edge, edgeSize);
+        targetCtx.fillStyle = 'rgba(0,0,0,0.18)';
+        this.paintMiniEdge(targetCtx, px, py, cell, dir.edge, edgeSize);
       }
     }
   }
 
   private paintMiniEdge(
+    targetCtx: CanvasRenderingContext2D,
     px: number,
     py: number,
     cell: number,
     edge: 'left' | 'right' | 'top' | 'bottom',
     edgeSize: number
   ): void {
-    if (edge === 'left') this.ctx.fillRect(px, py, edgeSize, cell);
-    else if (edge === 'right') this.ctx.fillRect(px + cell - edgeSize, py, edgeSize, cell);
-    else if (edge === 'top') this.ctx.fillRect(px, py, cell, edgeSize);
-    else this.ctx.fillRect(px, py + cell - edgeSize, cell, edgeSize);
+    if (edge === 'left') targetCtx.fillRect(px, py, edgeSize, cell);
+    else if (edge === 'right') targetCtx.fillRect(px + cell - edgeSize, py, edgeSize, cell);
+    else if (edge === 'top') targetCtx.fillRect(px, py, cell, edgeSize);
+    else targetCtx.fillRect(px, py + cell - edgeSize, cell, edgeSize);
   }
 }

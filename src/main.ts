@@ -910,7 +910,8 @@ class AethoriaGame implements GameContext {
       undefined,
       undefined,
       this.sim.spatialHash,
-      this.sim.air.airborne()
+      this.sim.air.airborne(),
+      this.sim.invasions
     );
     perfProfiler.record('render', performance.now() - renderStarted);
     perfProfiler.record('frame', performance.now() - frameStarted);

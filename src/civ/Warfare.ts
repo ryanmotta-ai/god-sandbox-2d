@@ -1263,11 +1263,10 @@ export class WarfareSystem {
     city.siegeState = null;
     city.prosperity = Math.min(city.prosperity, 0.5);
 
-    for (const key of city.territory) {
-      const [tx, ty] = key.split(',').map(Number);
+    city.territory.forEachXY((tx, ty) => {
       const tile = world.tileMap.getTile(tx, ty);
       if (tile && tile.cityId === city.id) { tile.kingdomId = to.id; world.tileMap.markRenderDirty(tile.x, tile.y); }
-    }
+    });
 
     for (const resident of world.entities) {
       if (resident.cityId !== city.id || resident.hp <= 0) continue;
@@ -1353,11 +1352,10 @@ export class WarfareSystem {
     city.siegeState = null;
     city.prosperity = Math.min(city.prosperity, 0.3);
 
-    for (const key of city.territory) {
-      const [tx, ty] = key.split(',').map(Number);
+    city.territory.forEachXY((tx, ty) => {
       const tile = world.tileMap.getTile(tx, ty);
       if (tile && tile.cityId === city.id) { tile.kingdomId = to.id; world.tileMap.markRenderDirty(tile.x, tile.y); }
-    }
+    });
 
     for (const resident of world.entities) {
       if (resident.cityId !== city.id || resident.hp <= 0) continue;
@@ -1714,11 +1712,10 @@ export class WarfareSystem {
     city.capturedYear = world.year;
     city.prosperity = Math.min(city.prosperity, 0.45);
 
-    for (const key of city.territory) {
-      const [tx, ty] = key.split(',').map(Number);
+    city.territory.forEachXY((tx, ty) => {
       const tile = world.tileMap.getTile(tx, ty);
       if (tile && tile.cityId === city.id) { tile.kingdomId = to.id; world.tileMap.markRenderDirty(tile.x, tile.y); }
-    }
+    });
 
     for (const resident of world.entities) {
       if (resident.cityId === city.id && resident.hp > 0) resident.kingdomId = to.id;

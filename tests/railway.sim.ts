@@ -30,19 +30,27 @@ function landRow(fromX: number, toX: number): number {
     }
     if (ok) return y;
   }
-  throw new Error('no land row for railway');
+  const midY = 24;
+  for (let x = fromX; x <= toX; x++) {
+    const t = tileMap.getTile(x, midY);
+    if (t) {
+      t.type = 'grass' as any;
+      t.height = 0.5;
+    }
+  }
+  return midY;
 }
 
 const PRODUCER_X = 8;
 const CONSUMER_X = 40;
 const LINE_Y = landRow(PRODUCER_X, CONSUMER_X);
 
-const producer = new City('p', 'Coalfield', SpeciesType.LUMINI, PRODUCER_X, LINE_Y, 'Founder', 1);
-const consumer = new City('c', 'Steelforge', SpeciesType.LUMINI, CONSUMER_X, LINE_Y, 'Founder', 1);
+const producer = new City('p', 'Coalfield', SpeciesType.HUMAN, PRODUCER_X, LINE_Y, 'Founder', 1);
+const consumer = new City('c', 'Steelforge', SpeciesType.HUMAN, CONSUMER_X, LINE_Y, 'Founder', 1);
 sim.cities.set(producer.id, producer);
 sim.cities.set(consumer.id, consumer);
 
-const kingdom = new Kingdom('k', 'Raildom', SpeciesType.LUMINI, '#ff6b6b', producer.id, 1);
+const kingdom = new Kingdom('k', 'Raildom', SpeciesType.HUMAN, '#ff6b6b', producer.id, 1);
 kingdom.cityIds.add(consumer.id);
 kingdom.research.complete('metallurgy');
 kingdom.research.complete('steam_power');
@@ -65,7 +73,7 @@ producer.stock.add('wood', 600);
 // Citizens so the settlement tick has a labour pool.
 function spawnCitizens(city: City, count: number): void {
   for (let i = 0; i < count; i++) {
-    const e = sim.spawnEntity(SpeciesType.LUMINI, city.x, city.y, tileMap);
+    const e = sim.spawnEntity(SpeciesType.HUMAN, city.x, city.y, tileMap);
     e.cityId = city.id;
     e.kingdomId = kingdom.id;
     e.profession = 'none';
@@ -129,11 +137,17 @@ console.log(`[rail.sim] freight flowed: cumulative=${cumulativeFreight}, consume
 // A siege grinds a whole band, so sever every link in a cross-section instead.
 const midX = Math.floor((PRODUCER_X + CONSUMER_X) / 2);
 for (const t of rail.railTiles(tileMap)) {
-  if (Math.abs(t.x - midX) <= 1) t.railDamage = 1;
+  if (Math.abs(t.x - midX) <= 1) {
+    t.railDamage = 1;
+    tileMap.markRailNetworkChanged(t.x, t.y);
+  }
 }
 if (rail.connected(tileMap, producer, consumer)) {
   for (const t of rail.railTiles(tileMap)) {
-    if (Math.abs(t.x - midX) <= 3) t.railDamage = 1;
+    if (Math.abs(t.x - midX) <= 3) {
+      t.railDamage = 1;
+      tileMap.markRailNetworkChanged(t.x, t.y);
+    }
   }
 }
 if (rail.connected(tileMap, producer, consumer)) {
@@ -148,7 +162,10 @@ console.log('[rail.sim] severed line: components=', rail.components(tileMap).len
 
 // ---- Phase 3: repair heals the band; freight resumes. ----
 for (const t of rail.railTiles(tileMap)) {
-  if (Math.abs(t.x - midX) <= 3) t.railDamage = 0;
+  if (Math.abs(t.x - midX) <= 3) {
+    t.railDamage = 0;
+    tileMap.markRailNetworkChanged(t.x, t.y);
+  }
 }
 if (!rail.connected(tileMap, producer, consumer)) {
   throw new Error('repair did not reconnect the network');

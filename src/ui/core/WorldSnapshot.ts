@@ -18,6 +18,8 @@ export interface WorldSnapshot {
   /** Calendar position within the year, from the engine's own calendar. */
   month: number;
   day: number;
+  season: string;
+  seasonIcon: string;
   /** Clock reading, already formatted by the engine. */
   timeString: string;
   periodLabel: string;
@@ -37,7 +39,7 @@ export interface WorldSnapshot {
 const MAX_AGE_MS = 400;
 
 const EMPTY: WorldSnapshot = {
-  year: 1, month: 1, day: 1, timeString: '00:00', periodLabel: '',
+  year: 1, month: 1, day: 1, season: 'Primavera', seasonIcon: '🌱', timeString: '00:00', periodLabel: '',
   population: 0, cities: 0, kingdoms: 0, activeWars: 0,
   citiesInFamine: 0, citiesBesieged: 0
 };
@@ -89,6 +91,8 @@ export class WorldSnapshotProvider {
       year: sim.currentYear,
       month: date.month,
       day: date.day,
+      season: date.season,
+      seasonIcon: date.seasonIcon,
       timeString: clock.timeString,
       periodLabel: clock.periodLabel,
       population: sim.entities.length,

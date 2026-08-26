@@ -16,7 +16,10 @@ import { SpriteRegistry } from './SpriteRegistry';
 import { PixelIcons } from './PixelIcons';
 import { DiplomacyManager } from '../civ/Diplomacy';
 import { Ship, SHIP_TIERS } from '../civ/NavalSystem';
+import type { InvasionFleet } from '../civ/NavalInvasion';
+import { flagshipOf } from '../civ/Warships';
 import { OverlandCaravan } from '../civ/CaravanSystem';
+import type { ActiveTrain, RailwayNetwork } from '../civ/RailwayNetwork';
 import { GOODS, type GoodTier } from '../civ/Goods';
 import {
   BRIDGE_HALF_WIDTH, BRIDGE_SLICE_PX, bridgeModelFor, bridgeSprite, needsCable, throwsShadow
@@ -385,10 +388,10 @@ export class PixelRenderer {
     if (['town_center', 'palace', 'academy', 'great_library', 'bank', 'stock_exchange', 'monument', 'colosseum'].includes(type)) return 'civic';
     if (['house', 'manor', 'apartment'].includes(type)) return 'residential';
     if (['market', 'harbor', 'port', 'caravanserai'].includes(type)) return 'market';
-    if (['factory', 'refinery', 'oil_well', 'workshop', 'smithy', 'mine', 'quarry', 'lumberyard'].includes(type)) return 'industrial';
-    if (['barracks', 'keep', 'wall'].includes(type)) return 'military';
+    if (['factory', 'refinery', 'oil_well', 'workshop', 'smithy', 'mine', 'quarry', 'lumberyard', 'enrichment_facility'].includes(type)) return 'industrial';
+    if (['barracks', 'keep', 'wall', 'naval_yard', 'radar_station', 'sam_site', 'missile_silo', 'drone_command'].includes(type)) return 'military';
     if (['temple', 'hospital'].includes(type)) return 'faith';
-    if (['granary', 'warehouse', 'aqueduct', 'grand_aqueduct', 'well', 'bridge'].includes(type)) return 'utility';
+    if (['granary', 'warehouse', 'aqueduct', 'grand_aqueduct', 'well', 'bridge', 'bomb_shelter'].includes(type)) return 'utility';
     return 'rural';
   }
 
@@ -925,6 +928,582 @@ export class PixelRenderer {
       this.ctx.fillStyle = 'rgba(214, 188, 135, 0.28)';
       this.ctx.fillRect(centerX - dir.x * tileSize * 0.38, centerY - dir.y * tileSize * 0.38, Math.max(1, tileSize * 0.14), Math.max(1, tileSize * 0.08));
       this.ctx.fillRect(centerX - dir.x * tileSize * 0.55, centerY - dir.y * tileSize * 0.22, Math.max(1, tileSize * 0.1), Math.max(1, tileSize * 0.06));
+    }
+  }
+
+  /**
+   * An armada at sea.
+   *
+   * High-fidelity procedural pixel art for all 17 warship classes, authentic
+   * tactical screening formations, smooth wave dynamics (heave, pitch, roll),
+   * recoil kickbacks, broadside muzzle flashes, damage listing, and dramatic
+   * cinematic sinking sequences.
+   */
+  private drawInvasionFleet(
+    fleet: InvasionFleet,
+    camera: Camera,
+    width: number,
+    height: number,
+    tileSize: number
+  ): void {
+    const pos = camera.worldToScreen(fleet.x, fleet.y, width, height);
+    const hull = Math.max(16, tileSize * 1.8);
+    const ctx = this.ctx;
+    const flagship = flagshipOf(fleet.composition);
+    const role = flagship?.role ?? 'transport';
+    const isSinking = fleet.state === 'sinking';
+    const sinkProgress = isSinking
+      ? 1 - Math.max(0, fleet.sinkTimer / Math.max(1, fleet.maxSinkTimer || 50))
+      : 0;
+
+    // Ocean buoyancy & wave physics (heave, pitch & roll)
+    const waveFreq = this.animTimer * 1.8 + fleet.x * 1.4;
+    const bob = isSinking
+      ? sinkProgress * hull * 0.85
+      : Math.sin(waveFreq) * hull * 0.07;
+    const waveRoll = Math.sin(this.animTimer * 1.4 + fleet.y * 1.2) * 0.05;
+
+    // Heading calculation and facing direction
+    const rawHeading = fleet.heading ?? 0;
+    const isFacingLeft = Math.cos(rawHeading) < -0.2;
+    let angle = isSinking
+      ? rawHeading + (fleet.x % 2 === 0 ? 1 : -1) * sinkProgress * 0.85
+      : rawHeading * 0.25 + waveRoll; // soft orientation tilt
+
+    // Recoil kickback on firing
+    const recoil = fleet.recoil ?? 0;
+    const recoilShiftX = -Math.cos(rawHeading) * recoil * hull * 0.18;
+    const recoilShiftY = -Math.sin(rawHeading) * recoil * hull * 0.18;
+
+    const flagshipX = pos.x + recoilShiftX;
+    const flagshipY = pos.y + bob + recoilShiftY;
+
+    // Total hulls and tactical escort positions
+    const hullCount = Object.values(fleet.composition).reduce((a: number, b) => a + (b ?? 0), 0);
+    const escortCount = Math.max(0, Math.min(6, hullCount - 1));
+
+    // ================= 1. SUBMERGED STEALTH (Submarines) =================
+    if (!fleet.detected && role === 'submarine') {
+      ctx.save();
+      // Sonar ping expansion rings
+      const ping1 = (hull * 0.3 + (this.animTimer * 14) % (hull * 1.4));
+      const ping2 = (hull * 0.3 + (this.animTimer * 14 + hull * 0.7) % (hull * 1.4));
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, ping1, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, ping2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Translucent submerged hull silhouette
+      ctx.globalAlpha = 0.35 + Math.sin(this.animTimer * 2.5) * 0.1;
+      ctx.fillStyle = '#0284c7';
+      ctx.beginPath();
+      ctx.ellipse(pos.x, pos.y, hull * 0.55, hull * 0.16, rawHeading, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Periscope surface wake
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = '#bae6fd';
+      ctx.fillRect(pos.x - 1, pos.y - hull * 0.2, 2, hull * 0.2);
+      ctx.beginPath();
+      ctx.ellipse(pos.x - Math.cos(rawHeading) * 4, pos.y, 4, 1.5, rawHeading, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    // ================= 2. WATER WAKES (Foam & Cavitation) =================
+    if (!isSinking) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(224, 242, 254, 0.45)';
+      const wakeW = hull * 1.2;
+      const wakeH = hull * 0.4;
+      ctx.beginPath();
+      ctx.ellipse(flagshipX, flagshipY + hull * 0.22, wakeW * 0.5, wakeH * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Stern foam churn
+      const sternX = flagshipX - Math.cos(rawHeading) * (hull * 0.6);
+      const sternY = flagshipY - Math.sin(rawHeading) * (hull * 0.6) + hull * 0.2;
+      ctx.fillStyle = 'rgba(240, 253, 250, 0.6)';
+      ctx.beginPath();
+      ctx.arc(sternX, sternY, hull * 0.18 + Math.sin(this.animTimer * 8) * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ================= 3. TACTICAL ESCORT FORMATION =================
+    if (!isSinking && escortCount > 0) {
+      // Station layout: forward screening wedge + flank screen
+      const escortOffsets = [
+        { dx: 0.85, dy: -0.55, scale: 0.38 },
+        { dx: 0.85, dy: 0.55, scale: 0.38 },
+        { dx: 0.15, dy: -0.85, scale: 0.34 },
+        { dx: 0.15, dy: 0.85, scale: 0.34 },
+        { dx: -0.75, dy: -0.5, scale: 0.32 },
+        { dx: -0.75, dy: 0.5, scale: 0.32 }
+      ];
+
+      for (let i = 0; i < escortCount; i++) {
+        const offset = escortOffsets[i % escortOffsets.length];
+        const ex = pos.x + (isFacingLeft ? -offset.dx : offset.dx) * hull * 1.25;
+        const ey = pos.y + offset.dy * hull * 0.75 + Math.sin(waveFreq + i * 1.5) * hull * 0.05;
+        const eSize = hull * offset.scale;
+
+        ctx.save();
+        ctx.translate(ex, ey);
+        if (isFacingLeft) ctx.scale(-1, 1);
+
+        // Escort hull
+        ctx.fillStyle = '#1e293b';
+        ctx.beginPath();
+        ctx.moveTo(-eSize * 0.6, 0);
+        ctx.lineTo(eSize * 0.6, 0);
+        ctx.lineTo(eSize * 0.35, eSize * 0.35);
+        ctx.lineTo(-eSize * 0.35, eSize * 0.35);
+        ctx.closePath();
+        ctx.fill();
+
+        // Escort bridge / gun deck
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(-eSize * 0.15, -eSize * 0.22, eSize * 0.3, eSize * 0.22);
+
+        // Escort flag pennant
+        ctx.fillStyle = fleet.kingdomColor;
+        ctx.fillRect(-eSize * 0.05, -eSize * 0.45, eSize * 0.1, eSize * 0.45);
+        ctx.beginPath();
+        ctx.moveTo(eSize * 0.05, -eSize * 0.45);
+        ctx.lineTo(eSize * 0.28, -eSize * 0.35);
+        ctx.lineTo(eSize * 0.05, -eSize * 0.25);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+      }
+    }
+
+    // ================= 4. FLAGSHIP RENDERING =================
+    ctx.save();
+    ctx.translate(flagshipX, flagshipY);
+
+    if (isSinking) {
+      ctx.globalAlpha = Math.max(0.2, 1 - sinkProgress * 0.75);
+    }
+
+    ctx.rotate(angle);
+    if (isFacingLeft) ctx.scale(-1, 1);
+
+    const shipId = flagship?.id ?? 'cog';
+    const integrity = Math.max(0, Math.min(1, fleet.hp / Math.max(1, fleet.maxHp)));
+    const listTilt = (1 - integrity) * 0.12;
+    ctx.rotate(listTilt);
+
+    // Render by warship architectural family
+    if (shipId === 'war_canoe') {
+      // Dugout wood canoe with rowing warriors
+      ctx.fillStyle = '#78350f';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.45, -hull * 0.05);
+      ctx.lineTo(hull * 0.45, -hull * 0.05);
+      ctx.lineTo(hull * 0.52, -hull * 0.12); // pointed prow
+      ctx.lineTo(hull * 0.3, hull * 0.16);
+      ctx.lineTo(-hull * 0.38, hull * 0.16);
+      ctx.closePath();
+      ctx.fill();
+
+      // Rowers
+      ctx.fillStyle = '#451a03';
+      for (let i = -2; i <= 2; i++) {
+        const rx = i * hull * 0.12;
+        ctx.fillRect(rx - 1, -hull * 0.18, 3, hull * 0.14);
+        // Paddles animated
+        const paddleStroke = Math.sin(this.animTimer * 6 + i) * 3;
+        ctx.strokeStyle = '#b45309';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(rx, -hull * 0.08);
+        ctx.lineTo(rx + paddleStroke, hull * 0.25);
+        ctx.stroke();
+      }
+    } else if (shipId === 'bireme' || shipId === 'trireme') {
+      // Mediterranean Galley: sleek wood hull, bronze ram beak, synchronized oars
+      ctx.fillStyle = '#854d0e';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.55, -hull * 0.08);
+      ctx.lineTo(hull * 0.55, -hull * 0.08);
+      ctx.lineTo(hull * 0.65, hull * 0.05); // Bronze ram beak
+      ctx.lineTo(hull * 0.35, hull * 0.25);
+      ctx.lineTo(-hull * 0.45, hull * 0.25);
+      ctx.closePath();
+      ctx.fill();
+
+      // Bronze Ram Prow
+      ctx.fillStyle = '#d97706';
+      ctx.beginPath();
+      ctx.moveTo(hull * 0.45, -hull * 0.05);
+      ctx.lineTo(hull * 0.68, hull * 0.05);
+      ctx.lineTo(hull * 0.48, hull * 0.18);
+      ctx.closePath();
+      ctx.fill();
+
+      // Animated Oar Banks
+      const oarLevels = shipId === 'trireme' ? 2 : 1;
+      for (let level = 0; level < oarLevels; level++) {
+        const oarY = hull * (0.06 + level * 0.10);
+        ctx.strokeStyle = '#fef08a';
+        ctx.lineWidth = 1.2;
+        for (let i = -4; i <= 3; i++) {
+          const ox = i * hull * 0.09;
+          const oarAngle = Math.sin(this.animTimer * 5 + ox * 0.2) * 0.45;
+          ctx.beginPath();
+          ctx.moveTo(ox, oarY);
+          ctx.lineTo(ox - Math.cos(oarAngle) * hull * 0.25, oarY + hull * 0.22);
+          ctx.stroke();
+        }
+      }
+
+      // Galley Mast & Square Sail
+      ctx.fillStyle = '#78350f';
+      ctx.fillRect(-hull * 0.04, -hull * 0.65, hull * 0.06, hull * 0.65);
+      ctx.fillStyle = fleet.kingdomColor;
+      ctx.fillRect(-hull * 0.22, -hull * 0.58, hull * 0.44, hull * 0.28);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-hull * 0.05, -hull * 0.58, hull * 0.1, hull * 0.28);
+    } else if (shipId === 'cog' || shipId === 'caravel' || shipId === 'carrack') {
+      // Age of Discovery: Curved tumblehome wooden hull, fore & aft castles, billowing canvas
+      ctx.fillStyle = '#78350f';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.55, -hull * 0.22); // Aftcastle
+      ctx.lineTo(-hull * 0.35, -hull * 0.1);
+      ctx.lineTo(hull * 0.35, -hull * 0.1);
+      ctx.lineTo(hull * 0.52, -hull * 0.2);  // Forecastle
+      ctx.lineTo(hull * 0.38, hull * 0.32);
+      ctx.lineTo(-hull * 0.42, hull * 0.32);
+      ctx.closePath();
+      ctx.fill();
+
+      // Gunport strip
+      ctx.fillStyle = '#451a03';
+      ctx.fillRect(-hull * 0.35, -hull * 0.05, hull * 0.7, hull * 0.08);
+
+      // Main Mast + Fore Mast
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(-hull * 0.05, -hull * 0.8, hull * 0.06, hull * 0.8);
+      ctx.fillRect(hull * 0.25, -hull * 0.6, hull * 0.05, hull * 0.6);
+
+      // Billowing Sails with wave movement
+      const sailWave = Math.sin(this.animTimer * 4) * hull * 0.04;
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.25, -hull * 0.72);
+      ctx.quadraticCurveTo(sailWave, -hull * 0.55, hull * 0.15, -hull * 0.72);
+      ctx.lineTo(hull * 0.12, -hull * 0.35);
+      ctx.quadraticCurveTo(sailWave, -hull * 0.22, -hull * 0.22, -hull * 0.35);
+      ctx.closePath();
+      ctx.fill();
+
+      // Royal Cross / Emblem on sail
+      ctx.fillStyle = fleet.kingdomColor;
+      ctx.fillRect(-hull * 0.08, -hull * 0.62, hull * 0.12, hull * 0.22);
+    } else if (shipId === 'galleon' || shipId === 'frigate' || shipId === 'ship_of_the_line') {
+      // Ships of the Line & War Galleons: Massive multi-deck hulls with gunports & 3 full-rigged masts
+      const decks = shipId === 'ship_of_the_line' ? 3 : 2;
+      ctx.fillStyle = '#451a03';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.62, -hull * 0.28);
+      ctx.lineTo(-hull * 0.35, -hull * 0.15);
+      ctx.lineTo(hull * 0.45, -hull * 0.15);
+      ctx.lineTo(hull * 0.62, -hull * 0.24);
+      ctx.lineTo(hull * 0.48, hull * 0.38);
+      ctx.lineTo(-hull * 0.52, hull * 0.38);
+      ctx.closePath();
+      ctx.fill();
+
+      // Yellow / white gunport stripes
+      ctx.fillStyle = '#fef08a';
+      for (let d = 0; d < decks; d++) {
+        const dy = -hull * 0.08 + d * hull * 0.12;
+        ctx.fillRect(-hull * 0.45, dy, hull * 0.9, hull * 0.06);
+        // Black gunports with cannon barrels
+        ctx.fillStyle = '#0f172a';
+        for (let g = -3; g <= 3; g++) {
+          ctx.fillRect(g * hull * 0.12 - 2, dy + 1, 4, hull * 0.04);
+        }
+        ctx.fillStyle = '#fef08a';
+      }
+
+      // Three Masts (Mizzen, Main, Fore)
+      ctx.fillStyle = '#78350f';
+      ctx.fillRect(-hull * 0.32, -hull * 0.72, hull * 0.05, hull * 0.72);
+      ctx.fillRect(-hull * 0.02, -hull * 0.95, hull * 0.06, hull * 0.95);
+      ctx.fillRect(hull * 0.28, -hull * 0.78, hull * 0.05, hull * 0.78);
+
+      // Billowing Sails
+      ctx.fillStyle = '#f1f5f9';
+      for (const mastX of [-0.32, -0.02, 0.28]) {
+        ctx.beginPath();
+        ctx.moveTo(hull * (mastX - 0.15), -hull * 0.65);
+        ctx.lineTo(hull * (mastX + 0.15), -hull * 0.65);
+        ctx.lineTo(hull * (mastX + 0.12), -hull * 0.38);
+        ctx.lineTo(hull * (mastX - 0.12), -hull * 0.38);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (shipId === 'ironclad') {
+      // Ironclad Steam Ram: Dark armored sloped casemate, revolving turret, chugging funnel
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.55, -hull * 0.08);
+      ctx.lineTo(-hull * 0.35, -hull * 0.22);
+      ctx.lineTo(hull * 0.35, -hull * 0.22);
+      ctx.lineTo(hull * 0.62, hull * 0.08); // Piercing iron ram
+      ctx.lineTo(hull * 0.42, hull * 0.28);
+      ctx.lineTo(-hull * 0.48, hull * 0.28);
+      ctx.closePath();
+      ctx.fill();
+
+      // Riveted Iron Armor Plates
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Revolving Heavy Gun Turret
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.arc(-hull * 0.1, -hull * 0.25, hull * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+      // Cannon barrel
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(-hull * 0.1, -hull * 0.28, hull * 0.28, hull * 0.06);
+
+      // Steam Funnel
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(hull * 0.15, -hull * 0.5, hull * 0.08, hull * 0.35);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(hull * 0.14, -hull * 0.52, hull * 0.1, hull * 0.06);
+    } else if (shipId === 'corvette' || shipId === 'destroyer') {
+      // Modern Escort / Destroyer: High-speed raked hull, bridge, dual turrets, depth charge rails
+      ctx.fillStyle = '#334155';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.58, -hull * 0.1);
+      ctx.lineTo(hull * 0.45, -hull * 0.1);
+      ctx.lineTo(hull * 0.65, -hull * 0.18); // Raked sharp bow
+      ctx.lineTo(hull * 0.48, hull * 0.22);
+      ctx.lineTo(-hull * 0.52, hull * 0.22);
+      ctx.closePath();
+      ctx.fill();
+
+      // Bridge / Superstructure
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(-hull * 0.08, -hull * 0.32, hull * 0.28, hull * 0.22);
+      ctx.fillStyle = '#0284c7'; // Bridge windows
+      ctx.fillRect(hull * 0.08, -hull * 0.28, hull * 0.1, hull * 0.06);
+
+      // Gun Turrets (Bow & Stern)
+      ctx.fillStyle = '#1e293b';
+      for (const tx of [-0.35, 0.32]) {
+        ctx.beginPath();
+        ctx.arc(hull * tx, -hull * 0.16, hull * 0.09, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#64748b';
+        ctx.fillRect(hull * tx, -hull * 0.18, hull * 0.18, hull * 0.04);
+        ctx.fillStyle = '#1e293b';
+      }
+
+      // Radar Mast
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(hull * 0.05, -hull * 0.32);
+      ctx.lineTo(hull * 0.05, -hull * 0.62);
+      ctx.moveTo(-hull * 0.02, -hull * 0.55);
+      ctx.lineTo(hull * 0.12, -hull * 0.55);
+      ctx.stroke();
+    } else if (shipId === 'cruiser' || shipId === 'battleship') {
+      // Dreadnought Battleship: Colossal steel hull, armored citadel, triple turrets, conning tower
+      const isBB = shipId === 'battleship';
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.68, -hull * 0.14);
+      ctx.lineTo(hull * 0.55, -hull * 0.14);
+      ctx.lineTo(hull * 0.76, -hull * 0.24); // Heavy flared bow
+      ctx.lineTo(hull * 0.58, hull * 0.32);
+      ctx.lineTo(-hull * 0.62, hull * 0.32);
+      ctx.closePath();
+      ctx.fill();
+
+      // Tiered Armored Citadel
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(-hull * 0.22, -hull * 0.38, hull * 0.44, hull * 0.24);
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(-hull * 0.08, -hull * 0.55, hull * 0.22, hull * 0.18);
+
+      // Heavy Gun Turrets (Front A/B + Rear X/Y)
+      const turretPositions = isBB ? [-0.48, -0.32, 0.34, 0.48] : [-0.42, 0.38];
+      for (const tx of turretPositions) {
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.arc(hull * tx, -hull * 0.2, hull * 0.11, 0, Math.PI * 2);
+        ctx.fill();
+        // Heavy multi-barrel guns
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillRect(hull * tx, -hull * 0.23, hull * 0.26, hull * 0.035);
+        ctx.fillRect(hull * tx, -hull * 0.18, hull * 0.26, hull * 0.035);
+      }
+
+      // Funnels & Tripod Mast
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(-hull * 0.18, -hull * 0.6, hull * 0.08, hull * 0.25);
+      ctx.fillRect(hull * 0.02, -hull * 0.6, hull * 0.08, hull * 0.25);
+    } else if (shipId === 'submarine') {
+      // Submerged/surfaced diesel-electric submarine
+      ctx.fillStyle = '#0f172a';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.55, 0);
+      ctx.lineTo(hull * 0.55, 0);
+      ctx.lineTo(hull * 0.45, hull * 0.2);
+      ctx.lineTo(-hull * 0.45, hull * 0.2);
+      ctx.closePath();
+      ctx.fill();
+
+      // Conning Tower & Periscope
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(-hull * 0.06, -hull * 0.28, hull * 0.15, hull * 0.28);
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillRect(-hull * 0.01, -hull * 0.42, 2, hull * 0.14);
+      // Periscope lens
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(-hull * 0.01, -hull * 0.43, 3, 2);
+    } else if (shipId === 'carrier') {
+      // Aircraft Carrier: Flat flight deck with runway markings, arresting wires, starboard island
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(-hull * 0.72, -hull * 0.18, hull * 1.44, hull * 0.38);
+
+      // Flight Deck
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(-hull * 0.75, -hull * 0.22, hull * 1.5, hull * 0.12);
+
+      // White Runway Centerline Stripes
+      ctx.fillStyle = '#f8fafc';
+      for (let i = -5; i <= 5; i++) {
+        ctx.fillRect(i * hull * 0.13, -hull * 0.17, hull * 0.07, 2);
+      }
+
+      // Starboard Island Superstructure
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(hull * 0.15, -hull * 0.48, hull * 0.18, hull * 0.28);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(hull * 0.22, -hull * 0.45, hull * 0.08, 3);
+
+      // Parked Plane Silhouettes on Deck
+      ctx.fillStyle = '#475569';
+      for (const px of [-0.5, -0.32, -0.15]) {
+        ctx.fillRect(hull * px, -hull * 0.26, hull * 0.09, hull * 0.05);
+        ctx.fillRect(hull * (px + 0.02), -hull * 0.29, hull * 0.04, hull * 0.1);
+      }
+    } else if (shipId === 'landing_craft') {
+      // Landing Barge: Boxy blunt ramp prow
+      ctx.fillStyle = '#334155';
+      ctx.beginPath();
+      ctx.moveTo(-hull * 0.45, -hull * 0.12);
+      ctx.lineTo(hull * 0.38, -hull * 0.12);
+      ctx.lineTo(hull * 0.48, hull * 0.08); // Ramp prow
+      ctx.lineTo(hull * 0.35, hull * 0.24);
+      ctx.lineTo(-hull * 0.42, hull * 0.24);
+      ctx.closePath();
+      ctx.fill();
+
+      // Soldier Helmets in hold
+      ctx.fillStyle = '#15803d';
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.arc(i * hull * 0.1, -hull * 0.14, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // ================= 5. KINGDOM BANNER & MASTHEAD =================
+    if (role !== 'submarine' && role !== 'carrier') {
+      const bannerX = -hull * 0.02;
+      const bannerY = -hull * 0.75;
+      const bannerWave = Math.sin(this.animTimer * 5 + fleet.x) * hull * 0.08;
+
+      ctx.fillStyle = fleet.kingdomColor;
+      ctx.beginPath();
+      ctx.moveTo(bannerX, bannerY);
+      ctx.lineTo(bannerX + hull * 0.45 + bannerWave, bannerY + hull * 0.12);
+      ctx.lineTo(bannerX, bannerY + hull * 0.24);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // ================= 6. MUZZLE FLASHES ON FIRING =================
+    if (fleet.lastFiredTick && (Date.now() - fleet.lastFiredTick < 220)) {
+      const flashAlpha = 1 - (Date.now() - fleet.lastFiredTick) / 220;
+      ctx.save();
+      ctx.globalAlpha = flashAlpha;
+      ctx.fillStyle = '#fde047';
+      // Muzzle flashes erupting along broadside / turrets
+      for (const gx of [-0.3, 0.0, 0.3]) {
+        const flashR = hull * 0.15 * (0.8 + Math.random() * 0.4);
+        ctx.beginPath();
+        ctx.arc(hull * gx, -hull * 0.25, flashR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath();
+        ctx.arc(hull * gx, -hull * 0.25, flashR * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // ================= 7. DAMAGE FIRES & SMOKE =================
+    if (isSinking || integrity < 0.65 || fleet.state === 'engaged') {
+      const numFires = isSinking ? 4 : integrity < 0.35 ? 3 : 1;
+      for (let f = 0; f < numFires; f++) {
+        const fx = ((f % 3) - 1) * hull * 0.28;
+        const fy = -hull * 0.25;
+        const fireFlicker = Math.sin(this.animTimer * 12 + f * 2.5) * 3;
+
+        // Animated Flame Core
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(fx, fy - fireFlicker, hull * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.arc(fx, fy - fireFlicker * 0.7, hull * 0.07, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+
+    // ================= 8. INTEGRITY BAR & TROOP COUNT =================
+    if (!isSinking) {
+      if (integrity < 0.999) {
+        const barW = hull * 1.2;
+        const barH = 3.5;
+        const barX = pos.x - barW / 2;
+        const barY = pos.y - hull * 1.05;
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+        ctx.fillStyle = integrity > 0.5 ? '#22c55e' : integrity > 0.25 ? '#f59e0b' : '#ef4444';
+        ctx.fillRect(barX, barY, barW * integrity, barH);
+      }
+
+      // Soldier headcount badge
+      if (tileSize >= 9 && fleet.soldierIds.length > 0) {
+        ctx.fillStyle = 'rgba(241, 245, 249, 0.95)';
+        ctx.font = `600 ${Math.max(9, Math.floor(tileSize * 0.55))}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`⚔ ${fleet.soldierIds.length}`, pos.x, pos.y + hull * 0.85);
+        ctx.textAlign = 'left';
+      }
     }
   }
 
@@ -1905,12 +2484,14 @@ export class PixelRenderer {
     brushSize: number,
     ships?: Iterable<Ship>,
     caravans?: Iterable<OverlandCaravan>,
-    railways?: { yearlyFreight: number },
+    railways?: RailwayNetwork | { yearlyFreight: number },
     warFocus?: WarOverlayFocus | null,
     overlays?: OverlayManager,
     mapIntel?: MapIntelligenceSnapshot | null,
     entityIndex?: SpatialHash<Entity>,
-    flights?: Iterable<Flight>
+    flights?: Iterable<Flight>,
+    /** Armies at sea. Drawn heavier than trade hulls, and in the realm's colour. */
+    fleets?: Iterable<InvasionFleet>
   ): void {
     const width = this.canvas.width;
     const height = this.canvas.height;
@@ -2355,6 +2936,16 @@ export class PixelRenderer {
       }
     }
 
+    // ========== 3b-bis. INVASION FLEETS ==========
+    // Before the trade hulls, so a merchantman caught in a battle is drawn over
+    // the warships rather than hidden behind them.
+    if (fleets && tileSize >= 4) {
+      for (const fleet of fleets) {
+        if (fleet.x < minX - 4 || fleet.x > maxX + 4 || fleet.y < minY - 4 || fleet.y > maxY + 4) continue;
+        this.drawInvasionFleet(fleet, camera, width, height, tileSize);
+      }
+    }
+
     // ========== 3c. NAVAL SHIPS & CARAVANS ==========
     if (ships && tileSize >= 5) {
       for (const ship of ships) {
@@ -2476,6 +3067,9 @@ export class PixelRenderer {
         }
       }
     }
+
+    // ========== 3e. PHYSICAL ACTIVE TRAINS & CARS ==========
+    this.drawActiveTrainsPass(railways, camera, width, height, tileSize, minX, maxX, minY, maxY);
 
     // ========== 2f. AIRCRAFT ==========
     // Drawn after everything on the ground, because they are over it.
@@ -2641,6 +3235,27 @@ export class PixelRenderer {
             this.ctx.lineTo(3.5, 2);
             this.ctx.closePath();
             this.ctx.fill();
+          } else if (proj.type === 'fire_arrow') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            // Fiery flame on tip
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.beginPath();
+            this.ctx.moveTo(8, 0);
+            this.ctx.lineTo(2, -3);
+            this.ctx.lineTo(4, 0);
+            this.ctx.lineTo(2, 3);
+            this.ctx.closePath();
+            this.ctx.fill();
+            this.ctx.fillStyle = '#fbbf24';
+            this.ctx.fillRect(3, -1.5, 3, 3);
+            // Arrow shaft
+            this.ctx.strokeStyle = '#78350f';
+            this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, 0);
+            this.ctx.lineTo(5, 0);
+            this.ctx.stroke();
           } else if (proj.type === 'bullet') {
             this.ctx.strokeStyle = '#fde047';
             this.ctx.lineWidth = Math.max(2, tileSize * 0.15);
@@ -2648,14 +3263,61 @@ export class PixelRenderer {
             this.ctx.moveTo(screenPos.x - Math.cos(angle) * 8, screenPos.y - Math.sin(angle) * 8);
             this.ctx.lineTo(screenPos.x, screenPos.y);
             this.ctx.stroke();
-          } else if (proj.type === 'cannonball') {
-            const r = Math.max(3, tileSize * 0.25);
-            this.ctx.fillStyle = '#1e293b';
+          } else if (proj.type === 'cannonball' || proj.type === 'naval_shell') {
+            const isHeavy = proj.type === 'naval_shell';
+            const r = Math.max(3, tileSize * (isHeavy ? 0.32 : 0.25));
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            this.ctx.fillStyle = isHeavy ? '#0f172a' : '#1e293b';
             this.ctx.beginPath();
-            this.ctx.arc(screenPos.x, screenPos.y, r, 0, Math.PI * 2);
+            this.ctx.ellipse(0, 0, r * (isHeavy ? 1.4 : 1), r, 0, 0, Math.PI * 2);
             this.ctx.fill();
             this.ctx.strokeStyle = '#475569';
             this.ctx.stroke();
+            if (isHeavy) {
+              this.ctx.fillStyle = '#b45309'; // Copper driving band
+              this.ctx.fillRect(-r * 0.4, -r * 0.7, r * 0.35, r * 1.4);
+            }
+          } else if (proj.type === 'torpedo') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            const tLen = Math.max(8, tileSize * 0.65);
+            const tWidth = Math.max(2.5, tileSize * 0.16);
+            // Torpedo steel hull
+            this.ctx.fillStyle = '#334155';
+            this.ctx.fillRect(-tLen * 0.5, -tWidth * 0.5, tLen, tWidth);
+            // Brass warhead tip
+            this.ctx.fillStyle = '#d97706';
+            this.ctx.beginPath();
+            this.ctx.arc(tLen * 0.5, 0, tWidth * 0.5, -Math.PI / 2, Math.PI / 2);
+            this.ctx.fill();
+            // Propeller tail fins
+            this.ctx.fillStyle = '#0f172a';
+            this.ctx.fillRect(-tLen * 0.55, -tWidth * 0.9, tLen * 0.15, tWidth * 1.8);
+          } else if (proj.type === 'depth_charge') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle + proj.progress * Math.PI * 4); // Spinning barrel
+            const dSize = Math.max(4, tileSize * 0.28);
+            this.ctx.fillStyle = '#1e293b';
+            this.ctx.fillRect(-dSize * 0.6, -dSize * 0.4, dSize * 1.2, dSize * 0.8);
+            this.ctx.fillStyle = '#e2e8f0';
+            this.ctx.fillRect(-dSize * 0.1, -dSize * 0.45, dSize * 0.2, dSize * 0.9);
+          } else if (proj.type === 'carrier_plane') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            const pSize = Math.max(6, tileSize * 0.45);
+            // Fuselage
+            this.ctx.fillStyle = '#334155';
+            this.ctx.fillRect(-pSize * 0.6, -pSize * 0.15, pSize * 1.2, pSize * 0.3);
+            // Wings
+            this.ctx.fillStyle = '#475569';
+            this.ctx.fillRect(-pSize * 0.15, -pSize * 0.8, pSize * 0.35, pSize * 1.6);
+            // Propeller disk
+            this.ctx.fillStyle = 'rgba(226, 232, 240, 0.7)';
+            this.ctx.fillRect(pSize * 0.6, -pSize * 0.4, 1.5, pSize * 0.8);
+            // Tail rudder
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.fillRect(-pSize * 0.6, -pSize * 0.35, pSize * 0.2, pSize * 0.7);
           } else if (proj.type === 'spear_thrust') {
             this.ctx.translate(screenPos.x, screenPos.y);
             this.ctx.rotate(angle);
@@ -2839,7 +3501,8 @@ export class PixelRenderer {
     overlays?: OverlayManager,
     mapIntel?: MapIntelligenceSnapshot | null,
     entityIndex?: SpatialHash<Entity>,
-    flights?: Iterable<Flight>
+    flights?: Iterable<Flight>,
+    fleets?: Iterable<InvasionFleet>
   ): void {
     const width = this.canvas.width;
     const height = this.canvas.height;
@@ -2868,9 +3531,10 @@ export class PixelRenderer {
     }
 
     // 2. HEALTH BARS FOR DAMAGED ENTITIES
-    if (this.options.showHealthBars && tileSize >= 5) {
+    if (this.options.showHealthBars && tileSize > 8) {
       for (const e of visibleEntities) {
-        if (e.hp < e.maxHp && e.hp > 0) {
+        if (e.hp <= 0 || !e.kingdomId) continue;
+        if (e.hp < e.maxHp) {
           const screenPos = camera.worldToScreen(e.x, e.y, width, height);
           const entitySize = tileSize;
           const ageScale = e.lifeStage === 'infant' ? 0.52 : e.lifeStage === 'child' ? 0.70 : e.lifeStage === 'adolescent' ? 0.86 : 1.0;
@@ -2912,6 +3576,14 @@ export class PixelRenderer {
       }
     }
 
+    // 2c. INVASION FLEETS (WebGPU Overlay / HUD fallback)
+    if (fleets && tileSize >= 4) {
+      for (const fleet of fleets) {
+        if (fleet.x < minX - 4 || fleet.x > maxX + 4 || fleet.y < minY - 4 || fleet.y > maxY + 4) continue;
+        this.drawInvasionFleet(fleet, camera, width, height, tileSize);
+      }
+    }
+
     // 3. SIEGE RINGS
     if (tileSize >= 5) {
       for (const city of cities.values()) {
@@ -2922,23 +3594,18 @@ export class PixelRenderer {
         const centerX = screenPos.x + tileSize / 2;
         const centerY = screenPos.y + tileSize / 2;
         const radius = 7 * tileSize;
-        const pulse = 0.45 + Math.sin(this.animTimer * 4) * 0.2;
 
-        this.ctx.strokeStyle = `rgba(239, 68, 68, ${pulse})`;
-        this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
-        this.ctx.setLineDash([tileSize * 0.5, tileSize * 0.4]);
+        this.ctx.save();
         this.ctx.beginPath();
         this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        this.ctx.strokeStyle = 'rgba(239, 68, 68, 0.55)';
+        this.ctx.lineWidth = Math.max(2, tileSize * 0.15);
+        this.ctx.setLineDash([8, 8]);
         this.ctx.stroke();
-        this.ctx.setLineDash([]);
 
-        if (city.siegeProgress > 0) {
-          this.ctx.strokeStyle = 'rgba(248, 113, 113, 0.95)';
-          this.ctx.lineWidth = Math.max(2, tileSize * 0.2);
-          this.ctx.beginPath();
-          this.ctx.arc(centerX, centerY, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, city.siegeProgress));
-          this.ctx.stroke();
-        }
+        this.ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+        this.ctx.fill();
+        this.ctx.restore();
       }
     }
 
@@ -2978,38 +3645,35 @@ export class PixelRenderer {
       this.ctx.textAlign = 'start';
     }
 
-    // 5. PARTICLES & DAMAGE NUMBERS
+    // 5. FLOATING PARTICLES & DAMAGE NUMBERS
     if (this.options.showParticles) {
       for (const p of particles.activeParticles) {
-        if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) {
-          const screenPos = camera.worldToScreen(p.x, p.y, width, height);
-          this.ctx.globalAlpha = p.alpha;
+        if (p.x < minX - 2 || p.x > maxX + 2 || p.y < minY - 2 || p.y > maxY + 2) continue;
+        const screenPos = camera.worldToScreen(p.x, p.y, width, height);
+        this.ctx.globalAlpha = p.alpha;
 
-          if (p.text) {
-            this.ctx.font = 'bold 12px var(--font-mono)';
-            this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
-            this.ctx.fillText(p.text, screenPos.x + 1, screenPos.y + 1);
-            this.ctx.fillStyle = p.color;
-            this.ctx.fillText(p.text, screenPos.x, screenPos.y);
-          } else {
-            this.ctx.fillStyle = p.color;
-            this.ctx.fillRect(screenPos.x, screenPos.y, p.size, p.size);
-          }
-
-          this.ctx.globalAlpha = 1.0;
+        if (p.text) {
+          this.ctx.font = 'bold 12px var(--font-mono)';
+          this.ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          this.ctx.fillText(p.text, screenPos.x + 1, screenPos.y + 1);
+          this.ctx.fillStyle = p.color;
+          this.ctx.fillText(p.text, screenPos.x, screenPos.y);
+        } else {
+          this.ctx.fillStyle = p.color;
+          this.ctx.fillRect(screenPos.x, screenPos.y, p.size, p.size);
         }
+
+        this.ctx.globalAlpha = 1.0;
       }
     }
 
-    // 6. FLYING PROJECTILES (Arrows, Bullets, Cannonballs, Spears)
+    // 6. FLYING PROJECTILES (Arrows, Bullets, Cannonballs, Torpedoes, Planes)
     if (this.options.showParticles && particles.activeProjectiles) {
       for (const proj of particles.activeProjectiles) {
         if (proj.x >= minX - 2 && proj.x <= maxX + 2 && proj.y >= minY - 2 && proj.y <= maxY + 2) {
           const arcOffset = proj.arcHeight ? Math.sin(proj.progress * Math.PI) * proj.arcHeight : 0;
           const screenPos = camera.worldToScreen(proj.x, proj.y - arcOffset, width, height);
 
-          // Ground shadow for airborne projectiles: a small semi-transparent
-          // ellipse at the projectile's ground position (no arc offset)
           if (arcOffset > 0 && proj.progress < 1) {
             const groundPos = camera.worldToScreen(proj.x, proj.y, width, height);
             this.ctx.save();
@@ -3022,9 +3686,6 @@ export class PixelRenderer {
           }
 
           this.ctx.save();
-          // Angle from parabolic derivative: dzdt gives the instantaneous
-          // vertical velocity of the arc, tilting the projectile nose-up on
-          // ascent and nose-down on descent for a natural flight attitude.
           const dx = proj.targetX - proj.startX;
           const dy = proj.targetY - proj.startY;
           const dist = Math.hypot(dx, dy) || 1;
@@ -3035,7 +3696,6 @@ export class PixelRenderer {
             this.ctx.translate(screenPos.x, screenPos.y);
             this.ctx.rotate(angle);
 
-            // Arrow fletching feathers (feathers on tail)
             this.ctx.fillStyle = '#e2e8f0';
             this.ctx.beginPath();
             this.ctx.moveTo(-6, 0);
@@ -3047,14 +3707,12 @@ export class PixelRenderer {
             this.ctx.lineTo(-4, 2.5);
             this.ctx.lineTo(-2.5, 0);
             this.ctx.fill();
-            // Arrow shaft
             this.ctx.strokeStyle = '#78350f';
             this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
             this.ctx.beginPath();
             this.ctx.moveTo(-6, 0);
             this.ctx.lineTo(6, 0);
             this.ctx.stroke();
-            // Arrowhead
             this.ctx.fillStyle = '#94a3b8';
             this.ctx.beginPath();
             this.ctx.moveTo(7, 0);
@@ -3062,6 +3720,25 @@ export class PixelRenderer {
             this.ctx.lineTo(3.5, 2);
             this.ctx.closePath();
             this.ctx.fill();
+          } else if (proj.type === 'fire_arrow') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.beginPath();
+            this.ctx.moveTo(8, 0);
+            this.ctx.lineTo(2, -3);
+            this.ctx.lineTo(4, 0);
+            this.ctx.lineTo(2, 3);
+            this.ctx.closePath();
+            this.ctx.fill();
+            this.ctx.fillStyle = '#fbbf24';
+            this.ctx.fillRect(3, -1.5, 3, 3);
+            this.ctx.strokeStyle = '#78350f';
+            this.ctx.lineWidth = Math.max(1.5, tileSize * 0.12);
+            this.ctx.beginPath();
+            this.ctx.moveTo(-6, 0);
+            this.ctx.lineTo(5, 0);
+            this.ctx.stroke();
           } else if (proj.type === 'bullet') {
             this.ctx.strokeStyle = '#fde047';
             this.ctx.lineWidth = Math.max(2, tileSize * 0.15);
@@ -3069,14 +3746,54 @@ export class PixelRenderer {
             this.ctx.moveTo(screenPos.x - Math.cos(angle) * 8, screenPos.y - Math.sin(angle) * 8);
             this.ctx.lineTo(screenPos.x, screenPos.y);
             this.ctx.stroke();
-          } else if (proj.type === 'cannonball') {
-            const r = Math.max(3, tileSize * 0.25);
-            this.ctx.fillStyle = '#1e293b';
+          } else if (proj.type === 'cannonball' || proj.type === 'naval_shell') {
+            const isHeavy = proj.type === 'naval_shell';
+            const r = Math.max(3, tileSize * (isHeavy ? 0.32 : 0.25));
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            this.ctx.fillStyle = isHeavy ? '#0f172a' : '#1e293b';
             this.ctx.beginPath();
-            this.ctx.arc(screenPos.x, screenPos.y, r, 0, Math.PI * 2);
+            this.ctx.ellipse(0, 0, r * (isHeavy ? 1.4 : 1), r, 0, 0, Math.PI * 2);
             this.ctx.fill();
             this.ctx.strokeStyle = '#475569';
             this.ctx.stroke();
+            if (isHeavy) {
+              this.ctx.fillStyle = '#b45309';
+              this.ctx.fillRect(-r * 0.4, -r * 0.7, r * 0.35, r * 1.4);
+            }
+          } else if (proj.type === 'torpedo') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            const tLen = Math.max(8, tileSize * 0.65);
+            const tWidth = Math.max(2.5, tileSize * 0.16);
+            this.ctx.fillStyle = '#334155';
+            this.ctx.fillRect(-tLen * 0.5, -tWidth * 0.5, tLen, tWidth);
+            this.ctx.fillStyle = '#d97706';
+            this.ctx.beginPath();
+            this.ctx.arc(tLen * 0.5, 0, tWidth * 0.5, -Math.PI / 2, Math.PI / 2);
+            this.ctx.fill();
+            this.ctx.fillStyle = '#0f172a';
+            this.ctx.fillRect(-tLen * 0.55, -tWidth * 0.9, tLen * 0.15, tWidth * 1.8);
+          } else if (proj.type === 'depth_charge') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle + proj.progress * Math.PI * 4);
+            const dSize = Math.max(4, tileSize * 0.28);
+            this.ctx.fillStyle = '#1e293b';
+            this.ctx.fillRect(-dSize * 0.6, -dSize * 0.4, dSize * 1.2, dSize * 0.8);
+            this.ctx.fillStyle = '#e2e8f0';
+            this.ctx.fillRect(-dSize * 0.1, -dSize * 0.45, dSize * 0.2, dSize * 0.9);
+          } else if (proj.type === 'carrier_plane') {
+            this.ctx.translate(screenPos.x, screenPos.y);
+            this.ctx.rotate(angle);
+            const pSize = Math.max(6, tileSize * 0.45);
+            this.ctx.fillStyle = '#334155';
+            this.ctx.fillRect(-pSize * 0.6, -pSize * 0.15, pSize * 1.2, pSize * 0.3);
+            this.ctx.fillStyle = '#475569';
+            this.ctx.fillRect(-pSize * 0.15, -pSize * 0.8, pSize * 0.35, pSize * 1.6);
+            this.ctx.fillStyle = 'rgba(226, 232, 240, 0.7)';
+            this.ctx.fillRect(pSize * 0.6, -pSize * 0.4, 1.5, pSize * 0.8);
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.fillRect(-pSize * 0.6, -pSize * 0.35, pSize * 0.2, pSize * 0.7);
           } else if (proj.type === 'spear_thrust') {
             this.ctx.translate(screenPos.x, screenPos.y);
             this.ctx.rotate(angle);
@@ -3473,60 +4190,230 @@ export class PixelRenderer {
         ctx.fill();
       }
     }
+  }
 
-    // Locomotive: a real pixel-art engine, oriented along its segment, only
-    // drawn while freight is actually moving this year.
-    // ponytail: one engine walks the concatenation of all visible segments in
-    // raster order, not a per-component ordered path — fine for the common
-    // case of one simple point-to-point line; revisit if multiple simultaneous
-    // lines on screen make the single cursor jump visibly between them.
-    if (hasActiveFreight && tileSize >= 6 && segs.length > 0) {
-      const speed = 0.6;
-      const totalLen = segs.reduce((s, g) => s + g.len, 0);
-      const cycle = totalLen / speed;
-      const along = ((this.animTimer * 10) % cycle + cycle) % cycle;
-      let remaining = along * speed;
-      let seg = segs[0];
-      for (const g of segs) {
-        if (remaining <= g.len) { seg = g; break; }
-        remaining -= g.len;
+  /**
+   * Physical Active Trains: draws locomotives (steam, diesel, electric bullet)
+   * leading modular trailing cars (coal, ore, oil tankers, boxcars, passenger, troop cars, caboose)
+   * precisely rotated and articulated along real track curves.
+   */
+  private drawActiveTrainsPass(
+    railways: RailwayNetwork | { yearlyFreight: number } | undefined,
+    camera: Camera,
+    width: number,
+    height: number,
+    tileSize: number,
+    minX: number,
+    maxX: number,
+    minY: number,
+    maxY: number
+  ): void {
+    if (!railways || !('activeTrains' in railways) || tileSize < 4) return;
+    const activeTrains = (railways as RailwayNetwork).activeTrains;
+    if (activeTrains.size === 0) return;
+
+    const ctx = this.ctx;
+
+    for (const train of activeTrains.values()) {
+      if (train.x < minX - 6 || train.x > maxX + 6 || train.y < minY - 6 || train.y > maxY + 6) continue;
+
+      const L = Math.max(14, tileSize * 0.82);
+      const H = Math.max(7, tileSize * 0.42);
+
+      // 1. Draw Trailing Cars (behind locomotive)
+      for (let c = train.cars.length - 1; c >= 0; c--) {
+        const car = train.cars[c];
+        if (car.x < minX - 3 || car.x > maxX + 3 || car.y < minY - 3 || car.y > maxY + 3) continue;
+
+        const carScreen = camera.worldToScreen(car.x, car.y, width, height);
+        const carAngle = Math.atan2(car.headingY, car.headingX);
+
+        ctx.save();
+        ctx.translate(carScreen.x + tileSize * 0.5, carScreen.y + tileSize * 0.5);
+        ctx.rotate(carAngle);
+
+        const carL = L * 0.85;
+        const carH = H * 0.88;
+
+        // Drop shadow under car
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.32)';
+        ctx.fillRect(-carL * 0.5, -carH * 0.5 + 2, carL, carH);
+
+        switch (car.type) {
+          case 'coal_hopper':
+            ctx.fillStyle = '#292524';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
+            ctx.fillStyle = '#09090b';
+            ctx.fillRect(-carL * 0.4, -carH * 0.35, carL * 0.8, carH * 0.7);
+            ctx.fillStyle = '#18181b';
+            ctx.fillRect(-carL * 0.25, -carH * 0.25, carL * 0.5, carH * 0.5);
+            break;
+
+          case 'ore_hopper':
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
+            ctx.fillStyle = car.cargo === 'tools' ? '#64748b' : '#78350f';
+            ctx.fillRect(-carL * 0.4, -carH * 0.35, carL * 0.8, carH * 0.7);
+            break;
+
+          case 'oil_tanker':
+            ctx.fillStyle = '#475569';
+            ctx.beginPath();
+            ctx.roundRect(-carL * 0.5, -carH * 0.5, carL, carH, carH * 0.35);
+            ctx.fill();
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillRect(-carL * 0.25, -carH * 0.5, 2, carH);
+            ctx.fillRect(carL * 0.25 - 2, -carH * 0.5, 2, carH);
+            ctx.fillStyle = '#f59e0b';
+            ctx.fillRect(-2, -2, 4, 4);
+            break;
+
+          case 'passenger_car':
+            ctx.fillStyle = train.kingdomColor ?? '#3b82f6';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, 2);
+            ctx.fillStyle = '#fef08a';
+            for (let w = 0; w < 4; w++) {
+              const wx = -carL * 0.38 + (w / 3) * carL * 0.65;
+              ctx.fillRect(wx, -1.5, carL * 0.12, carH * 0.45);
+            }
+            break;
+
+          case 'troop_car':
+            ctx.fillStyle = '#3f4f34';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
+            ctx.fillStyle = '#2d3725';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, 2);
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.arc(-carL * 0.2, 0, 2, 0, Math.PI * 2);
+            ctx.arc(carL * 0.2, 0, 2, 0, Math.PI * 2);
+            ctx.fill();
+            break;
+
+          case 'caboose':
+            ctx.fillStyle = '#991b1b';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
+            ctx.fillStyle = '#7f1d1d';
+            ctx.fillRect(-carL * 0.15, -carH * 0.75, carL * 0.3, carH * 0.45);
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath();
+            ctx.arc(-carL * 0.5, 0, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            break;
+
+          case 'boxcar':
+          default:
+            ctx.fillStyle = '#78350f';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
+            ctx.fillStyle = '#57534e';
+            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, 2);
+            ctx.fillStyle = '#451a03';
+            ctx.fillRect(-carL * 0.15, -carH * 0.4, carL * 0.3, carH * 0.8);
+            break;
+        }
+
+        // Iron Coupler Link
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(carL * 0.48, -1, 3, 2);
+
+        // Wheels
+        ctx.fillStyle = '#0c0a09';
+        ctx.fillRect(-carL * 0.4, carH * 0.42, 4, 2);
+        ctx.fillRect(carL * 0.4 - 4, carH * 0.42, 4, 2);
+
+        ctx.restore();
       }
-      const frac = seg.len > 0 ? remaining / seg.len : 0;
-      const ex = seg.x1 + (seg.x2 - seg.x1) * frac;
-      const ey = seg.y1 + (seg.y2 - seg.y1) * frac;
-      const dirX = seg.x2 - seg.x1;
-      const dirY = seg.y2 - seg.y1;
-      const angle = Math.atan2(dirY, dirX);
+
+      // 2. Draw Locomotive (Lead Engine)
+      const locoScreen = camera.worldToScreen(train.x, train.y, width, height);
+      const locoAngle = Math.atan2(train.headingY, train.headingX);
 
       ctx.save();
-      ctx.translate(ex, ey);
-      ctx.rotate(angle);
-      const L = tileSize * 0.62;
-      const H = tileSize * 0.34;
-      // Wagon trailing behind the engine.
-      ctx.fillStyle = '#44403c';
-      ctx.fillRect(-L * 1.55, -H * 0.4, L * 0.7, H * 0.8);
-      // Locomotive body.
-      ctx.fillStyle = '#1c1917';
-      ctx.fillRect(-L * 0.5, -H * 0.5, L, H);
-      // Cab stripe.
-      ctx.fillStyle = '#dc2626';
-      ctx.fillRect(-L * 0.5, -H * 0.5, L * 0.28, H);
-      // Cab window.
-      ctx.fillStyle = '#7dd3fc';
-      ctx.fillRect(-L * 0.38, -H * 0.28, L * 0.14, H * 0.3);
-      // Chimney + smoke puff.
-      ctx.fillStyle = '#292524';
-      ctx.fillRect(L * 0.28, -H * 0.85, L * 0.14, H * 0.5);
-      ctx.fillStyle = 'rgba(214, 211, 209, 0.55)';
-      const puff = 0.5 + Math.sin(this.animTimer * 6) * 0.15;
-      ctx.beginPath();
-      ctx.arc(L * 0.35, -H * 1.0, H * 0.32 * puff, 0, Math.PI * 2);
-      ctx.fill();
-      // Wheels.
-      ctx.fillStyle = '#0c0a09';
-      ctx.beginPath(); ctx.arc(-L * 0.22, H * 0.5, H * 0.16, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(L * 0.18, H * 0.5, H * 0.16, 0, Math.PI * 2); ctx.fill();
+      ctx.translate(locoScreen.x + tileSize * 0.5, locoScreen.y + tileSize * 0.5);
+      ctx.rotate(locoAngle);
+
+      // Locomotive Drop Shadow
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.45)';
+      ctx.fillRect(-L * 0.5, -H * 0.5 + 2, L, H);
+
+      if (train.trainType === 'steam') {
+        // Steam Locomotive Body (Black Iron)
+        ctx.fillStyle = '#18181b';
+        ctx.fillRect(-L * 0.5, -H * 0.5, L, H);
+        // Cab (Back)
+        ctx.fillStyle = '#27272a';
+        ctx.fillRect(-L * 0.5, -H * 0.55, L * 0.35, H * 1.1);
+        // Cab window
+        ctx.fillStyle = '#7dd3fc';
+        ctx.fillRect(-L * 0.4, -H * 0.3, L * 0.15, H * 0.35);
+        // Boiler Brass bands
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillRect(-L * 0.05, -H * 0.5, 2, H);
+        ctx.fillRect(L * 0.2, -H * 0.5, 2, H);
+        // Chimney & Steam Dome
+        ctx.fillStyle = '#09090b';
+        ctx.fillRect(L * 0.28, -H * 0.85, L * 0.14, H * 0.5);
+        // Golden Headlamp
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(L * 0.45, -H * 0.2, 3, H * 0.4);
+        // Wheels
+        ctx.fillStyle = '#09090b';
+        ctx.beginPath();
+        ctx.arc(-L * 0.2, H * 0.45, H * 0.22, 0, Math.PI * 2);
+        ctx.arc(L * 0.1, H * 0.45, H * 0.22, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Smoke puff animation
+        ctx.fillStyle = 'rgba(214, 211, 209, 0.55)';
+        const puff = 0.6 + Math.sin(this.animTimer * 8) * 0.2;
+        ctx.beginPath();
+        ctx.arc(L * 0.35 - (this.animTimer % 1.5) * 4, -H * 1.1, H * 0.4 * puff, 0, Math.PI * 2);
+        ctx.fill();
+
+      } else if (train.trainType === 'diesel') {
+        // Heavy Diesel Locomotive
+        ctx.fillStyle = train.kingdomColor ?? '#d97706';
+        ctx.fillRect(-L * 0.5, -H * 0.5, L, H);
+        // Cab nose
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(-L * 0.5, -H * 0.45, L * 0.25, H * 0.9);
+        // Windshield
+        ctx.fillStyle = '#7dd3fc';
+        ctx.fillRect(-L * 0.45, -H * 0.25, L * 0.12, H * 0.5);
+        // Roof air vents
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(-L * 0.1, -H * 0.55, L * 0.4, 2);
+        // Front Headlights
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(L * 0.45, -H * 0.25, 3, H * 0.5);
+
+      } else {
+        // High-Speed Electric Bullet Train
+        ctx.fillStyle = '#f8fafc';
+        ctx.beginPath();
+        ctx.roundRect(-L * 0.5, -H * 0.5, L, H, [H * 0.2, H * 0.5, H * 0.5, H * 0.2]);
+        ctx.fill();
+        // Modern Blue/Kingdom racing stripe
+        ctx.fillStyle = train.kingdomColor ?? '#2563eb';
+        ctx.fillRect(-L * 0.5, -1, L, 3);
+        // Aerodynamic cockpit visor
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(L * 0.15, -H * 0.35, L * 0.25, H * 0.7);
+        // Pantograph on roof
+        ctx.strokeStyle = '#64748b';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(-L * 0.2, -H * 0.5);
+        ctx.lineTo(-L * 0.1, -H * 0.85);
+        ctx.lineTo(0, -H * 0.5);
+        ctx.stroke();
+        // LED Headlights
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(L * 0.42, -H * 0.2, 3, H * 0.4);
+      }
+
       ctx.restore();
     }
   }
