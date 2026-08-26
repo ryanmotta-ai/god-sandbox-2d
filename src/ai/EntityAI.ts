@@ -983,15 +983,8 @@ export class SimulationEngine {
     // physical gold ore on a shelf. Both halves of that were wrong: money has to
     // be conserved, and a grocery sale does not produce metal.
     //
-    // Prices here are quoted in world value (LocalMarket anchors to the world
-    // price), so the crown's till is credited through the exchange rate like
-    // every other public receipt.
     const kingdom = city.kingdomId ? this.kingdoms.get(city.kingdomId) : null;
-    if (kingdom && paid > 0) {
-      kingdom.economy.treasury += kingdom.economy.hasCurrency
-        ? kingdom.economy.fromWorldValue(paid)
-        : paid;
-    }
+    if (kingdom && paid > 0) kingdom.economy.treasury += paid;
   }
 
   /**
@@ -1052,9 +1045,7 @@ export class SimulationEngine {
       if (heirHousehold) {
         heirHousehold.earn(estate);
       } else if (kingdom) {
-        kingdom.economy.treasury += kingdom.economy.hasCurrency
-          ? kingdom.economy.fromWorldValue(estate)
-          : estate;
+        kingdom.economy.treasury += estate;
       }
     }
   }
@@ -1062,23 +1053,16 @@ export class SimulationEngine {
   /**
    * Pays a wage out of a realm's till and reports what was actually handed over.
    *
-   * Wages are quoted in world value, because that is the unit a household purse
-   * and a market price are both denominated in; the till is kept in the realm's
-   * own money. A realm with no currency yet has no money to conserve — its
-   * economy is still barter — so the wage is simply honoured.
-   *
    * The till is allowed to go negative. A crown that cannot make payroll should
-   * discover that as a deficit, which `collectTaxes` then covers by printing and
-   * the currency pays for next year. Refusing to pay instead would quietly stop
-   * an early realm's whole food economy the first winter it ran short.
+   * discover that as a deficit, which `collectTaxes` then zeroes out. Refusing
+   * to pay instead would quietly stop an early realm's whole food economy the
+   * first winter it ran short.
    */
-  private payWageFromTreasury(kingdom: Kingdom | null | undefined, worldValue: number): number {
-    if (worldValue <= 0) return 0;
-    if (!kingdom) return worldValue;
-    kingdom.economy.treasury -= kingdom.economy.hasCurrency
-      ? kingdom.economy.fromWorldValue(worldValue)
-      : worldValue;
-    return worldValue;
+  private payWageFromTreasury(kingdom: Kingdom | null | undefined, wage: number): number {
+    if (wage <= 0) return 0;
+    if (!kingdom) return wage;
+    kingdom.economy.treasury -= wage;
+    return wage;
   }
 
   /**

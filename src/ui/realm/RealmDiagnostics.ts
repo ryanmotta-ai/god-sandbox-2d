@@ -88,8 +88,7 @@ export function realmProblems(conditions: RealmCondition[]): RealmCondition[] {
 
 function diagnoseEconomy(m: RealmMetrics): RealmCondition {
   const terms: NonNullable<RealmCondition['terms']> = [
-    { label: 'PIB', value: m.gdp.toFixed(1) },
-    { label: 'PIB por habitante', value: m.gdpPerCapita.toFixed(2) },
+    { label: 'Produção', value: m.output.toFixed(1) },
     { label: 'Tesouro', value: m.treasury.toFixed(1) },
     { label: 'Industrialização', value: `${Math.round(m.industrialisation * 100)}%` },
     { label: 'Desigualdade', value: `${Math.round(m.inequality * 100)}%` }

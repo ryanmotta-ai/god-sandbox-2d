@@ -1,55 +1,12 @@
 import { GoodId, GOODS, ALL_GOODS } from './Goods';
-import { SpeciesType } from '../entities/Species';
-import { rng } from '../core/Random';
 
 /**
- * Money, prices and national accounts.
+ * Prices and what a realm owns.
  *
- * Before the `currency` technology a realm barters — its treasury is measured in
- * raw gold. Once currency is minted the realm gets a named money whose value
- * floats against every other realm's, driven by how much gold backs it and how
- * much of it has been printed.
+ * A realm's treasury is gold, by weight, always. There is no mint, no exchange
+ * rate and no inflation: what a realm has is the gold in its till and the goods
+ * in its cities' stores, and both are things you can point at on the map.
  */
-
-// ============================ CURRENCY ============================
-
-/**
- * Every realm mints the real. Each one is still its own currency with its own
- * gold backing and its own inflation — the exchange rate between two realms is
- * what drives trade — but they are all denominated in R$, so a price on one
- * screen means the same thing as a price on another.
- */
-const CURRENCY_NAME = 'Real';
-const CURRENCY_SYMBOL = 'R$';
-
-export interface Currency {
-  name: string;
-  symbol: string;
-  /** Year the mint opened. */
-  foundedYear: number;
-  /** Value of one unit in abstract world units. Floats with gold backing and money supply. */
-  value: number;
-  /** Units in circulation. Printing money without gold devalues it. */
-  supply: number;
-  /** Year-on-year change in value, as a fraction. Positive means the money is losing worth. */
-  inflation: number;
-}
-
-export function mintCurrency(species: SpeciesType, kingdomName: string, year: number): Currency {
-  // The realm's name distinguishes one mint from another: the Real of Frostholm
-  // buys a different amount of grain than the Real of Dawnspire.
-  const realmWord = kingdomName.split(' ').pop() ?? '';
-  const name = realmWord ? `${CURRENCY_NAME} de ${realmWord}` : CURRENCY_NAME;
-
-  return {
-    name,
-    symbol: CURRENCY_SYMBOL,
-    foundedYear: year,
-    value: 1,
-    supply: 500,
-    inflation: 0
-  };
-}
 
 // ============================ WORLD MARKET ============================
 
@@ -452,7 +409,7 @@ export interface YearlyLedger {
   tradeIncome: number;
   upkeep: number;
   net: number;
-  gdp: number;
+  output: number;
   treasury: number;
 }
 
@@ -462,16 +419,15 @@ const MAX_LEDGER_HISTORY = 120;
  * One kingdom's economy: what it owns, what it earns, and what its money is worth.
  */
 export class KingdomEconomy {
-  /** Held in the realm's own currency once minted, otherwise in raw gold. */
+  /** Gold in the till, by weight. */
   public treasury: number = 100;
-  public currency: Currency | null = null;
   /** What goods actually cost inside this realm. Diverges from the world price. */
   public market: LocalMarket = new LocalMarket();
 
-  /** Total value of everything produced last year. */
-  public gdp: number = 0;
-  /** Value produced per citizen — drives government choices and unrest. */
-  public gdpPerCapita: number = 0;
+  /** What the realm's buildings actually made last pass. */
+  public output: number = 0;
+  /** Output per citizen — drives government choices and unrest. */
+  public outputPerCapita: number = 0;
   /** Fraction of output from factories rather than farms and mines, 0..1. */
   public industrialisation: number = 0;
   /** 0..1 — how content the population is with its material conditions. */
@@ -480,36 +436,6 @@ export class KingdomEconomy {
   public inequality: number = 0.3;
 
   public ledger: YearlyLedger[] = [];
-
-  public get hasCurrency(): boolean {
-    return this.currency !== null;
-  }
-
-  public get moneyName(): string {
-    return this.currency?.name ?? 'ouro bruto';
-  }
-
-  public get moneySymbol(): string {
-    // Before a realm mints coin it still trades, by weight of raw gold.
-    return this.currency?.symbol ?? 'g';
-  }
-
-  /** Formats an amount in this realm's money, Brazilian style. */
-  public format(amount: number): string {
-    const rounded = Math.round(amount);
-    return `${this.moneySymbol} ${rounded.toLocaleString('pt-BR')}`;
-  }
-
-  /** Converts an amount of this realm's money into abstract world units. */
-  public toWorldValue(amount: number): number {
-    return amount * (this.currency?.value ?? 1);
-  }
-
-  /** Converts abstract world units into this realm's money. */
-  public fromWorldValue(worldValue: number): number {
-    const rate = this.currency?.value ?? 1;
-    return rate <= 0 ? worldValue : worldValue / rate;
-  }
 
   public recordYear(entry: YearlyLedger): void {
     this.ledger.push(entry);
@@ -521,56 +447,25 @@ export class KingdomEconomy {
   }
 
   /**
-   * Revalues the currency. Money backed by real gold reserves and real output
-   * holds its worth; money printed to cover deficits does not.
-   */
-  public revalue(goldReserves: number, output: number): void {
-    if (!this.currency) return;
-
-    const backing = (goldReserves * 6 + output) / Math.max(1, this.currency.supply);
-    const target = Math.max(0.15, Math.min(4, backing));
-    const previous = this.currency.value;
-
-    this.currency.value += (target - this.currency.value) * 0.2;
-    this.currency.inflation = previous > 0 ? (previous - this.currency.value) / previous : 0;
-  }
-
-  /**
-   * Pays another realm out of this till, across the exchange rate.
-   *
-   * Every cross-border payment in the world — war reparations, peace indemnities,
-   * export revenue, vassal tribute, colonial tribute, foreign aid — used to move
-   * a bare number from one `treasury` to another. Two realms holding money of
-   * very different worth were therefore trading at a permanent, silent 1:1, so a
-   * weak currency could buy a strong one's whole economy and an indemnity was
-   * worth whatever the *payer's* mint happened to say.
-   *
-   * The payment is converted out of this realm's money into world value and back
-   * into the recipient's, which is the only conversion an exchange rate means.
-   * Returns what the payer actually parted with, in the payer's money.
+   * Pays another realm out of this till — reparations, indemnities, tribute,
+   * export revenue, foreign aid. Both tills hold gold by weight, so a payment
+   * is a move, not a conversion. Never pays more gold than is actually there;
+   * returns what was parted with.
    */
   public payAcrossBorder(recipient: KingdomEconomy, amount: number): number {
     if (amount <= 0) return 0;
     const paid = Math.min(amount, Math.max(0, this.treasury));
     if (paid <= 0) return 0;
     this.treasury -= paid;
-    recipient.treasury += recipient.fromWorldValue(this.toWorldValue(paid));
+    recipient.treasury += paid;
     return paid;
-  }
-
-  /** Printing money to cover a shortfall. Cheap now, expensive later. */
-  public printMoney(amount: number): void {
-    if (!this.currency) return;
-    this.currency.supply += amount;
-    this.treasury += amount;
   }
 
   public serialize(): any {
     return {
       treasury: this.treasury,
-      currency: this.currency,
-      gdp: this.gdp,
-      gdpPerCapita: this.gdpPerCapita,
+      output: this.output,
+      outputPerCapita: this.outputPerCapita,
       industrialisation: this.industrialisation,
       stability: this.stability,
       inequality: this.inequality,
@@ -582,24 +477,12 @@ export class KingdomEconomy {
   public deserialize(data: any): void {
     if (!data) return;
     this.treasury = data.treasury ?? 100;
-    this.currency = data.currency ?? null;
-    this.gdp = data.gdp ?? 0;
-    this.gdpPerCapita = data.gdpPerCapita ?? 0;
+    this.output = data.output ?? data.gdp ?? 0;
+    this.outputPerCapita = data.outputPerCapita ?? data.gdpPerCapita ?? 0;
     this.industrialisation = data.industrialisation ?? 0;
     this.stability = data.stability ?? 0.7;
     this.inequality = data.inequality ?? 0.3;
     this.ledger = data.ledger ?? [];
     this.market.deserialize(data.prices);
   }
-}
-
-/**
- * Exchange rate between two realms' currencies.
- * Returns how many units of `to` one unit of `from` buys.
- */
-export function exchangeRate(from: KingdomEconomy, to: KingdomEconomy): number {
-  const fromValue = from.currency?.value ?? 1;
-  const toValue = to.currency?.value ?? 1;
-  if (toValue <= 0) return 0;
-  return fromValue / toValue;
 }

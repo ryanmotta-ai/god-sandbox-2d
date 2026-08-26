@@ -166,7 +166,7 @@ export interface RealmEconomy {
   id: string;
   name: string;
   color: string;
-  gdp: number;
+  output: number;
   treasury: number;
   imported: number;
   exported: number;
@@ -176,8 +176,6 @@ export interface RealmEconomy {
   industrialisation: number;
   /** The engine's own trade-dependency figure, 0..1. */
   tradeDependency: number;
-  /** Inflation, only when the realm has minted a currency. */
-  inflation: number | null;
   /** Strategic goods this realm mostly buys rather than makes. */
   dependencies: { good: GoodId; share: number; imported: number; used: number }[];
   cities: number;
@@ -395,7 +393,7 @@ export function computeEconomyMetrics(ctx: GameContext): EconomyMetrics {
 
     routes,
     cities: cities.map(city => summariseCity(city, ctx)).sort((a, b) => b.output - a.output),
-    realms: kingdoms.map(k => summariseRealm(k, ctx)).sort((a, b) => b.gdp - a.gdp),
+    realms: kingdoms.map(k => summariseRealm(k, ctx)).sort((a, b) => b.output - a.output),
 
     cityFlows
   };
@@ -862,7 +860,7 @@ function summariseRealm(kingdom: Kingdom, ctx: GameContext): RealmEconomy {
     id: kingdom.id,
     name: kingdom.name,
     color: kingdom.color,
-    gdp: kingdom.economy.gdp,
+    output: kingdom.economy.output,
     treasury: kingdom.economy.treasury,
     imported,
     exported,
@@ -870,8 +868,6 @@ function summariseRealm(kingdom: Kingdom, ctx: GameContext): RealmEconomy {
     foodSecurity: kingdom.foodSecurity,
     industrialisation: kingdom.economy.industrialisation,
     tradeDependency: kingdom.tradeDependency,
-    // Only a realm that has minted coin has an inflation rate to report.
-    inflation: kingdom.economy.currency?.inflation ?? null,
     dependencies: dependencies.sort((a, b) => b.share - a.share).slice(0, 6),
     cities: cities.length
   };

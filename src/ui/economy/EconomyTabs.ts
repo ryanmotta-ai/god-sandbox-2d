@@ -1686,7 +1686,7 @@ export function buildRealms(m: EconomyMetrics, host: EconomyScreenHost, query: s
                 ),
                 sortValue: r => r.name
               },
-              { key: 'gdp', header: 'Produção', align: 'right', width: '104px', cell: r => formatCompact(r.gdp), sortValue: r => r.gdp },
+              { key: 'output', header: 'Produção', align: 'right', width: '104px', cell: r => formatCompact(r.output), sortValue: r => r.output },
               { key: 'treasury', header: 'Tesouro', align: 'right', width: '104px', cell: r => formatCompact(r.treasury), sortValue: r => r.treasury },
               { key: 'imported', header: 'Import.', align: 'right', width: '92px', cell: r => r.imported.toFixed(1), sortValue: r => r.imported },
               { key: 'exported', header: 'Export.', align: 'right', width: '92px', cell: r => r.exported.toFixed(1), sortValue: r => r.exported },
@@ -1714,27 +1714,15 @@ export function buildRealms(m: EconomyMetrics, host: EconomyScreenHost, query: s
                 sortValue: r => r.tradeDependency,
                 tooltip: { title: 'Dependência comercial', description: term('dependency') }
               },
-              {
-                key: 'inflation', header: 'Inflação', align: 'right', width: '100px',
-                // Only realms that have minted a currency have inflation. A realm
-                // still bartering has none, and 0% would be a claim, not a fact.
-                cell: r => (r.inflation === null
-                  ? withTooltip(el('span', { class: 'ae-muted', text: 'escambo' }), {
-                      title: 'Sem moeda',
-                      description: 'Este reino ainda não cunhou moeda, então não há taxa de inflação a medir.'
-                    })
-                  : formatPercent(r.inflation)),
-                sortValue: r => r.inflation ?? -1
-              }
             ],
             rows,
             rowKey: r => r.id,
-            sortBy: 'gdp',
+            sortBy: 'output',
             onRowClick: r => host.openRealm(r.id),
             status: r => (r.foodSecurity < 0.7 ? 'warning' : undefined),
             rowTooltip: r => ({
               title: r.name,
-              value: formatFull(Math.round(r.gdp)),
+              value: formatFull(Math.round(r.output)),
               rows: [
                 { label: 'Cidades', value: `${r.cities}` },
                 { label: 'Industrialização', value: formatPercent(r.industrialisation) },
@@ -1782,7 +1770,7 @@ function buildRankings(m: EconomyMetrics, host: EconomyScreenHost): HTMLElement 
   };
 
   const blocks = [
-    ranking('Maiores economias', 'economy', r => r.gdp, v => formatCompact(v)),
+    ranking('Maiores economias', 'economy', r => r.output, v => formatCompact(v)),
     ranking('Maiores exportadores', 'route', r => r.exported, v => v.toFixed(1)),
     ranking('Maiores importadores', 'route', r => r.imported, v => v.toFixed(1)),
     ranking('Mais industrializados', 'industry', r => r.industrialisation, v => formatPercent(v))

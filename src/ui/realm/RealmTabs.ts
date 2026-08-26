@@ -228,12 +228,11 @@ export function buildOverview(m: RealmMetrics, host: RealmScreenHost): Child[] {
         stat({ label: 'Cidades', value: m.cities.length, icon: 'city' }),
         stat({ label: 'Território', value: formatCompact(m.territory), unit: 'blocos', icon: 'map' }),
         stat({
-          label: 'PIB', value: formatCompact(m.gdp), icon: 'economy',
+          label: 'Produção', value: formatCompact(m.output), icon: 'economy',
           tooltip: {
-            title: 'Produto interno',
-            value: formatFull(Math.round(m.gdp)),
-            description: 'Valor de tudo que o reino produziu no último ciclo, medido pela própria simulação.',
-            rows: [{ label: 'Por habitante', value: m.gdpPerCapita.toFixed(2) }]
+            title: 'Produção',
+            value: formatFull(Math.round(m.output)),
+            description: 'O que as construções do reino fizeram no último ciclo.'
           }
         }),
         stat({
@@ -425,10 +424,9 @@ export function buildEconomy(m: RealmMetrics, host: RealmScreenHost): Child[] {
     panel({ title: 'Contas do reino', icon: 'economy' }, [
       statGrid([
         stat({
-          label: 'Produto interno', value: formatCompact(m.gdp), icon: 'economy',
-          tooltip: { title: 'PIB', value: formatFull(Math.round(m.gdp)), description: 'Valor de tudo produzido no último ciclo.' }
+          label: 'Produção', value: formatCompact(m.output), icon: 'economy',
+          tooltip: { title: 'Produção', value: formatFull(Math.round(m.output)), description: 'O que as construções fizeram no último ciclo.' }
         }),
-        stat({ label: 'Por habitante', value: m.gdpPerCapita.toFixed(2), icon: 'citizen' }),
         stat({
           label: 'Tesouro', value: formatCompact(m.treasury), icon: 'treasury',
           status: m.lastLedger && m.lastLedger.net < 0 && m.treasury < Math.abs(m.lastLedger.net) * 2 ? 'critical' : undefined

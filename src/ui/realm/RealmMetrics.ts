@@ -230,8 +230,7 @@ export interface RealmMetrics {
   territory: number;
 
   // ---- Economy ----
-  gdp: number;
-  gdpPerCapita: number;
+  output: number;
   treasury: number;
   industrialisation: number;
   stability: number;
@@ -342,8 +341,7 @@ export function computeRealmMetrics(kingdom: Kingdom, ctx: GameContext): RealmMe
     cities: cities.map(city => summariseCity(city, kingdom, ctx)).sort((a, b) => b.population - a.population),
     territory,
 
-    gdp: kingdom.economy.gdp,
-    gdpPerCapita: kingdom.economy.gdpPerCapita,
+    output: kingdom.economy.output,
     treasury: kingdom.economy.treasury,
     industrialisation: kingdom.economy.industrialisation,
     stability: kingdom.economy.stability,

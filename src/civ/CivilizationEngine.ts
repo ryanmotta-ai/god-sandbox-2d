@@ -7,7 +7,7 @@ import {
 } from './Goods';
 import { TECHNOLOGIES, TechDefinition, type ResearchState, techCost, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
 import { GOVERNMENTS, chooseGovernment, isRevolution, GovernmentType } from './Government';
-import { WorldMarket, mintCurrency } from './Economy';
+import { WorldMarket } from './Economy';
 import { TradeNetwork, transportCostPerUnit } from './Trade';
 import { DiplomacyManager, type PeaceSettlement } from './Diplomacy';
 import { culturalAffinity, rememberCulture, updateCulture } from './Culture';
@@ -171,7 +171,6 @@ export class CivilizationEngine {
   private static readonly STAPLE_HAUL_RANGE = 45;
 
   /** Set once a realm first mints money, so the chronicle only says it once. */
-  private announcedCurrencies: Set<string> = new Set();
   /** Maritime routes currently blocked by ruined ports, so a collapse is chronicled once. */
   private collapsedRoutes: Set<string> = new Set();
   /** Colonial routes whose interruption has already been recorded in the Chronicle. */
@@ -181,7 +180,6 @@ export class CivilizationEngine {
   private workersByKingdom: Map<string, number> = new Map();
 
   public reset(): void {
-    this.announcedCurrencies.clear();
     this.disruptedColonialRoutes.clear();
     this.entitiesByCity.clear();
     this.workersByKingdom.clear();
@@ -1976,16 +1974,12 @@ export class CivilizationEngine {
 
     const fraction = world.seasonFraction ?? 0.25;
     // Convert the value of the levy into coin in the treasury.
-    const rawIncome = kingdom.economy.hasCurrency
-      ? kingdom.economy.fromWorldValue(taxValue)
-      : taxValue;
-    const income = rawIncome * fraction;
+    const income = taxValue * fraction;
     kingdom.economy.treasury += income;
 
     // Upkeep: armies, courts and buildings all cost.
     const upkeep = (kingdom.cityIds.size * 8 + kingdom.totalPopulation * 0.4 + (kingdom.isEmpire ? 40 : 0)) * fraction;
-    const upkeepCost = kingdom.economy.hasCurrency ? kingdom.economy.fromWorldValue(upkeep) : upkeep;
-    kingdom.economy.treasury -= upkeepCost;
+    kingdom.economy.treasury -= upkeep;
 
     // Process War Reparations payments
     if (kingdom.warReparations) {
@@ -2000,34 +1994,27 @@ export class CivilizationEngine {
       }
     }
 
-    // A bankrupt realm prints money, which its citizens will notice next year.
-    if (kingdom.economy.treasury < 0) {
-      if (kingdom.economy.hasCurrency) {
-        kingdom.economy.printMoney(-kingdom.economy.treasury + 50);
-      } else {
-        kingdom.economy.treasury = 0;
-      }
-    }
+    // An empty till is an empty till — there is no mint to paper over it.
+    if (kingdom.economy.treasury < 0) kingdom.economy.treasury = 0;
 
     // wealth is derived from economy.treasury — single source of truth.
     // CaravanSystem and NavalSystem update economy.treasury directly (Bug #1 fix),
     // so this sync always reflects the full picture including trade revenue.
     kingdom.wealth = Math.round(kingdom.economy.treasury);
 
-    const gdp = taxValue / Math.max(0.01, gov.taxRate * 0.35);
-    kingdom.economy.gdp = gdp;
-    kingdom.economy.gdpPerCapita = gdp / Math.max(1, kingdom.totalPopulation);
+    // What the realm's buildings actually made: the levy read back through the
+    // rate it was taken at. Physical output, not a national account.
+    const output = taxValue / Math.max(0.01, gov.taxRate * 0.35);
+    kingdom.economy.output = output;
+    kingdom.economy.outputPerCapita = output / Math.max(1, kingdom.totalPopulation);
     // Bug #3: Record actual trade income (gold from caravans/ships this year).
-    const tradeIncome = kingdom.economy.hasCurrency
-      ? kingdom.economy.fromWorldValue(yearlyTradeGold)
-      : yearlyTradeGold;
     kingdom.economy.recordYear({
       year: world.year,
       taxIncome: income,
-      tradeIncome,
-      upkeep: upkeepCost,
-      net: income + tradeIncome - upkeepCost,
-      gdp,
+      tradeIncome: yearlyTradeGold,
+      upkeep,
+      net: income + yearlyTradeGold - upkeep,
+      output,
       treasury: kingdom.economy.treasury
     });
   }
@@ -2105,27 +2092,6 @@ export class CivilizationEngine {
       }
     );
 
-    // Currency is the moment a realm gets its own money.
-    if (tech.unlocks.features?.includes('currency') && !kingdom.economy.hasCurrency) {
-      kingdom.economy.currency = mintCurrency(kingdom.species, kingdom.name, world.year);
-      if (!this.announcedCurrencies.has(kingdom.id)) {
-        this.announcedCurrencies.add(kingdom.id);
-        chronicle.log(
-          world.year,
-          'economy',
-          `${kingdom.name} minted the ${kingdom.economy.currency.name} (${kingdom.economy.currency.symbol}).`,
-          {
-            title: `The ${kingdom.economy.currency.name} is Minted`,
-            importance: 'major',
-            scope: 'kingdom',
-            refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-            tags: ['currency', 'money', 'economy'],
-            consequences: [`${kingdom.name} gained a sovereign currency for taxation and trade.`]
-          }
-        );
-        events.emit('currencyMinted', { kingdom, currency: kingdom.economy.currency });
-      }
-    }
   }
 
   /**
@@ -2138,7 +2104,7 @@ export class CivilizationEngine {
     if (available.length === 0) return null;
 
     const atWar = world.diplomacy.getWarsFor(kingdom.id).length > 0;
-    const poor = kingdom.economy.gdpPerCapita < 8;
+    const poor = kingdom.economy.outputPerCapita < 8;
     const hungry = [...kingdom.cityIds].some(id => (world.cities.get(id)?.famineYears ?? 0) > 0);
     const warlike = kingdom.culture.militarism > 0.6;
 
@@ -2272,13 +2238,13 @@ export class CivilizationEngine {
 
       // The capitalism/communism fork is decided by material conditions.
       if (tech.id === 'capitalism') {
-        score += kingdom.economy.gdpPerCapita > 18 ? 25 : -15;
+        score += kingdom.economy.outputPerCapita > 18 ? 25 : -15;
         score += kingdom.economy.stability > 0.55 ? 12 : -20;
       }
       if (tech.id === 'communism') {
         score += kingdom.economy.stability < 0.5 ? 30 : -18;
         score += kingdom.economy.inequality > 0.55 ? 22 : -10;
-        score += kingdom.economy.gdpPerCapita < 12 ? 14 : -8;
+        score += kingdom.economy.outputPerCapita < 12 ? 14 : -8;
       }
 
       if (score > bestScore) {
@@ -2425,7 +2391,7 @@ export class CivilizationEngine {
     const tradeRouteValue = world.trade.routesFor(kingdom.id)
       .filter(route => route.active)
       .reduce((sum, route) => sum + route.volume * world.market.price(route.good), 0);
-    const tradeDependencyTarget = clamp(tradeRouteValue / Math.max(1, economy.gdp) * 1.15, 0, 1);
+    const tradeDependencyTarget = clamp(tradeRouteValue / Math.max(1, economy.output) * 1.15, 0, 1);
     kingdom.tradeDependency += (tradeDependencyTarget - kingdom.tradeDependency) * 0.2;
 
     let threatTarget = 0;
@@ -2448,7 +2414,6 @@ export class CivilizationEngine {
     economy.inequality += (clamp(inequalityTarget + (lawEffects.inequality ?? 0), 0.04, 0.9) - economy.inequality) * 0.15;
 
     const atWar = world.diplomacy.getWarsFor(kingdom.id).length > 0;
-    const inflationPain = Math.max(0, economy.currency?.inflation ?? 0) * 1.5;
     const effectiveTaxRate = clamp(gov.taxRate * (1 + (lawEffects.taxMultiplier ?? 0)), 0.01, 0.62);
     const taxPain = Math.max(0, effectiveTaxRate - 0.2) * 0.8;
     const adminPain = (1 - kingdom.administrativeReach) * 0.2;
@@ -2482,7 +2447,6 @@ export class CivilizationEngine {
           socialCohesion +
           (lawEffects.stability ?? 0)) -
           economy.inequality * 0.24 -
-          inflationPain -
           taxPain -
           adminPain -
           foodPain -
@@ -2520,9 +2484,6 @@ export class CivilizationEngine {
     );
     kingdom.legitimacy += (legitimacyTarget - kingdom.legitimacy) * 0.18;
 
-    // Revalue the currency against gold reserves and real output.
-    economy.revalue(kingdom.treasury.get('gold'), economy.gdp);
-
     // Under a market economy, banks and exchanges turn treasury into more treasury.
     // Returns are capped against real output: a state cannot compound its way to
     // infinite wealth on an economy that only produces so much.
@@ -2538,17 +2499,17 @@ export class CivilizationEngine {
        */
       const exchange = kingdom.research.knowsFeature('stock_market');
       if (exchange) {
-        const listed = Math.min(economy.gdp * 0.22, Math.max(0, economy.treasury) * 0.05);
+        const listed = Math.min(economy.output * 0.22, Math.max(0, economy.treasury) * 0.05);
         economy.treasury += listed;
       }
       const rate = gov.economy === 'market' ? 0.035 : 0.015;
-      const interest = Math.min(economy.treasury * rate, Math.max(0, economy.gdp * 0.5));
+      const interest = Math.min(economy.treasury * rate, Math.max(0, economy.output * 0.5));
       economy.treasury += interest;
     }
 
     // A treasury far beyond what the realm could ever spend is not hoarded: the
     // state pours it into its cities as public works, which shows up as prosperity.
-    const sustainable = Math.max(500, economy.gdp * 12 + kingdom.totalPopulation * 60);
+    const sustainable = Math.max(500, economy.output * 12 + kingdom.totalPopulation * 60);
     if (economy.treasury > sustainable) {
       const surplus = economy.treasury - sustainable;
       economy.treasury -= surplus * 0.35;
@@ -2651,7 +2612,7 @@ export class CivilizationEngine {
       faith: kingdom.faith,
       inequality: kingdom.economy.inequality,
       industrialisation: kingdom.economy.industrialisation,
-      gdpPerCapita: kingdom.economy.gdpPerCapita,
+      outputPerCapita: kingdom.economy.outputPerCapita,
       cityCount,
       famineYears,
       warWeariness: kingdom.warWeariness,
@@ -4266,28 +4227,22 @@ export class CivilizationEngine {
       // route — multiplied by a solvency check that inflated revenue whenever
       // the buyer had any gold stock, so a few routes minted hundreds of
       // thousands of gold for a realm of twenty people.
-      // Booked as money, in the seller's own currency. The matching
+      // Booked as gold. The matching
       // `treasury.add('gold', ...)` is gone: a grain sale paid the seller twice,
       // once in coin and once in bullion that appeared in its warehouse.
       sellerKingdom.exportVolume += sellerRevenue;
-      sellerKingdom.economy.treasury += sellerKingdom.economy.hasCurrency
-        ? sellerKingdom.economy.fromWorldValue(sellerRevenue)
-        : sellerRevenue;
+      sellerKingdom.economy.treasury += sellerRevenue;
       if (buyerKingdom.id !== sellerKingdom.id) {
         const tariffRate = world.trade.getAgreement(sellerKingdom.id, buyerKingdom.id)?.tariff ?? buyerKingdom.tariffRate();
         const tariff = value * tariffRate;
         buyerKingdom.tariffRevenue += tariff;
-        buyerKingdom.economy.treasury += buyerKingdom.economy.hasCurrency
-          ? buyerKingdom.economy.fromWorldValue(tariff)
-          : tariff;
+        buyerKingdom.economy.treasury += tariff;
         buyerKingdom.importVolume += value;
         // And the buyer pays for what it imported. This debit simply was not
         // here: the seller was credited and the buyer collected a tariff, so
         // both sides ended a trade richer than they started and the world
         // minted gold on every route, every year. No realm ever had a budget.
-        buyerKingdom.economy.treasury -= buyerKingdom.economy.hasCurrency
-          ? buyerKingdom.economy.fromWorldValue(value)
-          : value;
+        buyerKingdom.economy.treasury -= value;
       }
       this.settleColonialTribute(route, sellerKingdom, buyerKingdom, value);
 
@@ -4428,10 +4383,9 @@ export class CivilizationEngine {
   private settleColonialTribute(route: { colonialRoute?: boolean; colonialDirection?: string }, seller: Kingdom, buyer: Kingdom, value: number): void {
     if (!route.colonialRoute || route.colonialDirection !== 'colony_to_metropole') return;
     if (seller.metropoleId !== buyer.id || !seller.isColony) return;
-    // Tribute is money, and it crosses a border, so it crosses an exchange rate.
     // The bullion legs were removed with the rest of the gold alchemy: a colony
     // shipping timber home did not also ship ore out of thin air.
-    const tribute = Math.min(seller.economy.fromWorldValue(value * 0.08), seller.economy.treasury);
+    const tribute = Math.min(value * 0.08, seller.economy.treasury);
     seller.economy.payAcrossBorder(buyer.economy, tribute);
   }
 
@@ -5227,15 +5181,6 @@ export class CivilizationEngine {
           rebelKingdom.research.current = null;
           rebelKingdom.research.progress = 0;
 
-          // It also inherits the money it was already using, freshly renamed.
-          if (kingdom.economy.currency) {
-            rebelKingdom.economy.currency = {
-              ...kingdom.economy.currency,
-              name: `${city.name} ${kingdom.economy.currency.name.split(' ').pop()}`,
-              foundedYear: world.year,
-              supply: Math.max(100, kingdom.economy.currency.supply * 0.15)
-            };
-          }
           rebelKingdom.economy.treasury = Math.max(50, kingdom.economy.treasury * 0.12);
           kingdom.economy.treasury -= rebelKingdom.economy.treasury;
 

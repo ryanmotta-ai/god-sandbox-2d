@@ -100,7 +100,7 @@ export interface SocietyTickContext {
   faith: number;
   inequality: number;
   industrialisation: number;
-  gdpPerCapita: number;
+  outputPerCapita: number;
   /**
    * What food actually costs here, as a multiple of its base price.
    *
@@ -433,7 +433,7 @@ function factionTargets(
       influence += (ctx.culture.tradition + ctx.culture.innovation) * 0.05 + ctx.legitimacy * 0.04 + ctx.faith * 0.14;
       satisfaction += ctx.legitimacy * 0.2 + ctx.culture.tradition * 0.1 + ctx.culture.innovation * 0.08
         + ctx.faith * 0.22 - warPain * 0.08;
-      wealth = 0.34 + ctx.gdpPerCapita / 80 + ctx.legitimacy * 0.08;
+      wealth = 0.34 + ctx.outputPerCapita / 80 + ctx.legitimacy * 0.08;
       warSupport -= ctx.culture.diplomaticTrust * 0.12;
       reformSupport += ctx.culture.innovation * 0.14;
       break;
@@ -457,7 +457,7 @@ function factionTargets(
     case 'reformists':
       influence += ctx.culture.innovation * 0.12 + ctx.culture.openness * 0.1 + Math.max(0, 0.55 - ctx.stability) * 0.16;
       satisfaction += ctx.culture.openness * 0.12 + ctx.culture.innovation * 0.1 - ctx.culture.authority * 0.12 - Math.max(0, 0.55 - ctx.legitimacy) * 0.18;
-      wealth = 0.26 + ctx.gdpPerCapita / 90 + ctx.culture.innovation * 0.08;
+      wealth = 0.26 + ctx.outputPerCapita / 90 + ctx.culture.innovation * 0.08;
       warSupport -= 0.18 + ctx.culture.diplomaticTrust * 0.08;
       reformSupport += 0.38 + ctx.culture.innovation * 0.18 + Math.max(0, 0.58 - ctx.legitimacy) * 0.22;
       break;

@@ -198,7 +198,7 @@ console.log(`final entity count=${sim.entities.length}; totalBirths=${sim.totalB
 if (process.env.DUMP === '1') {
   for (const k of sim.kingdoms.values()) {
     const lat = k.economy.latest();
-    console.log(`\n[${k.name}] treasury=${Math.round(k.economy.treasury).toLocaleString()} money=${k.economy.moneyName} (value=${k.economy.currency?.value.toFixed(2)} supply=${k.economy.currency ? Math.round(k.economy.currency.supply).toLocaleString() : '-'})`);
+    console.log(`\n[${k.name}] treasury=${Math.round(k.economy.treasury).toLocaleString()}g output=${Math.round(k.economy.output).toLocaleString()}`);
     if (lat) {
       console.log(`  latest ledger: tax=${lat.taxIncome.toFixed(1)} trade=${lat.tradeIncome.toFixed(1)} upkeep=${lat.upkeep.toFixed(1)} net=${lat.net.toFixed(1)} gdp=${lat.gdp.toFixed(1)}`);
     }
