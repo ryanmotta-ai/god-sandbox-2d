@@ -2913,6 +2913,7 @@ household.cityId = city.id;
    */
   private tickRoyalCourts(tileMap: TileMap): void {
     if (this.kingdoms.size < 2) return;
+    const armies = this.armyStrengthByRealm();
 
     for (const kingdom of [...this.kingdoms.values()]) {
       // A vassal has no foreign policy of its own.
@@ -2928,7 +2929,7 @@ household.cityId = city.id;
         warWeariness: kingdom.warWeariness,
         capitalBesieged: !!capital?.besiegerId,
         // What is left of the levy, against what a realm this size should field.
-        armyRemaining: Math.min(1, this.armyStrengthOf(kingdom.id) / Math.max(1, kingdom.totalPopulation * 0.12))
+        armyRemaining: Math.min(1, (armies.get(kingdom.id) ?? 0) / Math.max(1, kingdom.totalPopulation * 0.12))
       };
 
       const neighbours: Neighbour[] = [];
@@ -2955,16 +2956,20 @@ household.cityId = city.id;
   }
 
   /**
-   * Fighting strength this realm still has in the field.
+   * Fighting strength every realm still has in the field, in one walk.
    *
    * Counted from the soldiers who exist, because that is what a king can
-   * actually send anywhere — not from a levy figure on a sheet.
+   * actually send anywhere — not from a levy figure on a sheet. One pass over
+   * the world rather than one per realm: asking this question separately for
+   * each court turned a court tick into O(realms x entities), which on a busy
+   * map is the whole point of the continuous pass thrown away.
    */
-  private armyStrengthOf(kingdomId: string): number {
-    let strength = 0;
+  private armyStrengthByRealm(): Map<string, number> {
+    const strength = new Map<string, number>();
     for (const e of this.entities) {
-      if (e.hp <= 0 || e.kingdomId !== kingdomId) continue;
-      if (e.profession === 'soldier' || e.profession === 'archer' || e.profession === 'leader') strength++;
+      if (e.hp <= 0 || !e.kingdomId) continue;
+      if (e.profession !== 'soldier' && e.profession !== 'archer' && e.profession !== 'leader') continue;
+      strength.set(e.kingdomId, (strength.get(e.kingdomId) ?? 0) + 1);
     }
     return strength;
   }
