@@ -379,7 +379,7 @@ function createTestTileMap(): TileMap {
   const entities: Entity[] = [];
 
   const k1 = new Kingdom('k1', 'Reino Rico', SpeciesType.HUMAN, '#0f0', 'c1', 1);
-  k1.economy.treasury = 500;
+  k1.addGold(500);
   k1.treasury.add('gold', 500);
   kingdoms.set('k1', k1);
 
@@ -395,11 +395,11 @@ function createTestTileMap(): TileMap {
   assert.ok(warfare.mercenaryCompanies.has(company.id), 'Companhia mercenária deve estar registrada');
   assert.equal(company.employerKingdomId, null, 'Companhia recém-criada não tem empregador');
 
-  const initialTreasury = k1.economy.treasury;
+  const initialTreasury = k1.gold;
   const hired = warfare.hireMercenaryCompany(company.id, 'k1', 3, world);
   assert.ok(hired, 'Contratação deve ter sucesso');
   assert.equal(company.employerKingdomId, 'k1', 'Companhia deve ter k1 como empregador');
-  assert.equal(k1.economy.treasury, initialTreasury - company.hiringCost, 'Tesouro deve ser debitado no custo de contratação');
+  assert.equal(k1.gold, initialTreasury - company.hiringCost, 'Tesouro deve ser debitado no custo de contratação');
   assert.ok(k1.armyIds.size > 0, 'Regimento mercenário deve ser adicionado ao reino');
 
   // Avança o tempo até o fim do contrato

@@ -31,7 +31,7 @@ capital.kingdomId = metropole.id;
 capital.population = 50;
 capital.stock.add('food', 500);
 capital.stock.add('wood', 200);
-metropole.economy.treasury = 500;
+metropole.addGold(500);
 metropole.research.era = TECHNOLOGIES['sailing'].era;
 tileMap.getTile(origin.x, origin.y)!.cityId = capital.id;
 tileMap.getTile(origin.x, origin.y)!.kingdomId = metropole.id;

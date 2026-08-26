@@ -77,7 +77,7 @@ function census() {
   }
   let treasury = 0, armies = 0;
   for (const k of sim.kingdoms.values()) {
-    treasury += k.economy.treasury;
+    treasury += k.gold;
     armies += sim.warfare.getArmiesForKingdom(k.id).length;
   }
   return { soldiers, pop, barracks, walls, treasury: Math.round(treasury), armies };

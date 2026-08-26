@@ -118,7 +118,7 @@ for (let year = 0; year < YEARS; year++) {
   for (let tick = 0; tick < TICKS_PER_YEAR; tick++) sim.tickAI(map, particles);
 }
 
-const treasuries = [...sim.kingdoms.values()].map(k => k.economy.treasury);
+const treasuries = [...sim.kingdoms.values()].map(k => k.gold);
 const money = treasuries.reduce((a, b) => a + b, 0);
 const living = sim.entities.filter(e => e.hp > 0).length;
 const zombies = sim.entities.filter(e => e.hp <= 0).length;

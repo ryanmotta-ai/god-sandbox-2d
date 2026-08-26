@@ -31,7 +31,7 @@ city.kingdomId = metropole.id;
 city.population = 50;
 city.stock.add('food', 500);
 city.stock.add('wood', 200);
-metropole.economy.treasury = 500;
+metropole.addGold(500);
 tileMap.getTile(origin.x, origin.y)!.cityId = city.id;
 tileMap.getTile(origin.x, origin.y)!.kingdomId = metropole.id;
 sim.cities.set(city.id, city);

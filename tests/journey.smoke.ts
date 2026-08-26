@@ -110,7 +110,7 @@ for (let y = 1; y <= YEAR_LIMIT; y++) {
     for (const city of sim.cities.values()) buildings += city.buildings.size;
     for (const k of sim.kingdoms.values()) {
       techs += k.research.known.size;
-      treasury += k.economy.treasury;
+      treasury += k.gold;
       kingPop += k.totalPopulation;
     }
     for (const e of sim.entities) {
@@ -162,7 +162,7 @@ for (let y = 1; y <= YEAR_LIMIT; y++) {
       const tech = [...k.research.known].join(',');
       progress(
         `  [K] ${k.name}(${k.species}) gov=${k.government} cities=${k.cityIds.size} pop=${k.totalPopulation} ` +
-        `treas=${Math.round(k.economy.treasury)} rel[${rels}] agreements=${worldAgreements(sim, k.id)} ` +
+        `treas=${Math.round(k.gold)} rel[${rels}] agreements=${worldAgreements(sim, k.id)} ` +
         `barracks=${hasBarracks} techs=${k.research.known.size} :: ${tech}`
       );
     }
@@ -188,7 +188,7 @@ console.log(`final entity count=${sim.entities.length}; totalBirths=${sim.totalB
 if (process.env.DUMP === '1') {
   for (const k of sim.kingdoms.values()) {
     const lat = k.economy.latest();
-    console.log(`\n[${k.name}] treasury=${Math.round(k.economy.treasury).toLocaleString()}g output=${Math.round(k.economy.output).toLocaleString()}`);
+    console.log(`\n[${k.name}] treasury=${Math.round(k.gold).toLocaleString()}g output=${Math.round(k.economy.output).toLocaleString()}`);
     if (lat) {
       console.log(`  latest ledger: tax=${lat.taxIncome.toFixed(1)} trade=${lat.tradeIncome.toFixed(1)} upkeep=${lat.upkeep.toFixed(1)} net=${lat.net.toFixed(1)} output=${lat.output.toFixed(1)}`);
     }
