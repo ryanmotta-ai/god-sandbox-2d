@@ -254,5 +254,38 @@ Engasgos de perf conhecidos, com a correção já identificada:
 ~60ms (fatiar dentro do sistema de ecologia) · `tickFamilies` ~17ms.
 Mediana de frame ~3,1ms.
 
-Não verificado ao vivo: nunca se viu uma guerra disparar de ponta a ponta.
-`RULER_FRICTION` foi calibrado por extrapolação.
+### Por que um mundo novo demora tanto para guerrear
+
+Medido, não inferido — e ao medir duas hipóteses minhas caíram.
+
+Num mundo semeado de **um povo** (o que a tela de setup produz), o crescimento
+é por colonização, e fundar colônia é `setRelation(metropole, colony, 100)` —
+um ato deliberado, isento do teto. O mundo nasce como uma família de +100 e
+precisa gastar décadas dissolvendo esse afeto antes que alguém tenha motivo de
+guerra. Caminhando: relação pior 81 (ano 30) → 64 (ano 40) → 37 (ano 50),
+contra um limiar de guerra de ~`6 + proximidade * 30`.
+
+Contando os gates de `tickGeopolitics` par por par, ano por ano:
+
+```
+ano reinos pares vassal longe amistoso ELEGÍVEL
+ 30      3     3      0     0        3        0
+ 40      4     6      0     0        6        0
+```
+
+**Todos os pares falham em "amistoso demais", e nenhum em vassalagem ou
+distância.** Se um mundo parece pacífico demais, é a relação que ainda não
+esfriou — não a estrutura política, não a geografia. Um probe que semeia dois
+povos independentes (`tests/war-contact.probe.ts`) briga no ano 41.
+
+E cuidado com dois instrumentos:
+- **`pior_rel` sozinho engana.** O par mais hostil pode ser o par mais
+  distante, e distância é gate duro (`proximity <= 0` → `continue`). Medir a
+  relação sem a distância do mesmo par não diz nada sobre guerra.
+- **`war-contact.probe` amostra uma vez por ano**, então guerra que nasce e
+  morre entre amostras é subcontada. "N/80 anos em guerra" é um piso, não a
+  duração real.
+
+A paz real vem de `settleWar(..., 'white_peace', null, -20, 8)` em
+`actOnRoyalDecision`: **trégua de 8 anos**. Então mesmo com guerras disparando,
+o mesmo par não volta a lutar por quase uma década.
