@@ -94,6 +94,17 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
  */
 const MOVE_PER_TICK = 0.055;
 
+/**
+ * Food per citizen a settlement keeps back from day-to-day meals.
+ *
+ * A citizen takes roughly three meals a year at `MEAL_ADULT`, so ~1.35 food a
+ * head, and the yearly pass wants `FOOD_PER_CITIZEN` on top. This floor is the
+ * only dial between "nobody ever goes hungry beside a full store" and "a town
+ * eats its seed corn in a week" — turn it down if settlements hoard, up if they
+ * strip themselves bare before winter.
+ */
+const FOOD_RESERVE_PER_HEAD = 1.5;
+
 /** Cap on how fast a body's visual facing can turn, in rad/tick (12 rad/s at the fixed 60 ticks/s rate above). */
 const MAX_TURN_PER_TICK = 12 / 60;
 /** How long a "checking the way" pause holds a citizen still when it triggers, in ticks (~0.3s at 1x). */
@@ -217,8 +228,11 @@ export class SimulationEngine {
   public caravans: CaravanSystem = new CaravanSystem();
   /** Railways: track, freight and AI line construction. Derived from tiles. */
   public railways: RailwayNetwork = new RailwayNetwork();
-  /** Family economic units. Keyed by householdId. */
+  /** Families — who lives under one roof. Keyed by householdId. */
   public households: Map<string, Household> = new Map();
+  /** Per-head family wealth, held for one year. See `familyWealthPerHead`. */
+  private familyWealthCache: Map<string, number> = new Map();
+  private familyWealthCacheYear: number = -1;
   /** Every cultural identity that exists (CULT-V1). Small, serialized whole. */
   public cultures: CultureRegistry = new CultureRegistry();
   /** Last map ticked. The daily pass needs terrain but is not handed one. */
@@ -808,12 +822,6 @@ export class SimulationEngine {
    * political problem — without any of that being scripted.
    */
   private tickDay(): void {
-    for (const household of this.households.values()) {
-      household.lastEarned = 0;
-      household.lastSpent = 0;
-      this.householdShop(household);
-    }
-
     for (const e of this.entities) {
       if (!SPECIES_DEFINITIONS[e.species].isHumanoid || e.hp <= 0) continue;
 
@@ -827,11 +835,12 @@ export class SimulationEngine {
       const appetite = e.isChild ? 0.65 : 1;
       needs.hunger = Math.min(100, needs.hunger + HUNGER_PER_DAY * appetite);
 
-      // Dependants are fed at home rather than sent out to forage for themselves.
-      // Adults still walk home to eat, because that is the part worth watching.
+      // Dependants are fed from the town store rather than sent out to forage for
+      // themselves. Adults still walk there to eat, because that is the part
+      // worth watching.
       if (household && (e.isChild || needs.hunger >= HUNGER_STARVING)) {
         const portion = e.isChild ? MEAL_CHILD : MEAL_ADULT;
-        if (household.takeMeal(portion)) {
+        if (this.eatFromCityStore(e, portion, needs.hunger >= HUNGER_STARVING)) {
           needs.hunger = Math.max(0, needs.hunger - MEAL_RELIEF);
           e.starvingDays = 0;
         }
@@ -917,8 +926,6 @@ export class SimulationEngine {
 
     // The older household absorbs the newer one, so family history survives.
     const [keep, absorb] = mine.foundedYear <= theirs.foundedYear ? [mine, theirs] : [theirs, mine];
-    keep.coin += absorb.coin;
-    keep.pantry.add('food', absorb.pantry.get('food'));
     for (const memberId of absorb.memberIds) {
       keep.memberIds.add(memberId);
       const member = this.getEntity(memberId);
@@ -927,128 +934,38 @@ export class SimulationEngine {
     this.households.delete(absorb.id);
   }
 
-  /** A family spends its purse keeping the pantry stocked from the city store. */
-  private householdShop(household: Household): void {
-    const city = household.cityId ? this.cities.get(household.cityId) : null;
-    if (!city) return;
+  /**
+   * A hungry citizen eats off the settlement's own shelves.
+   *
+   * This is the entire food economy. No purse, no pantry, no price: a meal is
+   * lifted straight out of `city.stock`, so the pile of grain a player can see
+   * in a town is the pile its people are living on. A shortage therefore bites
+   * everybody at once instead of reaching the dinner table through a family's
+   * bank balance.
+   *
+   * `FOOD_RESERVE_PER_HEAD` is what the store holds back — seed, and the ration
+   * the yearly pass still has to cover. Someone actually starving eats into it
+   * anyway, because a town watching its own people die beside a full granary is
+   * the one outcome worse than an empty one. Returns whether they ate.
+   */
+  private eatFromCityStore(e: Entity, portion: number, starving: boolean): boolean {
+    const city = e.cityId ? this.cities.get(e.cityId) : null;
+    if (!city) return false;
 
-    const shortfall = household.pantryTarget() - household.pantry.get('food');
-    if (shortfall <= 0) return;
+    const stored = city.stock.get('food');
+    const floor = starving ? 0 : city.population * FOOD_RESERVE_PER_HEAD;
+    if (stored - floor < portion) return false;
 
-    const available = city.stock.get('food');
-    if (available <= 0) return;
+    const taken = city.stock.take('food', portion);
+    if (taken <= 0) return false;
 
-    // Price rises as the settlement's own store empties. This is the link between
-    // a bad harvest and a family going hungry: scarcity reaches the dinner table
-    // through the purse, not through a scripted event. The realm's own food price
-    // is what a family pays — not the world reference it never trades at.
-    const kingdomForPrice = city.kingdomId ? this.kingdoms.get(city.kingdomId) : null;
-    const foodPrice = kingdomForPrice
-      ? kingdomForPrice.economy.market.price('food', this.market.price('food'))
-      : this.market.price('food');
-    const scarcity = Math.max(0.25, Math.min(3, (city.population * 6) / Math.max(1, available)));
-    const unitPrice = Math.max(0.4, foodPrice * 0.35 * scarcity);
-
-    const wanted = Math.min(shortfall, available);
-    const cost = wanted * unitPrice;
-    const paid = household.spend(cost, true);
-
-    let bought = paid > 0 ? Math.min(wanted, paid / unitPrice) : 0;
-
-    // The commons. A settlement sitting on a surplus does not watch its own people
-    // starve because they are broke — it feeds them. This is what keeps poverty a
-    // hardship rather than an automatic death sentence, and it is also why a real
-    // shortage (an empty store) bites everyone at once.
-    // Triggered on "cannot cover today's meals", not on an exactly empty pantry:
-    // a few crumbs left over must not disqualify a family from the dole.
-    const daysFood = household.size * MEAL_ADULT;
-    if (bought <= 0 && household.pantry.get('food') < daysFood) {
-      const surplus = available - city.population * 1.5;
-      if (surplus > 0) bought = Math.min(daysFood, surplus);
-    }
-    if (bought <= 0) return;
-
-    const taken = city.stock.take('food', bought);
-    household.pantry.add('food', taken);
     // Booked against the settlement's yearly ration so the same mouths are not
     // fed twice — once here and once in the annual consumption pass.
     city.householdFoodDrawn += taken;
     city.ledger.recordConsumed('food', taken);
-
-    // The settlement earns what the family spent — all of it, as money.
-    //
-    // This used to credit `paid * 0.25` into `kingdom.treasury`, which is the
-    // realm's *warehouse*, not its till. Three quarters of every coin a family
-    // spent on bread ceased to exist, and the quarter that survived arrived as
-    // physical gold ore on a shelf. Both halves of that were wrong: money has to
-    // be conserved, and a grocery sale does not produce metal.
-    //
-    const kingdom = city.kingdomId ? this.kingdoms.get(city.kingdomId) : null;
-    if (kingdom && paid > 0) kingdom.economy.treasury += paid;
+    return true;
   }
 
-  /**
-   * Winds up a house whose last member has died.
-   *
-   * The purse and the larder used to be dropped on the floor with the household
-   * object: a family that spent four generations accumulating savings had all of
-   * it deleted the moment the last name under that roof died, even with grown
-   * children living two streets away. Wealth could therefore only ever leave the
-   * economy, never move through it, and no line could compound across the
-   * generations the succession system exists to model.
-   *
-   * Claim runs outward from the household: the nearest living blood — children,
-   * then parents, then siblings — takes the coin and as much of the larder as
-   * their own pantry will hold. What no relative is left to claim escheats: the
-   * food to the settlement's store, the coin to the crown as a death duty. It is
-   * never destroyed, and a realm with no heirs quietly grows rich on them.
-   */
-  private dissolveHousehold(household: Household, dead: Entity): void {
-    const kin: Entity[] = [];
-    const push = (id: string | null | undefined) => {
-      if (!id) return;
-      const relative = this.getEntity(id);
-      if (relative && relative.hp > 0 && relative.householdId !== household.id) kin.push(relative);
-    };
-    for (const childId of dead.childrenIds) push(childId);
-    push(dead.fatherId);
-    push(dead.motherId);
-    // Siblings, through whichever parent is still on record.
-    for (const parentId of [dead.fatherId, dead.motherId]) {
-      const parent = parentId ? this.getEntity(parentId) : null;
-      if (!parent) continue;
-      for (const siblingId of parent.childrenIds) if (siblingId !== dead.id) push(siblingId);
-    }
-
-    const heirHousehold = kin
-      .map(relative => this.households.get(relative.householdId ?? ''))
-      .find((house): house is Household => !!house && house !== household);
-
-    const city = household.cityId ? this.cities.get(household.cityId) : null;
-    const kingdom = city?.kingdomId ? this.kingdoms.get(city.kingdomId) : null;
-
-    // The larder.
-    for (const { good, amount } of household.pantry.entries()) {
-      const taken = household.pantry.take(good, amount);
-      const inherited = heirHousehold ? heirHousehold.pantry.add(good, taken) : 0;
-      const leftover = taken - inherited;
-      if (leftover > 0 && city) {
-        const stored = city.stock.add(good, leftover);
-        city.ledger.recordProduced(good, stored);
-      }
-    }
-
-    // The purse.
-    if (household.coin > 0) {
-      const estate = household.coin;
-      household.coin = 0;
-      if (heirHousehold) {
-        heirHousehold.earn(estate);
-      } else if (kingdom) {
-        kingdom.economy.treasury += estate;
-      }
-    }
-  }
 
   /**
    * Pays a wage out of a realm's till and reports what was actually handed over.
@@ -1097,9 +1014,6 @@ export class SimulationEngine {
     const id = e.householdId ?? `hh_${e.id}`;
     const household = new Household(id, e.cityId, e.homeBuildingId, this.currentYear);
     household.memberIds.add(e.id);
-    // A new family starts with what its founder personally owns.
-    household.coin = e.wealth;
-    household.pantry.add('food', 6);
     this.households.set(id, household);
     e.householdId = id;
     return household;
@@ -1613,12 +1527,12 @@ export class SimulationEngine {
     }
 
     // ===== PRIORITY 4: Eat =====
-    // Above work and above the clock: a hungry citizen goes home for a meal.
-    // This is what turns an empty pantry into visible behaviour instead of a
+    // Above work and above the clock: a hungry citizen heads for the store.
+    // This is what turns an empty granary into visible behaviour instead of a
     // number nobody can see.
     if (e.cityId && !e.isChild && e.needs.hunger >= HUNGER_SEEK_FOOD && e.aiState !== 'eat') {
-      const household = this.households.get(e.householdId ?? '');
-      if (household && household.pantry.get('food') > 0) {
+      const city = this.cities.get(e.cityId);
+      if (city && city.stock.get('food') > 0) {
         e.aiState = 'eat';
         e.aiCooldown = rng.rangeInt(15, 30);
         return;
@@ -1853,12 +1767,9 @@ export class SimulationEngine {
       // SOC-V3. A young adult from a household with something behind it starts
       // ahead — better tools, a stake, a name that opens a door. Capped well
       // below certainty, because the point is advantage, not inheritance of rank.
-      const advantage = 1 + familyAdvantage(e, household);
+      const advantage = 1 + familyAdvantage(e, household ? this.familyWealthPerHead(household) : 0);
       const seeded = startingWealthFor(e.profession, (min, max) => rng.rangeInt(min, max)) * advantage;
-      if (seeded > e.wealth) {
-        if (household) household.earn(seeded - e.wealth);
-        e.wealth = seeded;
-      }
+      if (seeded > e.wealth) e.wealth = seeded;
 
       this.claimHome(e, city);
     }
@@ -2270,9 +2181,8 @@ household.cityId = city.id;
           break;
         }
 
-        const household = this.households.get(e.householdId ?? '');
         const portion = e.isChild ? MEAL_CHILD : MEAL_ADULT;
-        if (household && household.takeMeal(portion)) {
+        if (this.eatFromCityStore(e, portion, e.needs.hunger >= HUNGER_STARVING)) {
           e.needs.hunger = Math.max(0, e.needs.hunger - MEAL_RELIEF);
           e.energy = Math.min(e.maxEnergy, e.energy + 12);
           e.starvingDays = 0;
@@ -2320,8 +2230,6 @@ household.cityId = city.id;
           : this.market.price(load.good);
         const wage = this.payWageFromTreasury(dKingdom, stored * localPrice * 0.35);
         e.wealth += wage;
-        const household = this.householdFor(e);
-        if (household) household.earn(wage);
 
         e.carrying = null;
         e.gainXp(2);
@@ -3491,16 +3399,41 @@ household.cityId = city.id;
    * Wages only ever added to a citizen's purse, so wealth — and with it the
    * social class derived from it — could rise and never fall. A house could not
    * decline, which meant it could not really rise either: there was nothing for
-   * a rise to be measured against. Personal coin is now pulled toward the
-   * household's per-head share each year, so a family that spends more than it
-   * earns visibly slides down, and one that prospers carries its members up.
+   * a rise to be measured against. Personal coin is pulled toward what the
+   * people under this roof hold between them, so a member who falls behind is
+   * carried up by prospering kin and a whole house can slide together.
    */
   private settleFortune(e: Entity): void {
     const household = e.householdId ? this.households.get(e.householdId) : null;
     if (!household || household.size === 0) return;
-    const share = household.coin / household.size;
-    e.wealth += (share - e.wealth) * 0.25;
+    e.wealth += (this.familyWealthPerHead(household) - e.wealth) * 0.25;
     if (e.wealth < 0) e.wealth = 0;
+  }
+
+  /**
+   * What the people under one roof hold between them, per head.
+   *
+   * Memoised for the year, which is not just a speed fix. `settleFortune` walks
+   * members one at a time and writes to `wealth` as it goes, so recomputing the
+   * mean per member would have each one pulled toward a figure the previous one
+   * already moved — the household's total would drift every pass. Freezing the
+   * mean for the year makes the pull simultaneous, and a simultaneous pull
+   * toward the mean conserves what the family holds. It also stops one large
+   * household turning the pass into an O(n^2) walk.
+   */
+  private familyWealthPerHead(household: Household): number {
+    if (this.familyWealthCacheYear !== this.currentYear) {
+      this.familyWealthCache.clear();
+      this.familyWealthCacheYear = this.currentYear;
+    }
+    const cached = this.familyWealthCache.get(household.id);
+    if (cached !== undefined) return cached;
+
+    let total = 0;
+    for (const memberId of household.memberIds) total += this.getEntity(memberId)?.wealth ?? 0;
+    const perHead = household.size === 0 ? 0 : total / household.size;
+    this.familyWealthCache.set(household.id, perHead);
+    return perHead;
   }
 
   /**
@@ -3666,7 +3599,7 @@ household.cityId = city.id;
       this.entityChunks.update(mover, mover.prevX, mover.prevY);
     }
 
-    // The household follows the family, so the purse and pantry go with them.
+    // The household follows the family — the roof moves, the people with it.
     const household = e.householdId ? this.households.get(e.householdId) : null;
     if (household) { household.cityId = to.id; household.homeBuildingId = null; }
 
@@ -4058,7 +3991,6 @@ household.cityId = city.id;
     if (household) {
       household.memberIds.delete(dead.id);
       if (household.memberIds.size === 0) {
-        this.dissolveHousehold(household, dead);
         this.households.delete(household.id);
       }
     }

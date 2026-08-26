@@ -117,18 +117,22 @@ function person(id: string, overrides: Partial<Entity> = {}): Entity {
   settleEstate(rich2, lookup(new Map([[only.id, only]])), null, false);
   assert.equal(only.wealth, 400, 'a single heir concentrates the whole estate');
 
-  // No heir at all: the household keeps it, and a family can simply end.
+  // No heir at all: whoever else lives under that roof splits it, and a family
+  // can simply end.
   const lonely = person('lonely', { cityId: 'c', wealth: 120 });
+  const housemates = [person('mate1', { cityId: 'c', wealth: 0 }), person('mate2', { cityId: 'c', wealth: 0 })];
   const house = new Household('hh', 'c', null, 1);
-  house.memberIds.add('someone-else');
-  settleEstate(lonely, () => null, house, false);
-  assert.equal(house.coin, 120, 'with no heir the estate stays with the household');
+  for (const mate of housemates) house.memberIds.add(mate.id);
+  settleEstate(lonely, lookup(new Map(housemates.map(m => [m.id, m]))), house, false);
+  assert.equal(housemates[0].wealth, 60, 'with no heir the estate splits between housemates');
+  assert.equal(housemates[1].wealth, 60);
+  assert.equal(lonely.wealth, 0, 'the dead keep nothing');
 
   const extinct = person('extinct', { cityId: 'c', wealth: 90 });
   const emptied = new Household('hh2', 'c', null, 1);
   const gone = settleEstate(extinct, () => null, emptied, false);
   assert.equal(gone.heirs.length, 0, 'a line with nobody left leaves nobody anything');
-  assert.equal(emptied.coin, 0, 'and an empty household does not absorb it');
+  assert.equal(extinct.wealth, 0, 'and an empty household leaves nothing behind');
 
   // An heir who already has work keeps it — continuity is an offer, not a duty.
   const smith = person('smith', { cityId: 'c', wealth: 50, profession: 'miner', workplaceId: 'mine1' });
@@ -145,8 +149,9 @@ function person(id: string, overrides: Partial<Entity> = {}): Entity {
   const poor = person('poor', { wealth: 0 });
   const comfortable = person('mid', { wealth: 60 });
   const wealthy = person('rich', { wealth: 900 });
-  assert.ok(familyAdvantage(comfortable, null) > familyAdvantage(poor, null), 'money should help');
-  assert.ok(familyAdvantage(wealthy, null) <= 0.75, 'and never become a guarantee');
+  assert.ok(familyAdvantage(comfortable, 0) > familyAdvantage(poor, 0), 'money should help');
+  assert.ok(familyAdvantage(wealthy, 0) <= 0.75, 'and never become a guarantee');
+  assert.ok(familyAdvantage(poor, 200) > familyAdvantage(poor, 0), 'and so should the family behind you');
 }
 
 // --- The dead are not kept forever, but the important ones are --------------
@@ -223,7 +228,15 @@ function person(id: string, overrides: Partial<Entity> = {}): Entity {
 
   // Every particle call is a no-op; a Proxy covers whatever the AI reaches for.
   const particles = new Proxy({}, { get: () => () => {} }) as any;
-  const YEARS = 26;
+  /**
+   * Long enough for the founding generation to actually age out.
+   *
+   * This was 26, which passed on a single old-age death — the founders start at
+   * 20-31, so at year 26 the eldest is barely 57 and whether anybody died at all
+   * came down to one roll. Elders now appear around year 29 and deaths run from
+   * year 38, so 40 asserts the lifecycle instead of asserting a coin flip.
+   */
+  const YEARS = 40;
   for (let year = 0; year < YEARS; year++) {
     for (let tick = 0; tick < 7300; tick++) sim.tickAI(map, particles);
   }

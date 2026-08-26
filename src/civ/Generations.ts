@@ -178,8 +178,14 @@ export function settleEstate(
   claimants.push(...children.sort((a, b) => b.age - a.age));
 
   if (claimants.length === 0) {
-    // No heir. What was theirs stays with whoever still lives in the house.
-    if (household && household.memberIds.size > 0) household.earn(estate.coin);
+    // No heir. What was theirs is split between whoever still lives in the house.
+    const survivors = [...(household?.memberIds ?? [])]
+      .map(id => lookup(id))
+      .filter((member): member is Entity => !!member && member.hp > 0 && member !== dead);
+    if (survivors.length > 0) {
+      const each = estate.coin / survivors.length;
+      for (const survivor of survivors) survivor.wealth += each;
+    }
     dead.wealth = 0;
     return estate;
   }
@@ -243,10 +249,8 @@ export function settleEstate(
  * is advantaged rather than destined — which is the difference between social
  * mobility and a caste system.
  */
-export function familyAdvantage(entity: Entity, household: Household | null): number {
-  const purse = household ? household.coin / Math.max(1, household.size) : 0;
-  const inheritedCoin = entity.wealth;
-  return Math.min(0.75, (purse + inheritedCoin) / 260);
+export function familyAdvantage(entity: Entity, familyWealthPerHead: number): number {
+  return Math.min(0.75, (Math.max(0, familyWealthPerHead) + entity.wealth) / 260);
 }
 
 // ============================================================

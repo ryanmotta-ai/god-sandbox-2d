@@ -338,20 +338,7 @@ function buildLife(
     children.push(section('Domicílio', [
       rowList([
         statRow({ label: 'Sob o mesmo teto', value: `${household.size}`, unit: 'pessoas', icon: 'population' }),
-        statRow({
-          label: 'Despensa',
-          value: household.pantry.get('food').toFixed(1),
-          unit: `/ ${household.pantryTarget()}`,
-          icon: 'agriculture',
-          status: household.pantry.get('food') <= 0 ? 'critical' : undefined
-        }),
-        statRow({ label: 'Bolsa da família', value: formatFull(household.coin), icon: 'economy' }),
-        statRow({
-          label: 'Balanço do dia',
-          value: `+${Math.round(household.lastEarned)} / −${Math.round(household.lastSpent)}`,
-          icon: 'economy',
-          tooltip: { title: 'Balanço do dia', description: 'Ganho e gasto do domicílio no último dia simulado.' }
-        })
+        statRow({ label: 'Fundado em', value: `Ano ${household.foundedYear}`, icon: 'time' })
       ])
     ]));
   }

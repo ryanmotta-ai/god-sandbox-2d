@@ -252,8 +252,8 @@ function describeIdle(entity: Entity, sim: SimulationEngine): Activity {
  * Why a citizen is going to eat.
  *
  * Hunger alone is the trigger, but the useful part is whether there is anything
- * to eat when they get there — which is readable from the household pantry and
- * the settlement store. That turns "hungry" into an answerable problem.
+ * to eat when they get there — which is readable from the settlement store, the
+ * only larder there is. That turns "hungry" into an answerable problem.
  */
 function describeHunger(entity: Entity, sim: SimulationEngine): string {
   const hunger = Math.round(entity.needs.hunger);
@@ -261,19 +261,16 @@ function describeHunger(entity: Entity, sim: SimulationEngine): string {
     ? `Passando fome (${hunger}/100)`
     : `Fome em ${hunger}/100, acima do limite de ${HUNGER_SEEK_FOOD}`;
 
-  const household = entity.householdId ? sim.households.get(entity.householdId) : undefined;
-  // No household means no pantry to report on, so the hunger figure stands alone
-  // rather than being dressed up with a supply claim that has no source.
-  if (!household) return base;
-
-  const pantry = household.pantry.get('food');
-  if (pantry > 0.01) return `${base} · despensa com ${pantry.toFixed(1)} de comida`;
-
+  // A wanderer with no settlement has no store to report on, so the hunger
+  // figure stands alone rather than being dressed up with a claim that has no
+  // source.
   const city = entity.cityId ? sim.cities.get(entity.cityId) : undefined;
-  const store = city ? city.stock.get('food') : 0;
+  if (!city) return base;
+
+  const store = city.stock.get('food');
   return store > 0
-    ? `${base} · despensa vazia, mas ${Math.round(store)} no armazém de ${city!.name}`
-    : `${base} · sem comida na despensa nem no armazém de ${city?.name ?? 'sua cidade'}`;
+    ? `${base} · ${Math.round(store)} de comida no armazém de ${city.name}`
+    : `${base} · armazém de ${city.name} sem comida`;
 }
 
 /**
