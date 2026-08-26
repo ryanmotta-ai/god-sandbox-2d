@@ -951,32 +951,37 @@ export class CivilizationEngine {
   }
 
   /** People eat. Buildings and armies cost upkeep. Shortfall causes famine. */
+  /**
+   * What a settlement eats, and what it runs out of.
+   *
+   * There used to be two food systems. Citizens walked to the store and took a
+   * meal off the shelf — physical, visible, one meal at a time — and then this
+   * pass deducted an aggregate annual ration on top, computed a satisfaction
+   * ratio out of it, and carried a drawn-food counter around purely so the same
+   * mouths were not charged twice. The second one existed because the first did
+   * not used to cover everybody. It does now.
+   *
+   * So the ration is gone. People eat by eating, and they starve by not finding
+   * a meal, which `liveADay` already handles: hunger climbs, `starvingDays`
+   * counts up, and health goes down. What remains here is the settlement's own
+   * account of the shortage — how long the granary has been empty — because
+   * loyalty, prosperity and the chronicle all want to know.
+   */
   private consumeGoods(city: City, world: CivWorld, fraction: number = 0.25): void {
     const kingdom = city.kingdomId ? world.kingdoms.get(city.kingdomId) ?? null : null;
-    const needed = city.population * FOOD_PER_CITIZEN * fraction;
 
     this.spoilGoods(city, fraction);
 
     // Beyond bare survival, people want goods. This is what gives cloth, tools
-    // and gems a market at all, and why a rich city bids their prices up.
+    // and gems a market at all.
     this.reportLivingStandards(city, world);
 
-    // Families already bought part of this ration over the course of the year.
-    const alreadyFed = Math.min(needed, city.householdFoodDrawn);
-    city.householdFoodDrawn = 0;
-
-    const eaten = alreadyFed + city.stock.take('food', needed - alreadyFed);
-    city.ledger.recordConsumed('food', Math.max(0, eaten - alreadyFed));
-    const satisfaction = needed <= 0 ? 1 : eaten / needed;
+    // How well fed the town is, read off the shelves against the mouths in it.
+    const foodPerHead = city.stock.get('food') / Math.max(1, city.population);
+    const satisfaction = clamp(foodPerHead / FOOD_PER_CITIZEN, 0, 1);
 
     if (satisfaction < 0.85) {
       city.famineYears++;
-      // Starvation kills. Gradual mortality rate (15% in year 1, 25% in subsequent years) gives cities time to recover.
-      const mortalityRate = city.famineYears <= 1 ? 0.15 : 0.25;
-      const starved = Math.ceil(city.population * (1 - satisfaction) * mortalityRate);
-      if (starved > 0) {
-        this.killCitizens(city, world, starved, 'starvation');
-      }
       if (city.famineYears === 3) {
         chronicle.log(
           world.year,
@@ -995,7 +1000,7 @@ export class CivilizationEngine {
             consequences: ['Population loss and declining prosperity followed the shortage.'],
             threadId: `famine:${city.id}:${world.year - 2}`,
             threadTitle: `The Famine of ${city.name}`,
-            data: { foodSatisfaction: Number(satisfaction.toFixed(3)), famineYears: city.famineYears, deathsThisYear: starved }
+            data: { foodSatisfaction: Number(satisfaction.toFixed(3)), famineYears: city.famineYears }
           }
         );
       }
@@ -1963,33 +1968,6 @@ export class CivilizationEngine {
     return research * (0.4 + city.prosperity * 0.6);
   }
 
-  private killCitizens(city: City, world: CivWorld, count: number, cause: string): void {
-    const citizens = [...(this.entitiesByCity.get(city.id) ?? [])];
-    // The very young and very old die first.
-    citizens.sort((a, b) => {
-      const maxAge = SPECIES_DEFINITIONS[a.species].maxAge;
-      const vulnerabilityA = a.isChild ? 2 : a.age / maxAge;
-      const vulnerabilityB = b.isChild ? 2 : b.age / maxAge;
-      return vulnerabilityB - vulnerabilityA;
-    });
-
-    for (let i = 0; i < Math.min(count, citizens.length); i++) {
-      citizens[i].hp = 0; // The entity layer handles the actual removal
-    }
-    /**
-     * The head count is *not* decremented here.
-     *
-     * `handleEntityDeath` already takes one off the settlement for every citizen
-     * it buries, and it buries exactly the people this loop just killed. Doing it
-     * here as well took each famine death off the books twice, so a settlement
-     * that lost ten people to hunger reported twenty gone — and every figure
-     * derived from population for the rest of that year (tax base, production,
-     * prosperity, growth, the famine mortality rate itself) was computed against
-     * a settlement half the size of the real one, which deepened the next
-     * famine. Killing is this function's job; counting is the entity layer's.
-     */
-  }
-
   // ============================================================
   // KINGDOM TOTALS & TAXATION
   // ============================================================
@@ -2334,6 +2312,7 @@ export class CivilizationEngine {
     prosperity = cityCount > 0 ? prosperity / cityCount : 0.5;
 
     const foodPerHead = totalFood / Math.max(1, kingdom.totalPopulation);
+    // Years of eating in store is a full larder; anything less is a worry.
     const foodSecurityTarget = clamp(foodPerHead / (FOOD_PER_CITIZEN * 4) + (lawEffects.foodSecurity ?? 0), 0, 1);
     kingdom.foodSecurity += (foodSecurityTarget - kingdom.foodSecurity) * 0.3;
 

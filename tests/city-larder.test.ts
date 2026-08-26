@@ -37,7 +37,11 @@ const eat = (sim: SimulationEngine, e: Entity, starving: boolean) =>
   const before = city.stock.get('food');
   assert.equal(eat(sim, e, false), true, 'a full store feeds a citizen');
   assert.ok(Math.abs(city.stock.get('food') - (before - MEAL_ADULT)) < 1e-9, 'the meal leaves the store');
-  assert.ok(Math.abs(city.householdFoodDrawn - MEAL_ADULT) < 1e-9, 'and is booked against the yearly ration');
+  // Recorded as consumption, which is the only book there is now: the aggregate
+  // annual ration that used to double-count these mouths is gone. The ledger
+  // reports closed years, so close one to read it.
+  city.ledger.rollOver();
+  assert.ok(Math.abs(city.ledger.flow('food').consumed - MEAL_ADULT) < 1e-9, 'and is recorded as eaten');
 }
 
 // ---- the reserve is held back from a casual meal ----

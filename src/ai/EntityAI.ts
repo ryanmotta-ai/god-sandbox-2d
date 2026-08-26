@@ -84,10 +84,9 @@ const MOVE_PER_TICK = 0.055;
  * Food per citizen a settlement keeps back from day-to-day meals.
  *
  * A citizen takes roughly three meals a year at `MEAL_ADULT`, so ~1.35 food a
- * head, and the yearly pass wants `FOOD_PER_CITIZEN` on top. This floor is the
- * only dial between "nobody ever goes hungry beside a full store" and "a town
- * eats its seed corn in a week" — turn it down if settlements hoard, up if they
- * strip themselves bare before winter.
+ * head. This floor is the only dial between "nobody ever goes hungry beside a
+ * full store" and "a town eats its seed corn in a week" — turn it down if
+ * settlements hoard, up if they strip themselves bare before winter.
  */
 const FOOD_RESERVE_PER_HEAD = 1.5;
 
@@ -999,9 +998,6 @@ export class SimulationEngine {
     const taken = city.stock.take('food', portion);
     if (taken <= 0) return false;
 
-    // Booked against the settlement's yearly ration so the same mouths are not
-    // fed twice — once here and once in the annual consumption pass.
-    city.householdFoodDrawn += taken;
     city.ledger.recordConsumed('food', taken);
     return true;
   }

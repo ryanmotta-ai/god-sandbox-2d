@@ -208,14 +208,6 @@ export class City {
   public economicOutput: number = 0;
   /** Where every good came from and went last year. Written by production, consumption and trade. */
   public ledger: CityLedger = new CityLedger();
-  /**
-   * Food households already bought out of the store this year.
-   *
-   * Families shop daily while the settlement settles its books yearly. Both draw
-   * on the same stockpile, so the yearly pass must subtract what the families
-   * already took or the population eats twice.
-   */
-  public householdFoodDrawn: number = 0;
 
   // ========== RESOURCE CACHE (rebuilt yearly) ==========
   private resourceCacheYear: number = 0;
