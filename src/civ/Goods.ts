@@ -85,6 +85,16 @@ export interface GoodDefinition {
    * This is what turns a deposit into a casus belli.
    */
   strategic?: boolean;
+  /**
+   * Goes off if it is left sitting. Grain and meat do; stone and iron do not.
+   *
+   * A store needs a sink or a settlement can never be short of anything again.
+   * Taxation used to be that sink by accident — a slice of every good left every
+   * settlement every pass — so removing it made granaries fill up forever and
+   * famine impossible. Spoilage is the honest version: a thing you can watch
+   * happen in the ledger, on the goods it actually happens to.
+   */
+  perishable?: boolean;
   description: string;
 }
 
@@ -98,7 +108,8 @@ export const GOODS: Record<GoodId, GoodDefinition> = {
     kind: 'raw',
     tier: 'common',
     basePrice: 2,
-    description: 'Grãos, caça e frutos. Todo cidadão come todo ano, ou passa fome.'
+    description: 'Grãos, caça e frutos. Todo cidadão come todo ano, ou passa fome.',
+    perishable: true
   },
   wood: {
     id: 'wood',

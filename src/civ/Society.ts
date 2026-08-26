@@ -108,7 +108,8 @@ export interface SocietyTickContext {
    * normal, 2.0 means bread has doubled. Townsfolk who buy food suffer; the
    * countryside that sells it does not.
    */
-  foodPriceIndex: number;
+  /** How short of food the realm is. 1 is comfortable; it climbs as shelves empty. */
+  foodScarcity: number;
   /** Share of working-age citizens with no job slot to fill, 0..1. */
   unemployment: number;
   /** Share of job slots nobody is available to fill, 0..1. */
@@ -343,7 +344,7 @@ function factionTargets(
   const adminPain = clamp01(1 - ctx.administrativeReach);
   const inequalityPain = ctx.inequality;
   // Bread at double the base price is a full measure of pain.
-  const foodPricePain = clamp01((ctx.foodPriceIndex - 1) / 1.2);
+  const foodPricePain = clamp01((ctx.foodScarcity - 1) / 1.2);
   const joblessPain = clamp01(ctx.unemployment / 0.3);
 
   // Recorded as each delta is applied, so the explanation cannot drift from the

@@ -194,15 +194,38 @@ export class Kingdom {
   public doctrine: MilitaryDoctrine;
 
   // ============ TRADE BALANCE & MERCANTILISM STATS ============
-  public exportVolume: number = 0;
-  public importVolume: number = 0;
-  public tariffRevenue: number = 0;
   public pirateRaidsDefeated: number = 0;
 
   // ============ DEEP SIMULATION STATE ============
 
   /** The national reserve — taxed from cities, spent on projects and trade. */
   public treasury: Stockpile = new Stockpile(4000);
+
+  /** Gold in the till, by weight. */
+  public get gold(): number {
+    return this.treasury.get('gold');
+  }
+
+  /**
+   * Puts gold in the till, returning what actually fitted.
+   *
+   * A stockpile has a capacity, so a realm can be too rich for its own vaults —
+   * which is a real limit on a physical hoard and not a bug to route around.
+   */
+  public addGold(amount: number): number {
+    if (amount <= 0) return 0;
+    const stored = this.treasury.add('gold', amount);
+    this.wealth = this.treasury.get('gold');
+    return stored;
+  }
+
+  /** Takes gold out of the till, returning what was actually there to take. */
+  public takeGold(amount: number): number {
+    if (amount <= 0) return 0;
+    const taken = this.treasury.take('gold', amount);
+    this.wealth = this.treasury.get('gold');
+    return taken;
+  }
   public research: ResearchState = new ResearchState();
   public economy: KingdomEconomy = new KingdomEconomy();
   public government: GovernmentType = 'tribe';
@@ -243,6 +266,12 @@ export class Kingdom {
   /** Kept for the old culture-level display. Now derived from research. */
   public cultureLevel: number = 1;
   /** Legacy numeric wealth, mirrored from the economy treasury. */
+  /**
+   * The realm's gold, by weight, as a number for anything that only wants to
+   * read it. The gold itself lives in `treasury` — this is a mirror kept in step
+   * by `addGold`/`takeGold`, because power scores, the inspector and the AI all
+   * want a plain number and none of them should reach into the stockpile.
+   */
   public wealth: number = 100;
 
   constructor(id: string, name: string, species: SpeciesType, color: string, capitalCityId: string, foundingYear: number) {
@@ -355,20 +384,7 @@ export class Kingdom {
 
   // ============================ TRADE POLICY ============================
 
-  /**
-   * What this realm charges at its border, 0.02..0.45.
-   *
-   * The single source of truth for tariffs: caravans, ships and the route
-   * planner all read it, so a law passed in the capital is felt on every cart
-   * that crosses the frontier. Trade law dominates; mercantile culture only
-   * nudges it. `trade` is positive for open borders, negative for closed ones.
-   */
-  public tariffRate(): number {
-    const openness = aggregateLawEffects(this.laws).trade ?? 0;
-    const rate = 0.12 + this.culture.mercantilism * 0.08 - openness * 0.9;
-    return Math.max(0.02, Math.min(0.45, rate));
-  }
-
+  
   // ============================ POWER ============================
 
   /** Combined strength used for war resolution and the power ranking. */
@@ -525,9 +541,6 @@ export class Kingdom {
       foreignSupport: this.foreignSupport,
       cultureLevel: this.cultureLevel,
       wealth: this.wealth,
-      exportVolume: this.exportVolume,
-      importVolume: this.importVolume,
-      tariffRevenue: this.tariffRevenue,
       pirateRaidsDefeated: this.pirateRaidsDefeated,
       armyIds: Array.from(this.armyIds),
       militaryUpkeepGold: this.militaryUpkeepGold,
@@ -583,9 +596,6 @@ export class Kingdom {
     kingdom.foreignSupport = data.foreignSupport ?? 0;
     kingdom.cultureLevel = data.cultureLevel ?? 1;
     kingdom.wealth = data.wealth ?? 100;
-    kingdom.exportVolume = data.exportVolume ?? 0;
-    kingdom.importVolume = data.importVolume ?? 0;
-    kingdom.tariffRevenue = data.tariffRevenue ?? 0;
     kingdom.pirateRaidsDefeated = data.pirateRaidsDefeated ?? 0;
     kingdom.armyIds = new Set(data.armyIds ?? []);
     kingdom.militaryUpkeepGold = data.militaryUpkeepGold ?? 0;

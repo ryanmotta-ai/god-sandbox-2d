@@ -586,8 +586,7 @@ export class PowerExecutor {
         }
         if (kingdom) {
           sound.playMagic();
-          kingdom.treasury.add('gold', 1000);
-          kingdom.economy.treasury += 1000;
+          kingdom.addGold(1000);
           if (city) city.economicOutput += 200;
           const px = city?.x ?? tx;
           const py = city?.y ?? ty;

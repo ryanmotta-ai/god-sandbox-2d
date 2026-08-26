@@ -7,7 +7,7 @@ import {
 } from './Goods';
 import { TECHNOLOGIES, TechDefinition, type ResearchState, techCost, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
 import { GOVERNMENTS, chooseGovernment, isRevolution, GovernmentType } from './Government';
-import { WorldMarket } from './Economy';
+
 import { DiplomacyManager, type PeaceSettlement } from './Diplomacy';
 import { culturalAffinity, rememberCulture, updateCulture } from './Culture';
 import { updateSociety } from './Society';
@@ -62,7 +62,6 @@ export interface CivWorld {
   entities: Entity[];
   tileMap: TileMap;
   diplomacy: DiplomacyManager;
-  market: WorldMarket;
   /** Creates an entity of the given species at a position. */
   spawn: (species: SpeciesType, x: number, y: number) => Entity;
   /** Simulation engine. */
@@ -80,7 +79,24 @@ export interface CivWorld {
 export const CIV_VISIT_PERIOD = TICKS_PER_SEASON;
 
 /** Food a single citizen eats per year. */
-/** Share of a tax levy the crown keeps as goods; the rest is sold for coin. */
+/**
+ * Gold a settlement holds back from the haul to the capital.
+ *
+ * Its own building work is paid in gold too, so a town stripped to nothing can
+ * never put up anything again. Turn it down if crowns look poor, up if towns
+ * look unable to build.
+ */
+const CITY_GOLD_RESERVE = 40;
+
+/**
+ * Share of a perishable store lost to spoilage over a year.
+ *
+ * This is the dial between "a granary empties if nothing comes in" and "a good
+ * harvest is worthless by winter". At 0.35 a full store still carries a town
+ * through a bad season but not through a bad decade, which is the drama the
+ * famine and migration systems were written for.
+ */
+const SPOILAGE_PER_YEAR = 0.35;
 /** How far from a building the street plan is worth paving. */
 const STREET_SERVICE_REACH = 2;
 /**
@@ -98,7 +114,6 @@ const DEFECTION_GRIEVANCE = 0.62;
 const DEFECTION_REACH = 26;
 /** How much more prosperous the neighbour has to visibly be. */
 const DEFECTION_PROSPERITY_GAP = 0.22;
-const TAX_KEPT_IN_KIND = 0.5;
 /**
  * How hard neighbours resent each other over land. This is the strongest term
  * in the drift model on purpose: between two crowded, ambitious realms the
@@ -253,7 +268,6 @@ export class CivilizationEngine {
    * onto the continuous slices above.
    */
   public tickYearBoundary(world: CivWorld): void {
-    world.market.settle(world.year);
     for (const city of world.cities.values()) city.ledger.rollOver();
   }
 
@@ -293,7 +307,7 @@ export class CivilizationEngine {
       const scoped = { ...world, seasonFraction: this.chargeFor(kingdom.id, now) };
       this.distributeStaples(kingdom, scoped);
       this.tickFaith(kingdom, scoped);
-      this.collectTaxes(kingdom, scoped);
+      this.gatherCrownRevenue(kingdom, scoped);
       this.tickResearch(kingdom, scoped);
       this.tickEconomy(kingdom, scoped);
       this.tickCulture(kingdom, scoped);
@@ -580,7 +594,6 @@ export class CivilizationEngine {
         for (const [goodKey, amountValue] of Object.entries(def.consumes)) {
           const good = goodKey as GoodId;
           const amount = (amountValue as number) * Math.max(0.25, building.outputMultiplier());
-          world.market.reportDemand(good, amount);
           if (city.stock.get(good) < amount) affordable = false;
         }
         if (!affordable) continue;
@@ -625,8 +638,7 @@ export class CivilizationEngine {
           const extracted = Math.min(wanted, tile.resourceAmount);
           tile.resourceAmount = Math.max(0, tile.resourceAmount - extracted);
           const stored = city.stock.add(naturalGood!, extracted);
-          output += stored * world.market.price(naturalGood!);
-          world.market.reportSupply(naturalGood!, stored);
+          output += stored * GOODS[naturalGood!].basePrice;
           city.ledger.recordProduced(naturalGood!, stored);
           continue;
         }
@@ -639,8 +651,7 @@ export class CivilizationEngine {
           const harvested = Math.min(bonusRate * scale, tile.resourceAmount);
           tile.resourceAmount = Math.max(0, tile.resourceAmount - harvested);
           const stored = city.stock.add(naturalGood, harvested);
-          output += stored * world.market.price(naturalGood);
-          world.market.reportSupply(naturalGood, stored);
+          output += stored * GOODS[naturalGood].basePrice;
           city.ledger.recordProduced(naturalGood, stored);
         } else {
           building.extractedGood = null;
@@ -669,8 +680,7 @@ export class CivilizationEngine {
       for (const [goodKey, amountValue] of Object.entries(def.produces)) {
         const good = goodKey as GoodId;
         const stored = city.stock.add(good, (amountValue as number) * scale);
-        output += stored * world.market.price(good);
-        world.market.reportSupply(good, stored);
+        output += stored * GOODS[good].basePrice;
         city.ledger.recordProduced(good, stored);
       }
     }
@@ -681,13 +691,13 @@ export class CivilizationEngine {
     // hard Malthusian ceiling — enough to survive and eventually discover
     // agriculture, never enough to become a city without farmland.
     const foraged = this.forageWildFood(city, world, foodClimate);
-    output += foraged * world.market.price('food');
+    output += foraged * GOODS['food'].basePrice;
 
     // Timber cut by hand. A settlement with no lumber camp still needs wood for
     // its first houses — and for the lumber camp itself, which costs wood. Without
     // this the stone age is a dead end: no wood income means no camp, ever.
     const cutWood = this.gatherWildWood(city, world);
-    output += cutWood * world.market.price('wood');
+    output += cutWood * GOODS['wood'].basePrice;
 
     city.economicOutput = output;
   }
@@ -735,7 +745,6 @@ export class CivilizationEngine {
     }
 
     const stored = city.stock.add('wood', gathered);
-    world.market.reportSupply('wood', stored);
     city.ledger.recordProduced('wood', stored);
     return stored;
   }
@@ -764,7 +773,6 @@ export class CivilizationEngine {
     // Report what actually reached the granary, not what was picked: a full
     // stockpile must not look like extra supply to the price model.
     const stored = city.stock.add('food', gathered);
-    world.market.reportSupply('food', stored);
     city.ledger.recordProduced('food', stored);
     return stored;
   }
@@ -863,8 +871,7 @@ export class CivilizationEngine {
             const desired = qty * remaining;
             if (city.stock.get(input) < desired) {
               const missing = desired - city.stock.get(input);
-              world.market.reportDemand(input, missing);
-              missingValue += missing * world.market.price(input);
+              missingValue += missing * GOODS[input].basePrice;
             }
           }
 
@@ -887,20 +894,45 @@ export class CivilizationEngine {
       }
       const produced = best.recipe.output * cycles;
       const stored = city.stock.add(best.good, produced);
-      world.market.reportSupply(best.good, stored);
       city.ledger.recordProduced(best.good, stored);
-      value += stored * world.market.price(best.good);
+      value += stored * GOODS[best.good].basePrice;
       remaining -= cycles;
     }
 
     return value;
   }
 
+  /**
+   * What was left sitting too long goes off.
+   *
+   * A settlement's store needs somewhere for goods to go, or it fills up and
+   * stays full and nothing is ever scarce again. Taxation used to be that sink
+   * without anybody intending it: a slice of every good left for the crown every
+   * pass, so a town with no farms slowly emptied. With the levy gone, granaries
+   * filled forever and a famine became impossible.
+   *
+   * So the sink is the honest one now — grain rots, and a granary is only as good
+   * as what keeps coming in. It is charged against the same `fraction` as
+   * everything else, so a year of spoilage is a year of spoilage however the
+   * visits are spaced, and it is recorded as consumption so the ledger shows
+   * where the food went.
+   */
+  private spoilGoods(city: City, fraction: number): void {
+    for (const good of ALL_GOODS) {
+      if (!GOODS[good].perishable) continue;
+      const held = city.stock.get(good);
+      if (held <= 0) continue;
+      const lost = city.stock.take(good, held * SPOILAGE_PER_YEAR * fraction);
+      if (lost > 0) city.ledger.recordConsumed(good, lost);
+    }
+  }
+
   /** People eat. Buildings and armies cost upkeep. Shortfall causes famine. */
   private consumeGoods(city: City, world: CivWorld, fraction: number = 0.25): void {
     const kingdom = city.kingdomId ? world.kingdoms.get(city.kingdomId) ?? null : null;
     const needed = city.population * FOOD_PER_CITIZEN * fraction;
-    world.market.reportDemand('food', needed);
+
+    this.spoilGoods(city, fraction);
 
     // Beyond bare survival, people want goods. This is what gives cloth, tools
     // and gems a market at all, and why a rich city bids their prices up.
@@ -996,7 +1028,6 @@ export class CivilizationEngine {
     for (const [goodKey, amount] of Object.entries(wants)) {
       const good = goodKey as GoodId;
       const want = amount as number;
-      world.market.reportDemand(good, want);
 
       // Consume what is available, so surplus is drawn down rather than hoarded.
       const consumed = city.stock.take(good, Math.min(want, city.stock.get(good) * 0.25));
@@ -1204,14 +1235,9 @@ export class CivilizationEngine {
       const score = this.scoreBuilding(type, city, kingdom, world, spot.resourceGood, spot.siteScore);
       if (score <= 0) continue;
 
-      if (!city.stock.hasAll(def.cost)) {
-        for (const [goodKey, amountValue] of Object.entries(def.cost)) {
-          const good = goodKey as GoodId;
-          const missing = (amountValue as number) - city.stock.get(good);
-          if (missing > 0) world.market.reportDemand(good, missing);
-        }
-        continue;
-      }
+      // The settlement simply cannot afford it yet. Nobody is told; the stone
+      // either turns up on its shelves later or the project never happens.
+      if (!city.stock.hasAll(def.cost)) continue;
       candidates.push({ type, score, spot });
     }
 
@@ -1523,7 +1549,7 @@ export class CivilizationEngine {
 
     if (resourceGood && def.resourceTargets?.includes(resourceGood)) {
       const held = city.stock.get(resourceGood);
-      const price = world.market.price(resourceGood);
+      const price = GOODS[resourceGood].basePrice;
       // Scarcity has to scale. A flat +35 for "under thirty" meant a settlement
       // sitting on zero stone valued a new quarry barely more than one sitting on
       // twenty-nine, while its wood piled up past three hundred — so it kept
@@ -2045,102 +2071,63 @@ export class CivilizationEngine {
     }
   }
 
-  /** The crown takes its share of what its settlements produced. */
-  private collectTaxes(kingdom: Kingdom, world: CivWorld): void {
-    const gov = GOVERNMENTS[kingdom.government];
-    const lawEffects = aggregateLawEffects(kingdom.laws);
-    const effectiveTaxRate = clamp(gov.taxRate * (1 + (lawEffects.taxMultiplier ?? 0)), 0.01, 0.62);
-    let taxValue = 0;
-
-    // Bug #2: Reset yearly trade counters so they reflect the current year only.
-    const yearlyTradeGold = kingdom.exportVolume + kingdom.tariffRevenue;
-    kingdom.exportVolume = 0;
-    kingdom.importVolume = 0;
-    kingdom.tariffRevenue = 0;
+  /**
+   * What the realm made, and the gold its settlements sent in.
+   *
+   * This replaces taxation, and there is no rate anywhere in it. A crown used
+   * to take a slice of every good in every settlement, keep part of it and be
+   * credited the market value of the rest, then pay an upkeep bill and record
+   * the lot in a yearly ledger — an entire accounting department the player
+   * could only ever meet as a table of figures.
+   *
+   * What remains is the two things you can point at. Gold is a good, so it is
+   * hauled from the settlement's shelves to the crown's vault like any other
+   * cargo, above the reserve a town keeps for its own building work. And output
+   * is counted by walking the buildings and asking what they make, which is
+   * what the old levy was measuring all along through a tax rate.
+   */
+  private gatherCrownRevenue(kingdom: Kingdom, world: CivWorld): void {
+    const fraction = world.seasonFraction ?? 0.25;
+    let output = 0;
 
     for (const cityId of kingdom.cityIds) {
       const city = world.cities.get(cityId);
       if (!city) continue;
 
-      // Tax is taken in kind: a slice of whatever the settlement holds.
-      for (const good of ALL_GOODS) {
-        const held = city.stock.get(good);
-        if (held <= 0) continue;
-        const levy = held * effectiveTaxRate * 0.35;
-        const taken = city.stock.take(good, levy);
-        // Tax in kind leaves the settlement for the crown's stores.
-        city.ledger.recordExported(good, taken);
-        // The crown keeps part of the levy and sells the rest for coin. It used
-        // to store the whole levy *and* be credited its full market value, so
-        // the crown was paid twice for the same grain and every treasury ran
-        // away within a few decades. Anything its stores cannot hold is sold too.
-        const stored = kingdom.treasury.add(good, taken * TAX_KEPT_IN_KIND);
-        taxValue += (taken - stored) * world.market.price(good);
+      // Gold rides to the capital. A settlement keeps a working reserve, because
+      // its own masons and smiths spend gold too and a stripped town cannot build.
+      const spare = city.stock.get('gold') - CITY_GOLD_RESERVE;
+      if (spare > 0) {
+        const hauled = city.stock.take('gold', spare * fraction);
+        const delivered = kingdom.addGold(hauled);
+        city.ledger.recordExported('gold', delivered);
+        // Whatever the crown's vault could not hold stays where it was.
+        if (delivered < hauled) city.stock.add('gold', hauled - delivered);
       }
 
-      // Public receipts: duties, fees, tolls and interest. This is what a market,
-      // a harbour, a bank, an exchange, a port or a palace actually contributes to
-      // a crown — revenue, collected in money, scaled by how well the building is
-      // running. It replaces the `produces: { gold }` entries those buildings used
-      // to carry, which minted physical ore out of bookkeeping.
       for (const building of city.buildings.values()) {
         const fiscal = building.definition.fiscal;
-        if (!fiscal) continue;
-        taxValue += fiscal * building.outputMultiplier();
-      }
-
-      const taxPain = Math.max(0, effectiveTaxRate - 0.22);
-      if (taxPain > 0) {
-        city.prosperity = clamp(city.prosperity - taxPain * 0.035, 0, 1);
+        if (fiscal) output += fiscal * building.outputMultiplier();
       }
     }
 
-    const fraction = world.seasonFraction ?? 0.25;
-    // Convert the value of the levy into coin in the treasury.
-    const income = taxValue * fraction;
-    kingdom.economy.treasury += income;
-
-    // Upkeep: armies, courts and buildings all cost.
-    const upkeep = (kingdom.cityIds.size * 8 + kingdom.totalPopulation * 0.4 + (kingdom.isEmpire ? 40 : 0)) * fraction;
-    kingdom.economy.treasury -= upkeep;
-
-    // Process War Reparations payments
+    // Indemnities are gold, and gold crosses a border by being carried.
     if (kingdom.warReparations) {
       if (world.year <= kingdom.warReparations.endYear) {
         const creditor = world.kingdoms.get(kingdom.warReparations.creditorId);
         if (creditor) {
-          const payment = Math.min(Math.max(0, kingdom.economy.treasury * 0.25), kingdom.warReparations.annualAmount);
-          kingdom.economy.payAcrossBorder(creditor.economy, payment);
+          const owed = Math.min(kingdom.gold * 0.25, kingdom.warReparations.annualAmount * fraction);
+          creditor.addGold(kingdom.takeGold(owed));
         }
       } else {
         kingdom.warReparations = null;
       }
     }
 
-    // An empty till is an empty till — there is no mint to paper over it.
-    if (kingdom.economy.treasury < 0) kingdom.economy.treasury = 0;
-
-    // wealth is derived from economy.treasury — single source of truth.
-    // CaravanSystem and NavalSystem update economy.treasury directly (Bug #1 fix),
-    // so this sync always reflects the full picture including trade revenue.
-    kingdom.wealth = Math.round(kingdom.economy.treasury);
-
-    // What the realm's buildings actually made: the levy read back through the
-    // rate it was taken at. Physical output, not a national account.
-    const output = taxValue / Math.max(0.01, gov.taxRate * 0.35);
     kingdom.economy.output = output;
     kingdom.economy.outputPerCapita = output / Math.max(1, kingdom.totalPopulation);
-    // Bug #3: Record actual trade income (gold from caravans/ships this year).
-    kingdom.economy.recordYear({
-      year: world.year,
-      taxIncome: income,
-      tradeIncome: yearlyTradeGold,
-      upkeep,
-      net: income + yearlyTradeGold - upkeep,
-      output,
-      treasury: kingdom.economy.treasury
-    });
   }
+
 
   // ============================================================
   // RESEARCH
@@ -2397,7 +2384,6 @@ export class CivilizationEngine {
     for (const { good, weight } of strategicGoodsFor(kingdom.research)) {
       const wanted = weight * industrialBase * 0.1;
       if (wanted <= 0) continue;
-      world.market.reportDemand(good, wanted);
       kingdom.strategicDemand.set(good, wanted);
     }
   }
@@ -2427,29 +2413,6 @@ export class CivilizationEngine {
     kingdom.operatingEra = operatingEra(kingdom.research, kingdom.techCapabilities);
   }
 
-  /**
-   * Re-prices every good inside one realm against what that realm actually holds.
-   *
-   * This is what makes iron cost 8 in a realm sitting on ore and 21 in one with
-   * none — and therefore what gives a trade route a reason to exist at all.
-   */
-  private repriceLocalMarket(kingdom: Kingdom, world: CivWorld): void {
-    const cities = [...kingdom.cityIds].map(id => world.cities.get(id)).filter((c): c is City => !!c);
-    if (cities.length === 0) return;
-
-    for (const good of ALL_GOODS) {
-      let available = kingdom.treasury.get(good);
-      let wanted = 0;
-
-      for (const city of cities) {
-        const flow = city.ledger.flow(good);
-        available += city.stock.get(good) + flow.produced + flow.imported;
-        wanted += flow.consumed + flow.exported;
-      }
-
-      kingdom.economy.market.settle(good, world.market.price(good), available, wanted);
-    }
-  }
 
   private tickEconomy(kingdom: Kingdom, world: CivWorld): void {
     const economy = kingdom.economy;
@@ -2471,7 +2434,6 @@ export class CivilizationEngine {
 
     this.reportTechnologicalDemand(kingdom, world);
     this.assessTechnologicalCapacity(kingdom, world);
-    this.repriceLocalMarket(kingdom, world);
 
     const capital = world.cities.get(kingdom.capitalCityId) ?? null;
     let prosperity = 0;
@@ -2569,7 +2531,7 @@ export class CivilizationEngine {
     );
     economy.stability += (stabilityTarget - economy.stability) * 0.25;
 
-    const bankruptcyPain = economy.treasury <= 0 ? 0.12 : 0;
+    const bankruptcyPain = kingdom.gold <= 0 ? 0.12 : 0;
     const cultureLegitimacy =
       (gov.succession === 'bloodline' ? kingdom.culture.tradition * 0.09 : 0) +
       (gov.succession === 'election' ? kingdom.culture.openness * 0.05 + kingdom.culture.innovation * 0.04 : 0) +
@@ -2597,42 +2559,6 @@ export class CivilizationEngine {
       1
     );
     kingdom.legitimacy += (legitimacyTarget - kingdom.legitimacy) * 0.18;
-
-    // Under a market economy, banks and exchanges turn treasury into more treasury.
-    // Returns are capped against real output: a state cannot compound its way to
-    // infinite wealth on an economy that only produces so much.
-    if (kingdom.research.knowsFeature('banking')) {
-      /**
-       * The exchange.
-       *
-       * `stock_market` was unlocked by capitalism and read nowhere, so a realm
-       * that reached the joint-stock company had exactly the same capital market
-       * as one that had just invented the ledger. It deepens the market rather
-       * than replacing it: more return on reserves, and a higher ceiling on what
-       * finance can contribute before it is just printing.
-       */
-      const exchange = kingdom.research.knowsFeature('stock_market');
-      if (exchange) {
-        const listed = Math.min(economy.output * 0.22, Math.max(0, economy.treasury) * 0.05);
-        economy.treasury += listed;
-      }
-      const rate = gov.economy === 'market' ? 0.035 : 0.015;
-      const interest = Math.min(economy.treasury * rate, Math.max(0, economy.output * 0.5));
-      economy.treasury += interest;
-    }
-
-    // A treasury far beyond what the realm could ever spend is not hoarded: the
-    // state pours it into its cities as public works, which shows up as prosperity.
-    const sustainable = Math.max(500, economy.output * 12 + kingdom.totalPopulation * 60);
-    if (economy.treasury > sustainable) {
-      const surplus = economy.treasury - sustainable;
-      economy.treasury -= surplus * 0.35;
-
-      const cities = [...kingdom.cityIds].map(id => world.cities.get(id)).filter((c): c is City => !!c);
-      for (const city of cities) {
-        city.prosperity = Math.min(1, city.prosperity + 0.02);
-      }
-    }
   }
 
   // ============================================================
@@ -2750,15 +2676,22 @@ export class CivilizationEngine {
    * Every figure is measured, never assumed.
    */
   private economicPressures(kingdom: Kingdom, world: CivWorld): {
-    foodPriceIndex: number;
+    foodScarcity: number;
     unemployment: number;
     labourShortage: number;
     embargoes: number;
   } {
     const cities = [...kingdom.cityIds].map(id => world.cities.get(id)).filter((c): c is City => !!c);
 
-    const foodPrice = kingdom.economy.market.price('food', world.market.price('food'));
-    const foodPriceIndex = foodPrice / Math.max(0.01, GOODS.food.basePrice);
+    // Scarcity read off the shelves. This used to be a price index from a local
+    // market model; it is the same signal — how short of food the realm is —
+    // taken from the thing a player can actually see in a granary.
+    let stocked = 0;
+    for (const city of cities) stocked += city.stock.get('food');
+    const foodPerHead = stocked / Math.max(1, kingdom.totalPopulation);
+    // 1 is comfortable, and it climbs as the shelves empty, so everything
+    // downstream that read a rising price still reads rising hardship.
+    const foodScarcity = clamp(2 - foodPerHead, 0.5, 3);
 
     let jobs = 0;
     let filled = 0;
@@ -2773,7 +2706,7 @@ export class CivilizationEngine {
     const unemployment = workers > 0 ? clamp((workers - filled) / workers, 0, 1) : 0;
     const labourShortage = jobs > 0 ? clamp((jobs - filled) / jobs, 0, 1) : 0;
 
-    return { foodPriceIndex, unemployment, labourShortage, embargoes: 0 };
+    return { foodScarcity, unemployment, labourShortage, embargoes: 0 };
   }
 
   private tickSocietyFlashpoints(kingdom: Kingdom, world: CivWorld): void {
@@ -2838,7 +2771,7 @@ export class CivilizationEngine {
     }
 
     if (merchants.satisfaction < 0.3 && merchants.influence > 0.18 && (gov.taxRate > 0.24 || kingdom.tradeDependency > 0.25) && rng.chance(0.12)) {
-      kingdom.economy.treasury *= 0.92;
+      kingdom.takeGold(kingdom.gold * 0.08);
       kingdom.economy.stability = clamp(kingdom.economy.stability - 0.05, 0, 1);
       kingdom.society.lastUnrestYear = world.year;
       chronicle.log(
@@ -2953,7 +2886,7 @@ export class CivilizationEngine {
 
     if (workers.satisfaction < 0.28 && workers.influence > 0.16 && kingdom.economy.industrialisation > 0.28 && rng.chance(0.12)) {
       kingdom.economy.stability = clamp(kingdom.economy.stability - 0.08, 0, 1);
-      kingdom.economy.treasury *= 0.96;
+      kingdom.takeGold(kingdom.gold * 0.04);
       kingdom.society.lastUnrestYear = world.year;
       chronicle.log(
         world.year,
@@ -3051,7 +2984,7 @@ export class CivilizationEngine {
       kingdom.administrativeReach = clamp(kingdom.administrativeReach - 0.14, 0, 1);
       kingdom.economy.stability = clamp(kingdom.economy.stability - 0.06, 0, 1);
       // A state that cannot collect cannot spend.
-      kingdom.economy.treasury *= 0.93;
+      kingdom.takeGold(kingdom.gold * 0.07);
       bureaucrats.radicalization = clamp(bureaucrats.radicalization + 0.07, 0, 1);
       kingdom.society.lastUnrestYear = world.year;
       chronicle.log(
@@ -3190,7 +3123,7 @@ export class CivilizationEngine {
       atWar: world.diplomacy.getWarsFor(kingdom.id).length > 0,
       stability: kingdom.economy.stability,
       cityCount: kingdom.cityIds.size,
-      wealthRatio: kingdom.economy.treasury / Math.max(1, needed),
+      wealthRatio: kingdom.gold / Math.max(1, needed),
       industrialisation: kingdom.economy.industrialisation,
       rulerPersonality: ruler?.personality ?? 'peaceful',
       culturalMilitarism: kingdom.culture.militarism,
@@ -3219,7 +3152,7 @@ export class CivilizationEngine {
     if (revolution) {
       // A revolution costs the realm dearly and usually costs the ruler more.
       kingdom.economy.stability = 0.35;
-      kingdom.economy.treasury *= 0.6;
+      kingdom.takeGold(kingdom.gold * 0.4);
       kingdom.legitimacy = clamp(kingdom.legitimacy - 0.1, 0, 1);
       rememberCulture(kingdom.culture, 'revolution', world.year, 0.85, 'Uma revolução mudou a ordem social.');
       chronicle.log(
@@ -3733,7 +3666,7 @@ export class CivilizationEngine {
     const settlement: PeaceSettlement = victor ? 'victory' : exhausted ? 'exhaustion' : 'white_peace';
 
     if (victor && loser) {
-      loser.economy.payAcrossBorder(victor.economy, Math.max(0, loser.economy.treasury * 0.12));
+      victor.addGold(loser.takeGold(loser.gold * 0.12));
       victor.legitimacy = clamp(victor.legitimacy + 0.06, 0, 1);
       loser.legitimacy = clamp(loser.legitimacy - 0.08, 0, 1);
       rememberCulture(victor.culture, 'victory', world.year, 0.7, `A vitória sobre ${loser.name} fortaleceu o orgulho nacional.`);
@@ -3960,7 +3893,7 @@ export class CivilizationEngine {
         0.04,
         0.18
       );
-      vassal.economy.payAcrossBorder(overlord.economy, Math.max(0, vassal.economy.treasury * tributeRate));
+      overlord.addGold(vassal.takeGold(vassal.gold * tributeRate));
 
       vassal.economy.stability = clamp(vassal.economy.stability - tributeRate * 0.08, 0, 1);
       vassal.legitimacy = clamp(vassal.legitimacy - tributeRate * 0.04, 0, 1);
@@ -4009,8 +3942,8 @@ export class CivilizationEngine {
   private tickColonialFoundations(world: CivWorld): void {
     for (const metropole of world.kingdoms.values()) {
       if (metropole.isColony || !metropole.research.knowsFeature('colonisation')) continue;
-      if (metropole.totalPopulation < 18 || metropole.economy.treasury < 120) continue;
-      if (!rng.chance(0.055 + Math.min(0.04, metropole.economy.treasury / 12000))) continue;
+      if (metropole.totalPopulation < 18 || metropole.gold < 120) continue;
+      if (!rng.chance(0.055 + Math.min(0.04, metropole.gold / 12000))) continue;
 
       const parent = [...metropole.cityIds]
         .map(id => world.cities.get(id))
@@ -4027,8 +3960,7 @@ export class CivilizationEngine {
     const settlers = Math.max(5, Math.min(12, Math.floor(parent.population * 0.2)));
     const provisions = parent.stock.take('food', 80);
     const timber = parent.stock.take('wood', 45);
-    const expeditionCost = Math.min(80, metropole.economy.treasury * 0.16);
-    metropole.economy.treasury -= expeditionCost;
+    const expeditionCost = metropole.takeGold(Math.min(80, metropole.gold * 0.16));
     const capital = new City(nextId('city'), this.generateSettlementName(parent, world), parent.species, site.x, site.y, parent.founderName, world.year);
     assignCityBlueprint(capital, world.tileMap, metropole);
     const colony = new Kingdom(nextId('king'), this.generateColonialName(metropole, capital.name, world), parent.species, metropole.color, capital.id, world.year);
@@ -4038,7 +3970,7 @@ export class CivilizationEngine {
     colony.research.deserialize(metropole.research.serialize());
     colony.research.current = null;
     colony.research.progress = 0;
-    colony.economy.treasury = expeditionCost;
+    colony.addGold(expeditionCost);
     colony.knownKingdoms.add(metropole.id);
     metropole.knownKingdoms.add(colony.id);
     metropole.addColony(colony.id);
@@ -4504,7 +4436,7 @@ export class CivilizationEngine {
       if (!power) continue;
       const supportsColony = world.diplomacy.getRelation(power.id, colony.id) >= 25 && world.diplomacy.getRelation(power.id, metropole.id) < 25;
       const recipient = supportsColony ? colony : metropole;
-      const aid = power.economy.payAcrossBorder(recipient.economy, Math.min(30, Math.max(0, power.economy.treasury * 0.035)));
+      const aid = recipient.addGold(power.takeGold(Math.min(30, power.gold * 0.035)));
       if (aid <= 0) continue;
       if (supportsColony) {
         colony.foreignSupport = clamp(colony.foreignSupport + aid / 180, 0, 1);
@@ -4788,8 +4720,7 @@ export class CivilizationEngine {
           rebelKingdom.research.current = null;
           rebelKingdom.research.progress = 0;
 
-          rebelKingdom.economy.treasury = Math.max(50, kingdom.economy.treasury * 0.12);
-          kingdom.economy.treasury -= rebelKingdom.economy.treasury;
+          rebelKingdom.addGold(kingdom.takeGold(Math.max(50, kingdom.gold * 0.12)));
 
           // Government follows what the rebels can actually sustain: a republic if
           // they have the political theory for it, otherwise their old order.

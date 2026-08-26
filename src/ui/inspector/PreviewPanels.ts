@@ -302,8 +302,7 @@ export function buildKingdomPanel(kingdom: Kingdom, host: InspectorHost): Child[
         }
       }),
       button('+1.000 Ouro', () => {
-        kingdom.treasury.add('gold', 1000);
-        kingdom.economy.treasury += 1000;
+        kingdom.addGold(1000);
         host.ctx.toast(`💰 Chuva de Ouro: +1.000 Ouro adicionado ao tesouro de ${kingdom.name}!`, 'info');
         sound.playMagic();
       }, {

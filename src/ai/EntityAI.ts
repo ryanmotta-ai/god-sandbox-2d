@@ -17,8 +17,7 @@ import { chronicle } from '../civ/Chronicle';
 import { sound } from '../core/SoundSynth';
 import { rng, nextId, hashString, hashToUnit, stableSlot, MARCH_SLOTS } from '../core/Random';
 import { TICKS_PER_DAY, DAYS_PER_YEAR, DAYS_PER_SEASON, SEASONS_PER_YEAR, TICKS_PER_SEASON, TICKS_PER_YEAR, type Season } from '../core/Clock';
-import { WorldMarket } from '../civ/Economy';
-import { GoodId, MINEABLE_GOODS, QUARRY_GOODS } from '../civ/Goods';
+import { GoodId, GOODS, MINEABLE_GOODS, QUARRY_GOODS } from '../civ/Goods';
 import { tileResourceToGood } from '../world/Tile';
 import { events } from '../core/EventBus';
 import { CivilizationEngine, type CivWorld } from '../civ/CivilizationEngine';
@@ -198,8 +197,6 @@ export class SimulationEngine {
   public citySpatialHash: SpatialHash<City> = new SpatialHash<City>(16);
   private entitiesById: Map<string, Entity> = new Map();
 
-  /** Global price-setting market every realm trades against. */
-  public market: WorldMarket = new WorldMarket();
   public air: AirSystem = new AirSystem();
   /** Armies at sea. Trade hulls carry goods; these carry people. */
   public invasions: NavalInvasionSystem = new NavalInvasionSystem();
@@ -645,7 +642,6 @@ export class SimulationEngine {
         entities: this.entities,
         tileMap,
         diplomacy: this.diplomacy,
-        market: this.market,
         era: this.currentEra,
         spawn: (species, x, y) => this.spawnEntity(species, x, y),
         sim: this
@@ -997,18 +993,19 @@ export class SimulationEngine {
 
 
   /**
-   * Pays a wage out of a realm's till and reports what was actually handed over.
+   * Pays a worker out of the settlement's own gold, and reports what they got.
    *
-   * The till is allowed to go negative. A crown that cannot make payroll should
-   * discover that as a deficit, which `collectTaxes` then zeroes out. Refusing
-   * to pay instead would quietly stop an early realm's whole food economy the
-   * first winter it ran short.
+   * A wage used to be drawn from an abstract crown treasury that was allowed to
+   * go negative — a realm could always make payroll because the number simply
+   * went down. Gold is a physical good now, so a town pays out of the gold on
+   * its shelves and a town with none pays nothing. That is a harder world, and
+   * it is the honest one: a settlement with no gold and no mine has no coin to
+   * hand anybody, and the citizen still eats, because eating comes off the
+   * granary and not out of a purse.
    */
-  private payWageFromTreasury(kingdom: Kingdom | null | undefined, wage: number): number {
-    if (wage <= 0) return 0;
-    if (!kingdom) return wage;
-    kingdom.economy.treasury -= wage;
-    return wage;
+  private payWageFromStore(city: City | null | undefined, wage: number): number {
+    if (wage <= 0 || !city) return 0;
+    return city.stock.take('gold', wage);
   }
 
   /**
@@ -2241,7 +2238,6 @@ household.cityId = city.id;
 
         const load = e.carrying;
         const stored = dCity.stock.add(load.good, load.amount);
-        this.market.reportSupply(load.good, stored);
         // Hand-carried output is production too — it must show in the books or the
         // settlement's stock rises out of nowhere.
         dCity.ledger.recordProduced(load.good, stored);
@@ -2251,13 +2247,7 @@ household.cityId = city.id;
         //
         // The pay comes out of a real till at the realm's own price. Before, it
         // was minted from nothing at the *world* reference price — a settlement
-        // could pay any wage bill it liked, and the coin it invented was spent
-        // into the food market as pure inflation nobody had earned.
-        const dKingdom = dCity.kingdomId ? this.kingdoms.get(dCity.kingdomId) : null;
-        const localPrice = dKingdom
-          ? dKingdom.economy.market.price(load.good, this.market.price(load.good))
-          : this.market.price(load.good);
-        const wage = this.payWageFromTreasury(dKingdom, stored * localPrice * 0.35);
+        const wage = this.payWageFromStore(dCity, stored * GOODS[load.good].basePrice * 0.35);
         e.wealth += wage;
 
         e.carrying = null;

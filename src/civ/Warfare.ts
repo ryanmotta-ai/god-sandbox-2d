@@ -310,12 +310,12 @@ export class WarfareSystem {
       const employer = world.kingdoms.get(company.employerKingdomId);
 
       const expired = company.contractEndYear !== null && world.year >= company.contractEndYear;
-      const canAfford = employer && employer.economy.treasury >= company.annualFee;
+      const canAfford = employer && employer.gold >= company.annualFee;
 
       if (!employer || expired || !canAfford) {
         this.releaseMercenaryCompany(company.id, world, !canAfford ? 'inadimplência' : 'fim do contrato');
       } else {
-        employer.economy.treasury -= company.annualFee;
+        employer.takeGold(company.annualFee);
         employer.treasury.take('gold', company.annualFee);
       }
     }
@@ -365,9 +365,9 @@ export class WarfareSystem {
     const kingdom = world.kingdoms.get(kingdomId);
     if (!company || !kingdom || company.employerKingdomId) return false;
 
-    if (kingdom.economy.treasury < company.hiringCost) return false;
+    if (kingdom.gold < company.hiringCost) return false;
 
-    kingdom.economy.treasury -= company.hiringCost;
+    kingdom.takeGold(company.hiringCost);
     kingdom.treasury.take('gold', company.hiringCost);
     company.employerKingdomId = kingdomId;
     company.contractEndYear = world.year + Math.max(1, durationYears);
@@ -675,11 +675,11 @@ export class WarfareSystem {
       kingdom.militaryUpkeepGold = goldUpkeep;
       kingdom.militaryUpkeepFood = foodUpkeep;
 
-      const hasGold = kingdom.economy.treasury >= goldUpkeep;
+      const hasGold = kingdom.gold >= goldUpkeep;
       const hasFood = kingdom.treasury.get('food') >= foodUpkeep;
 
       if (hasGold) {
-        kingdom.economy.treasury -= goldUpkeep;
+        kingdom.takeGold(goldUpkeep);
         kingdom.treasury.take('gold', goldUpkeep);
       } else {
         for (const armyId of kingdom.armyIds) {
@@ -1658,7 +1658,7 @@ export class WarfareSystem {
       }
     }
 
-    const reparationRate = Math.round(loser.economy.treasury * 0.15 + 20);
+    const reparationRate = Math.round(loser.gold * 0.15 + 20);
     loser.warReparations = {
       creditorId: dominant.id,
       annualAmount: reparationRate,

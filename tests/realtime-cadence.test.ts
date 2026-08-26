@@ -62,7 +62,7 @@ sim.citySpatialHash.rebuild(sim.cities.values());
 // three months, not twelve — averaging over it would hide the real invariant.
 const charged = new Map<string, Map<string, { visits: number; total: number }>>();
 const proto = CivilizationEngine.prototype as any;
-for (const method of ['tickSettlement', 'collectTaxes']) {
+for (const method of ['tickSettlement', 'gatherCrownRevenue']) {
   const original = proto[method];
   proto[method] = function (subject: { id: string }, world: { seasonFraction?: number }, ...rest: any[]) {
     let byId = charged.get(method);
@@ -114,7 +114,7 @@ for (let i = 0; i < TICKS_PER_YEAR; i++) sim.tickAI(tileMap, particles);
 
 // ---- The crown is charged the same way ----
 {
-  const byId = charged.get('collectTaxes')!;
+  const byId = charged.get('gatherCrownRevenue')!;
   const rows = foundingRealms.map(id => byId.get(id)).filter((r): r is { visits: number; total: number } => !!r);
   assert.equal(rows.length, foundingRealms.length, 'every founding realm has to be visited');
   const perRealm = rows.reduce((t, r) => t + r.total, 0) / rows.length;
