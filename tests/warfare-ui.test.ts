@@ -1,3 +1,4 @@
+import { TECHNOLOGIES } from '../src/civ/TechTree';
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { City } from '../src/civ/City';
@@ -116,7 +117,7 @@ chronicle.clear();
 // 5. Equipment is read from entities; research alone does not invent adoption.
 {
   const f = world();
-  f.kingdoms.get('a')!.research.complete('gunpowder');
+  f.kingdoms.get('a')!.research.era = TECHNOLOGIES['gunpowder'].era;
   f.entities.push(soldier('a1', 'a', 10, 10, 'idle', 'Matchlock Musket'), soldier('a2', 'a', 11, 10, 'idle', 'Iron Broadsword'));
   const equipment = snapshot(f).forces[0].equipment;
   assert.equal(equipment.find(item => item.name === 'Matchlock Musket')?.count, 1);

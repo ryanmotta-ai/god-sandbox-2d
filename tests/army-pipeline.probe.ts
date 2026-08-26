@@ -71,7 +71,7 @@ kB.knownKingdoms.add(kA.id);
 
 // The whole point of the probe: the tech gate is already open on year 1.
 const GRANTED = ['stone_tools', 'fire_mastery', 'agriculture', 'mining', 'masonry', 'bronze_working'];
-for (const k of [kA, kB]) for (const tech of GRANTED) k.research.complete(tech);
+for (const k of [kA, kB]) for (const tech of GRANTED) k.research.era = TECHNOLOGIES[tech].era;
 
 // Enough founding stock that nothing stalls for want of thirty stone.
 for (const c of [cityA, cityB]) {

@@ -18,7 +18,7 @@ import { TERRAINS } from '../world/Biomes';
 import { UrbanDistrictPlanner } from '../civ/UrbanDistricts';
 import type { DiplomacyManager } from '../civ/Diplomacy';
 import type { ToastType } from '../ui/components/Toasts';
-import { TECHNOLOGIES } from '../civ/TechTree';
+import { TECH_ERAS } from '../civ/TechTree';
 
 export const ALL_POWERS: PowerDefinition[] = [
   // TERRENO & ALTIMETRIA
@@ -633,20 +633,13 @@ export class PowerExecutor {
         }
         if (kingdom) {
           sound.playMagic();
-          kingdom.research.progress += 1000;
-          if (kingdom.research.current) {
-            const techDef = TECHNOLOGIES[kingdom.research.current];
-            const techId = kingdom.research.current;
-            kingdom.research.complete(techId);
-            terraform?.toast?.(`💡 Iluminação Científica: Tecnologia [${techDef?.name ?? techId}] descoberta em ${kingdom.name}!`, 'info');
+          // The gift is an age, not a research point: the realm steps straight
+          // into the next one and everything that age allows opens up at once.
+          const reached = kingdom.research.forceAdvance();
+          if (reached) {
+            terraform?.toast?.(`💡 Iluminação Científica: ${kingdom.name} entrou na ${TECH_ERAS[reached].name}!`, 'info');
           } else {
-            const available = kingdom.research.availableTechs();
-            if (available.length > 0) {
-              kingdom.research.complete(available[0].id);
-              terraform?.toast?.(`💡 Iluminação Científica: [${available[0].name}] descoberta em ${kingdom.name}!`, 'info');
-            } else {
-              terraform?.toast?.(`💡 Iluminação Científica: +1.000 ciência concedida a ${kingdom.name}!`, 'info');
-            }
+            terraform?.toast?.(`💡 ${kingdom.name} já alcançou a última era.`, 'info');
           }
           for (let i = 0; i < 18; i++) {
             particles.spawnParticle(tx + rng.range(-2, 2), ty + rng.range(-2, 2), '#a855f7', 0, -0.7, 0.7);

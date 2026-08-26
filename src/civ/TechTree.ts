@@ -3,15 +3,19 @@ import { BuildingType } from './Building';
 import { GovernmentType } from './Government';
 
 /**
- * The knowledge a civilization accumulates.
+ * What each age of the world allows.
  *
- * Two interlocking tracks: `craft` is material technology, `politics` is how a
- * society organises itself. Political techs gate on material ones — you cannot
- * invent feudalism without agriculture, or communism without industry — so the
- * two trees advance together as a single web.
+ * This was a research tree — costs, prerequisites, exclusive branches, points
+ * banked per year — and it is now a table. Every entry says which era it belongs
+ * to and what that era unlocks: buildings, goods, governments, features, and the
+ * modifiers that make an iron-age realm stronger than a stone-age one. A realm
+ * knows everything its era carries and nothing beyond it.
+ *
+ * The entries kept their names and descriptions because they are what the
+ * chronicle says when an age turns over, and because "Agricultura unlocks the
+ * farm" reads better than a list of building ids.
  */
 
-export type TechTrack = 'craft' | 'politics';
 
 export type TechEra =
   | 'stone'
@@ -74,20 +78,6 @@ const ERA_COST_SCALE: Record<TechEra, number> = {
   industrial: 2.2,
   modern: 3.0
 };
-
-/**
- * The real research cost of a technology.
- *
- * `diffusion` is the discount, 0..1, earned from neighbours who already know it —
- * see `ResearchState.diffusionOf`. Knowledge that exists somewhere in the world is
- * cheaper to reach than knowledge nobody has: there are people to ask, artefacts
- * to copy and craftsmen to poach.
- */
-export function techCost(tech: TechDefinition, cityCount: number = 1, diffusion: number = 0): number {
-  const expansionFactor = 1 + Math.max(0, (cityCount - 1) * 0.04);
-  const discount = 1 - Math.max(0, Math.min(MAX_DIFFUSION_DISCOUNT, diffusion));
-  return Math.round(tech.cost * ERA_COST_SCALE[tech.era] * expansionFactor * discount);
-}
 
 /**
  * How much cheaper a technology gets per realm in contact that already has it.
@@ -167,15 +157,8 @@ export type TechFeature =
 export interface TechDefinition {
   id: string;
   name: string;
-  track: TechTrack;
   era: TechEra;
   icon: string;
-  /** Research points required. Scaled by era so progress slows realistically. */
-  cost: number;
-  /** All of these must be known first. */
-  requires: string[];
-  /** Only one of a mutually exclusive set may ever be taken. */
-  excludes?: string[];
   unlocks: TechUnlocks;
   description: string;
   /** Chronicle line written when a kingdom completes it. */
@@ -187,11 +170,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   stone_tools: {
     id: 'stone_tools',
     name: 'Ferramentas de Pedra',
-    track: 'craft',
     era: 'stone',
     icon: '🪓',
-    cost: 30,
-    requires: [],
     unlocks: { modifiers: { production: 1.15 }, buildings: ['lumber_camp'] },
     description: 'Sílex lascado. Tudo o mais na história se segue a partir disso.',
     discovery: 'aprendeu a moldar pedra em ferramentas'
@@ -199,11 +179,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   fire_mastery: {
     id: 'fire_mastery',
     name: 'Domínio do Fogo',
-    track: 'craft',
     era: 'stone',
     icon: '🔥',
-    cost: 40,
-    requires: ['stone_tools'],
     unlocks: { modifiers: { growth: 1.1, military: 1.1 } },
     description: 'Calor, comida cozida e uma arma que se espalha sozinha.',
     discovery: 'domou o fogo'
@@ -211,11 +188,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   agriculture: {
     id: 'agriculture',
     name: 'Agricultura',
-    track: 'craft',
     era: 'stone',
     icon: '🌾',
-    cost: 60,
-    requires: ['stone_tools'],
     unlocks: { buildings: ['farm', 'granary'], goods: ['cotton', 'spices'], modifiers: { growth: 1.35 } },
     description: 'Plantar em vez de forragear. As populações param de vagar e começam a contar.',
     discovery: 'começou a cultivar a terra'
@@ -223,11 +197,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   animal_husbandry: {
     id: 'animal_husbandry',
     name: 'Pecuária',
-    track: 'craft',
     era: 'stone',
     icon: '🐄',
-    cost: 70,
-    requires: ['agriculture'],
     unlocks: { buildings: ['pasture'], goods: ['horses', 'furs'], modifiers: { growth: 1.15, production: 1.1 } },
     description: 'Rebanhos que te seguem são melhores que rebanhos que você persegue.',
     discovery: 'domesticou o gado'
@@ -235,11 +206,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   sailing: {
     id: 'sailing',
     name: 'Navegação',
-    track: 'craft',
     era: 'stone',
     icon: '⛵',
-    cost: 40,
-    requires: ['stone_tools'],
     unlocks: { buildings: ['harbor'], features: ['maritime_trade', 'colonisation'], modifiers: { trade: 1.3 } },
     description: 'Canoas e ancoradouros de madeira. O mar deixa de ser um muro e se torna uma estrada.',
     discovery: 'aprendeu a navegar pelas águas costeiras'
@@ -249,11 +217,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   pottery: {
     id: 'pottery',
     name: 'Cerâmica e Tecelagem',
-    track: 'craft',
     era: 'bronze',
     icon: '🏺',
-    cost: 110,
-    requires: ['agriculture'],
     // Barter long predates coinage: this is what opens the first caravans.
     // Currency later makes that trade far more valuable, not merely possible.
     unlocks: {
@@ -268,11 +233,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   mining: {
     id: 'mining',
     name: 'Mineração',
-    track: 'craft',
     era: 'bronze',
     icon: '⛏️',
-    cost: 130,
-    requires: ['stone_tools'],
     unlocks: { buildings: ['mine', 'quarry'], goods: ['copper', 'tin', 'iron', 'coal', 'salt', 'gold', 'gems', 'saltpeter'], modifiers: { production: 1.2 } },
     description: 'Cavar abaixo da superfície pelo que a terra se recusa a dar livremente.',
     discovery: 'escavou os primeiros poços de mina'
@@ -280,11 +242,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   masonry: {
     id: 'masonry',
     name: 'Alvenaria',
-    track: 'craft',
     era: 'bronze',
     icon: '🧱',
-    cost: 150,
-    requires: ['mining'],
     unlocks: { buildings: ['wall'], modifiers: { military: 1.2, territory: 2 } },
     description: 'Pedra talhada. As cidades ganham muros, e os muros ganham significado.',
     discovery: 'ergueu suas primeiras muralhas de pedra'
@@ -292,11 +251,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   bronze_working: {
     id: 'bronze_working',
     name: 'Metalurgia do Bronze',
-    track: 'craft',
     era: 'bronze',
     icon: '⚒️',
-    cost: 180,
-    requires: ['mining', 'fire_mastery'],
     unlocks: { buildings: ['smithy', 'barracks'], goods: ['bronze', 'tools'], modifiers: { military: 1.25, production: 1.15 } },
     description: 'Metal em liga. As primeiras ferramentas que duram mais que as mãos que as fizeram.',
     discovery: 'fundiu o bronze'
@@ -304,11 +260,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   writing: {
     id: 'writing',
     name: 'Escrita',
-    track: 'craft',
     era: 'bronze',
     icon: '📜',
-    cost: 200,
-    requires: ['pottery'],
     unlocks: { buildings: ['library', 'temple'], modifiers: { research: 1.4 }, features: ['writing', 'diplomacy_pacts'] },
     description: 'A memória que sobrevive ao seu dono. Lei, dívida e história se tornam possíveis.',
     discovery: 'inventou a escrita'
@@ -318,11 +271,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   iron_working: {
     id: 'iron_working',
     name: 'Metalurgia do Ferro',
-    track: 'craft',
     era: 'iron',
     icon: '⚔️',
-    cost: 280,
-    requires: ['bronze_working'],
     unlocks: { modifiers: { military: 1.4, production: 1.2 } },
     description: 'Mais duro, mais barato e muito mais comum que o bronze. A guerra se democratiza.',
     discovery: 'forjou o ferro'
@@ -330,11 +280,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   mathematics: {
     id: 'mathematics',
     name: 'Matemática',
-    track: 'craft',
     era: 'iron',
     icon: '📐',
-    cost: 300,
-    requires: ['writing'],
     unlocks: { modifiers: { research: 1.25, production: 1.1 } },
     description: 'A contagem vira prova. Os edifícios ficam mais altos e os impostos ficam precisos.',
     discovery: 'formalizou a matemática'
@@ -342,11 +289,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   currency: {
     id: 'currency',
     name: 'Moeda e Câmbio',
-    track: 'politics',
     era: 'iron',
     icon: '🪙',
-    cost: 280,
-    requires: ['mathematics', 'mining'],
     unlocks: { buildings: ['market'], features: ['currency', 'trade_routes'], modifiers: { trade: 1.5 } },
     description: 'Moeda cunhada. A riqueza deixa de ser grãos no celeiro e se torna um número.',
     discovery: 'cunhou sua primeira moeda'
@@ -354,11 +298,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   roads: {
     id: 'roads',
     name: 'Construção de Estradas',
-    track: 'craft',
     era: 'iron',
     icon: '🛣️',
-    cost: 300,
-    requires: ['masonry'],
     unlocks: { modifiers: { trade: 1.25, territory: 3, military: 1.1 } },
     description: 'Rotas pavimentadas. Exércitos e caravanas se movem mais rápido — geralmente nessa ordem.',
     discovery: 'pavimentou as primeiras grandes estradas'
@@ -368,11 +309,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   engineering: {
     id: 'engineering',
     name: 'Engenharia',
-    track: 'craft',
     era: 'classical',
     icon: '🏗️',
-    cost: 480,
-    requires: ['mathematics', 'masonry'],
     unlocks: { buildings: ['aqueduct', 'port', 'naval_yard'], modifiers: { production: 1.3, growth: 1.2, territory: 3 } },
     description: 'Aquedutos, guindastes e máquinas de cerco. As cidades finalmente podem crescer além de seus poços.',
     discovery: 'dominou a engenharia'
@@ -380,11 +318,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   philosophy: {
     id: 'philosophy',
     name: 'Filosofia',
-    track: 'craft',
     era: 'classical',
     icon: '🧠',
-    cost: 500,
-    requires: ['writing'],
     unlocks: { buildings: ['academy'], modifiers: { research: 1.45 } },
     description: 'Perguntar por que o rei é rei. Historicamente, um passatempo perigoso.',
     discovery: 'deu origem aos seus primeiros filósofos'
@@ -392,11 +327,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   medicine: {
     id: 'medicine',
     name: 'Medicina',
-    track: 'craft',
     era: 'classical',
     icon: '⚕️',
-    cost: 520,
-    requires: ['philosophy'],
     unlocks: { modifiers: { growth: 1.35 } },
     description: 'Menos pessoas morrem de coisas que não precisavam matá-las.',
     discovery: 'desenvolveu a medicina formal'
@@ -404,11 +336,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   banking: {
     id: 'banking',
     name: 'Sistema Bancário',
-    track: 'craft',
     era: 'classical',
     icon: '🏦',
-    cost: 600,
-    requires: ['currency', 'mathematics'],
     unlocks: { buildings: ['bank'], features: ['banking'], modifiers: { trade: 1.5 } },
     description: 'Emprestar dinheiro que você não tem, contra riqueza que ainda não existe.',
     discovery: 'fundou seus primeiros bancos'
@@ -416,11 +345,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   metallurgy: {
     id: 'metallurgy',
     name: 'Metalurgia',
-    track: 'craft',
     era: 'classical',
     icon: '🔩',
-    cost: 620,
-    requires: ['iron_working', 'engineering'],
     unlocks: { goods: ['steel'], modifiers: { military: 1.35, production: 1.25 } },
     description: 'Aço, ligas e altos-fornos. O carvão deixa de ser uma curiosidade.',
     discovery: 'avançou a ciência dos metais'
@@ -430,11 +356,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   printing_press: {
     id: 'printing_press',
     name: 'Imprensa',
-    track: 'craft',
     era: 'industrial',
     icon: '🖨️',
-    cost: 850,
-    requires: ['philosophy', 'metallurgy'],
     unlocks: { modifiers: { research: 1.6, growth: 1.1 } },
     description: 'As ideias se reproduzem mais rápido do que as pessoas que as censuram.',
     discovery: 'construiu a imprensa'
@@ -442,11 +365,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   gunpowder: {
     id: 'gunpowder',
     name: 'Pólvora',
-    track: 'craft',
     era: 'industrial',
     icon: '💥',
-    cost: 900,
-    requires: ['metallurgy'],
     unlocks: { goods: ['gunpowder'], features: ['conscription'], modifiers: { military: 1.7 } },
     description: 'Muralhas deixam de ser a resposta. Cavaleiros também.',
     discovery: 'transformou a pólvora em arma'
@@ -454,11 +374,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   steam_power: {
     id: 'steam_power',
     name: 'Energia a Vapor',
-    track: 'craft',
     era: 'industrial',
     icon: '🚂',
-    cost: 1100,
-    requires: ['engineering', 'metallurgy'],
     unlocks: { buildings: ['train_station'], features: ['railways'], modifiers: { production: 1.5, trade: 1.3 } },
     description: 'O trabalho deixa de ser limitado por quantos braços você tem.',
     discovery: 'dominou o vapor'
@@ -466,11 +383,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   industrialization: {
     id: 'industrialization',
     name: 'Industrialização',
-    track: 'craft',
     era: 'industrial',
     icon: '🏭',
-    cost: 1400,
-    requires: ['steam_power', 'banking'],
     unlocks: { buildings: ['factory', 'oil_well', 'refinery'], goods: ['oil', 'fuel', 'machinery'], features: ['mass_production'], modifiers: { production: 1.8, growth: 1.2 } },
     description: 'Produção em massa. Riqueza enorme, desigualdade enorme, e um novo tipo de política.',
     discovery: 'entrou na era industrial'
@@ -479,11 +393,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   powered_flight: {
     id: 'powered_flight',
     name: 'Voo Motorizado',
-    track: 'craft',
     era: 'industrial',
     icon: '🛩️',
-    cost: 1600,
-    requires: ['industrialization'],
     unlocks: { buildings: ['airport'], modifiers: { research: 1.1 } },
     description: 'Um campo de pouso e uma máquina frágil que sai do chão. Pouca carga e pouco alcance — mas o terreno deixa de opinar.',
     discovery: 'levantou voo pela primeira vez'
@@ -493,11 +404,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   electricity: {
     id: 'electricity',
     name: 'Eletricidade',
-    track: 'craft',
     era: 'modern',
     icon: '⚡',
-    cost: 1800,
-    requires: ['industrialization'],
     unlocks: { goods: ['uranium'], modifiers: { production: 1.4, research: 1.4, growth: 1.15 } },
     description: 'Luz, motores e comunicação instantânea a qualquer distância.',
     discovery: 'eletrificou suas cidades'
@@ -505,11 +413,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   aviation: {
     id: 'aviation',
     name: 'Aviation',
-    track: 'craft',
     era: 'modern',
     icon: '✈️',
-    cost: 2200,
-    requires: ['electricity', 'powered_flight'],
     unlocks: { modifiers: { production: 1.15, research: 1.2 } },
     description: 'Aviões de linha: muito mais carga, muito mais alcance. Carga e passageiros passam a ignorar o terreno de verdade.',
     discovery: 'abriu suas linhas aéreas'
@@ -518,11 +423,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   jet_age: {
     id: 'jet_age',
     name: 'Era do Jato',
-    track: 'craft',
     era: 'modern',
     icon: '✈️',
-    cost: 2800,
-    requires: ['aviation'],
     unlocks: { modifiers: { production: 1.2, research: 1.25, growth: 1.1 } },
     description: 'A turbina. O dobro da velocidade do avião a hélice e nenhuma distância grande o bastante para importar.',
     discovery: 'entrou na era do jato'
@@ -530,11 +432,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   mass_media: {
     id: 'mass_media',
     name: 'Mídia de Massa',
-    track: 'craft',
     era: 'modern',
     icon: '📡',
-    cost: 2100,
-    requires: ['electricity', 'printing_press'],
     unlocks: { modifiers: { research: 1.3, trade: 1.2 } },
     description: 'Quem controla a transmissão controla o que as pessoas acreditam ter acontecido.',
     discovery: 'construiu um aparato de mídia de massa'
@@ -542,11 +441,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   radar_systems: {
     id: 'radar_systems',
     name: 'Sistemas de Radar',
-    track: 'craft',
     era: 'modern',
     icon: '📡',
-    cost: 2400,
-    requires: ['electricity', 'aviation'],
     unlocks: { buildings: ['radar_station'], features: ['air_defense_grid'] },
     description: 'Varredura e rastreamento por ondas de rádio para detecção de aeronaves e projéteis antes do impacto visual.',
     discovery: 'instalou seus primeiros radares de alerta antecipado'
@@ -554,11 +450,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   rocketry: {
     id: 'rocketry',
     name: 'Foguetes & Balística',
-    track: 'craft',
     era: 'modern',
     icon: '🚀',
-    cost: 3000,
-    requires: ['gunpowder', 'jet_age'],
     unlocks: { buildings: ['missile_silo', 'sam_site'], goods: ['missiles'] },
     description: 'Propulsão a combustível sólido e líquido para projéteis guiados de longo alcance.',
     discovery: 'dominou a tecnologia de foguetes e balística'
@@ -566,11 +459,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   nuclear_fission: {
     id: 'nuclear_fission',
     name: 'Fissão Nuclear',
-    track: 'craft',
     era: 'modern',
     icon: '☢️',
-    cost: 4200,
-    requires: ['electricity', 'rocketry'],
     unlocks: { buildings: ['enrichment_facility'], features: ['nuclear_weapons'], modifiers: { production: 1.5, research: 1.6 } },
     description: 'A divisão do átomo: energia massiva e o poder de dissuasão estratégica absoluta.',
     discovery: 'desvendou os segredos da fissão nuclear'
@@ -578,11 +468,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   drone_avionics: {
     id: 'drone_avionics',
     name: 'Aviônica & Drones',
-    track: 'craft',
     era: 'modern',
     icon: '🛸',
-    cost: 3400,
-    requires: ['mass_media', 'jet_age'],
     unlocks: { buildings: ['drone_command', 'bomb_shelter'], features: ['drone_swarms'] },
     description: 'Veículos aéreos pilotados remotamente com sistemas de navegação autônoma e munições espreitadoras.',
     discovery: 'implementou frotas de drones autônomos'
@@ -592,11 +479,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   tribalism: {
     id: 'tribalism',
     name: 'Tribalismo',
-    track: 'politics',
     era: 'stone',
     icon: '🪶',
-    cost: 0,
-    requires: [],
     unlocks: { governments: ['tribe'] },
     description: 'Parentesco e anciãos. A autoridade alcança exatamente até onde todo mundo pode gritar.',
     discovery: 'organizou-se em tribos'
@@ -604,11 +488,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   chiefdom: {
     id: 'chiefdom',
     name: 'Chefia Tribal',
-    track: 'politics',
     era: 'stone',
     icon: '🗿',
-    cost: 80,
-    requires: ['tribalism', 'agriculture'],
     unlocks: { governments: ['chiefdom'], modifiers: { growth: 1.1, territory: 1 } },
     description: 'Uma família reivindica o excedente, e os outros permitem.',
     discovery: 'coroou seu primeiro chefe'
@@ -616,11 +497,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   feudalism: {
     id: 'feudalism',
     name: 'Feudalismo',
-    track: 'politics',
     era: 'bronze',
     icon: '🛡️',
-    cost: 260,
-    requires: ['chiefdom', 'masonry', 'agriculture'],
     unlocks: {
       governments: ['feudal_kingdom'],
       buildings: ['keep'],
@@ -632,11 +510,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   monarchy: {
     id: 'monarchy',
     name: 'Monarquia',
-    track: 'politics',
     era: 'iron',
     icon: '👑',
-    cost: 460,
-    requires: ['feudalism', 'writing'],
     unlocks: {
       governments: ['monarchy'],
       buildings: ['palace'],
@@ -648,11 +523,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   imperialism: {
     id: 'imperialism',
     name: 'Imperialismo',
-    track: 'politics',
     era: 'classical',
     icon: '🦅',
-    cost: 780,
-    requires: ['monarchy', 'roads'],
     unlocks: {
       governments: ['empire'],
       modifiers: { military: 1.3, territory: 6, trade: 1.2 }
@@ -663,11 +535,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   constitutionalism: {
     id: 'constitutionalism',
     name: 'Constitucionalismo',
-    track: 'politics',
     era: 'industrial',
     icon: '📖',
-    cost: 1200,
-    requires: ['monarchy', 'printing_press', 'philosophy'],
     unlocks: {
       governments: ['constitutional_monarchy', 'republic'],
       modifiers: { research: 1.2, growth: 1.15, trade: 1.15 }
@@ -678,12 +547,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   capitalism: {
     id: 'capitalism',
     name: 'Capitalismo',
-    track: 'politics',
     era: 'industrial',
     icon: '📈',
-    cost: 1700,
-    requires: ['constitutionalism', 'industrialization', 'banking'],
-    excludes: ['communism'],
     unlocks: {
       governments: ['capitalist_state'],
       buildings: ['stock_exchange'],
@@ -696,12 +561,8 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
   communism: {
     id: 'communism',
     name: 'Comunismo',
-    track: 'politics',
     era: 'industrial',
     icon: '☭',
-    cost: 1700,
-    requires: ['constitutionalism', 'industrialization'],
-    excludes: ['capitalism'],
     unlocks: {
       governments: ['communist_state'],
       buildings: ['collective'],
@@ -714,20 +575,27 @@ export const TECHNOLOGIES: Record<string, TechDefinition> = {
 };
 
 export const ALL_TECH_IDS: string[] = Object.keys(TECHNOLOGIES);
-export const CRAFT_TECHS: TechDefinition[] = ALL_TECH_IDS.map(id => TECHNOLOGIES[id]).filter(t => t.track === 'craft');
-export const POLITICAL_TECHS: TechDefinition[] = ALL_TECH_IDS.map(id => TECHNOLOGIES[id]).filter(t => t.track === 'politics');
 
-/** Techs grouped by era, in progression order. Used by the tech tree screen. */
-export function techsByEra(track: TechTrack): { era: TechEraInfo; techs: TechDefinition[] }[] {
-  const eras = Object.values(TECH_ERAS).sort((a, b) => a.order - b.order);
-  return eras
-    .map(era => ({
-      era,
-      techs: ALL_TECH_IDS.map(id => TECHNOLOGIES[id]).filter(t => t.track === track && t.era === era.id)
-    }))
-    .filter(group => group.techs.length > 0);
-}
+/** The eras in the order a realm passes through them. */
+export const ERA_ORDER: TechEra[] = (Object.keys(TECH_ERAS) as TechEra[])
+  .sort((a, b) => TECH_ERAS[a].order - TECH_ERAS[b].order);
 
+/**
+ * What a realm has to be before it reaches an era.
+ *
+ * Both numbers are things a player can count on the map — how many people the
+ * realm feeds and how much it has built — so an age turns over because the world
+ * visibly changed, not because a bar filled up. These are the pacing dials: turn
+ * them down for a fast game, up for a long one.
+ */
+const ERA_GATES: Record<TechEra, { population: number; buildings: number }> = {
+  stone: { population: 0, buildings: 0 },
+  bronze: { population: 40, buildings: 12 },
+  iron: { population: 110, buildings: 30 },
+  classical: { population: 240, buildings: 60 },
+  industrial: { population: 480, buildings: 110 },
+  modern: { population: 900, buildings: 190 }
+};
 /**
  * The research state of one kingdom.
  * Kingdoms accumulate points every year and spend them on whatever they can reach.
@@ -759,28 +627,6 @@ const TECH_STRATEGIC_DEMAND: Record<string, Partial<Record<GoodId, number>>> = {
   drone_avionics: { fuel: 1.2, steel: 1.0, machinery: 1.5 }
 };
 
-/**
- * How badly this realm wants a good, purely because of what it knows.
- * Zero means the material is still just a rock to them.
- */
-/** The raw-material demand one technology creates, for the tech screen. */
-export function demandCreatedBy(techId: string): { good: GoodId; weight: number }[] {
-  const demand = TECH_STRATEGIC_DEMAND[techId];
-  if (!demand) return [];
-  return Object.entries(demand)
-    .map(([good, weight]) => ({ good: good as GoodId, weight: weight as number }))
-    .sort((a, b) => b.weight - a.weight);
-}
-
-export function strategicWeight(research: ResearchState, good: GoodId): number {
-  let weight = 0;
-  for (const techId of research.known) {
-    const demand = TECH_STRATEGIC_DEMAND[techId];
-    if (demand && demand[good]) weight += demand[good]!;
-  }
-  return weight;
-}
-
 /** Every good this realm's technology gives it a reason to want, strongest first. */
 export function strategicGoodsFor(research: ResearchState): { good: GoodId; weight: number }[] {
   const totals = new Map<GoodId, number>();
@@ -794,14 +640,6 @@ export function strategicGoodsFor(research: ResearchState): { good: GoodId; weig
   return [...totals.entries()]
     .map(([good, weight]) => ({ good, weight }))
     .sort((a, b) => b.weight - a.weight);
-}
-
-/** Whether any realm in the world has a technological reason to want this good yet. */
-export function isStrategicNow(researchStates: Iterable<ResearchState>, good: GoodId): boolean {
-  for (const research of researchStates) {
-    if (strategicWeight(research, good) > 0) return true;
-  }
-  return false;
 }
 
 // ============================ TECHNOLOGY ≠ CAPACITY ============================
@@ -883,57 +721,76 @@ export function operatingEra(research: ResearchState, capabilities: TechCapabili
   return best;
 }
 
+/**
+ * How advanced a realm is, and what that lets it do.
+ *
+ * This used to be a research tree: fifty-eight technologies, each with a cost,
+ * prerequisites, mutually exclusive branches, research points produced per year
+ * by libraries, a diffusion discount from whatever the neighbours knew, and a
+ * choice of what to pursue next. All of it was managed through a screen of
+ * tables, and none of it was visible on the map.
+ *
+ * What was visible is the era: stone gives way to bronze gives way to iron, and
+ * the buildings, units and sprites change with it. So the era is the whole model
+ * now. It advances on its own as a realm grows, and everything a realm can do is
+ * read off it — the technology table survives purely as the data that says which
+ * era unlocks what, which is what it was always really carrying.
+ */
 export class ResearchState {
-  public known: Set<string> = new Set(['tribalism']);
-  /** Tech currently being researched, and how many points are banked toward it. */
-  public current: string | null = null;
-  public progress: number = 0;
-  /** Research points produced per year, recomputed by the civilization engine. */
-  public output: number = 0;
-  /** Techs permanently barred by an exclusive choice already made. */
-  public forbidden: Set<string> = new Set();
+  /** How far this realm has come. Everything it can do is derived from this. */
+  public era: TechEra = 'stone';
 
   /**
-   * Diffusion discount per technology, 0..1, refreshed once a year by the
-   * civilization engine from the realms this one has actually met.
+   * Every technology the era carries, cached.
    *
-   * Derived, so it is not serialised — the first yearly tick after a load fills it
-   * in again. Held here rather than recomputed at each call site so the interface
-   * shows the player the same cost the simulation is charging.
+   * Derived, not stored: an era knows what an era knows. Rebuilt when the era
+   * turns over, because the rest of the simulation asks this question constantly
+   * and rebuilding a set of sixty ids per call is a waste.
    */
-  public diffusion: Map<string, number> = new Map();
+  private cachedKnown: Set<string> | null = null;
+  private cachedFor: TechEra | null = null;
+
+  public get known(): Set<string> {
+    if (this.cachedKnown && this.cachedFor === this.era) return this.cachedKnown;
+    const reached = TECH_ERAS[this.era].order;
+    const known = new Set<string>();
+    for (const id of ALL_TECH_IDS) {
+      if (TECH_ERAS[TECHNOLOGIES[id].era].order <= reached) known.add(id);
+    }
+    this.cachedKnown = known;
+    this.cachedFor = this.era;
+    return known;
+  }
+
+  /**
+   * Moves the realm on when it has outgrown its era.
+   *
+   * A realm advances by being a bigger, more built place than it was — which is
+   * a thing you can see on the map, unlike a research point. Returns the new era
+   * when it changed, so the caller can announce it.
+   */
+  public advance(population: number, buildings: number): TechEra | null {
+    const next = ERA_ORDER[TECH_ERAS[this.era].order + 1];
+    if (!next) return null;
+    const gate = ERA_GATES[next];
+    if (population < gate.population || buildings < gate.buildings) return null;
+    this.era = next;
+    return next;
+  }
+
+  /**
+   * Pushes the realm into the next age regardless of whether it has grown into
+   * one. For the scholar whose life's work is the breakthrough itself.
+   */
+  public forceAdvance(): TechEra | null {
+    const next = ERA_ORDER[TECH_ERAS[this.era].order + 1];
+    if (!next) return null;
+    this.era = next;
+    return next;
+  }
 
   public knows(techId: string): boolean {
     return this.known.has(techId);
-  }
-
-  public diffusionOf(techId: string): number {
-    return this.diffusion.get(techId) ?? 0;
-  }
-
-  /** Cost of a technology to *this* realm, contact and all. */
-  public costOf(tech: TechDefinition, cityCount: number): number {
-    return techCost(tech, cityCount, this.diffusionOf(tech.id));
-  }
-
-  /**
-   * Recomputes the discounts from the realms this one knows about.
-   *
-   * `peers` is every realm in contact; only their known sets are read, so a realm
-   * learns nothing from a civilisation it has never met — which is the whole point.
-   */
-  public refreshDiffusion(peers: Iterable<ResearchState>): void {
-    const counts = new Map<string, number>();
-    for (const peer of peers) {
-      for (const id of peer.known) {
-        if (this.known.has(id)) continue;
-        counts.set(id, (counts.get(id) ?? 0) + 1);
-      }
-    }
-    this.diffusion.clear();
-    for (const [id, peersKnowing] of counts) {
-      this.diffusion.set(id, Math.min(MAX_DIFFUSION_DISCOUNT, peersKnowing * DIFFUSION_PER_PEER));
-    }
   }
 
   public knowsFeature(feature: TechFeature): boolean {
@@ -941,18 +798,6 @@ export class ResearchState {
       if (TECHNOLOGIES[id]?.unlocks.features?.includes(feature)) return true;
     }
     return false;
-  }
-
-  /** A tech is available when every prerequisite is known and nothing forbids it. */
-  public isAvailable(techId: string): boolean {
-    if (this.known.has(techId) || this.forbidden.has(techId)) return false;
-    const tech = TECHNOLOGIES[techId];
-    if (!tech) return false;
-    return tech.requires.every(req => this.known.has(req));
-  }
-
-  public availableTechs(): TechDefinition[] {
-    return ALL_TECH_IDS.filter(id => this.isAvailable(id)).map(id => TECHNOLOGIES[id]);
   }
 
   /** Every modifier from every known tech, multiplied together. */
@@ -1001,65 +846,27 @@ export class ResearchState {
 
   /** Highest era among known craft techs — the kingdom's overall level of development. */
   public currentEra(): TechEra {
-    let best: TechEra = 'stone';
-    let bestOrder = -1;
-    for (const id of this.known) {
-      const tech = TECHNOLOGIES[id];
-      if (!tech) continue;
-      const order = TECH_ERAS[tech.era].order;
-      if (order > bestOrder) { bestOrder = order; best = tech.era; }
-    }
-    return best;
-  }
-
-  /** 0..1 across the entire tree, for progress bars. */
-  public overallProgress(): number {
-    return this.known.size / ALL_TECH_IDS.length;
-  }
-
-  /** Marks a tech known and applies its exclusivity. */
-  public complete(techId: string): void {
-    this.known.add(techId);
-    const tech = TECHNOLOGIES[techId];
-    for (const excluded of tech?.excludes ?? []) this.forbidden.add(excluded);
-    if (this.current === techId) {
-      this.current = null;
-      this.progress = 0;
-    }
-  }
-
-  /** Completes all technologies belonging to a specific era. */
-  public completeEra(era: TechEra): void {
-    for (const tech of Object.values(TECHNOLOGIES)) {
-      if (tech.era === era && !this.forbidden.has(tech.id)) {
-        this.complete(tech.id);
-      }
-    }
-  }
-
-  /** Completes every non-forbidden technology in the entire tree. */
-  public completeAll(): void {
-    for (const tech of Object.values(TECHNOLOGIES)) {
-      if (!this.forbidden.has(tech.id)) {
-        this.complete(tech.id);
-      }
-    }
+    return this.era;
   }
 
   public serialize(): any {
-    return {
-      known: Array.from(this.known),
-      current: this.current,
-      progress: this.progress,
-      forbidden: Array.from(this.forbidden)
-    };
+    return { era: this.era };
   }
 
   public deserialize(data: any): void {
     if (!data) return;
-    this.known = new Set(data.known ?? ['tribalism']);
-    this.current = data.current ?? null;
-    this.progress = data.progress ?? 0;
-    this.forbidden = new Set(data.forbidden ?? []);
+    if (data.era && TECH_ERAS[data.era as TechEra]) {
+      this.era = data.era as TechEra;
+      return;
+    }
+    // A save from the tree era carries a list of known technologies instead.
+    // The era it had reached is the furthest era anything on that list belongs
+    // to, which is exactly what `currentEra` used to compute.
+    let best: TechEra = 'stone';
+    for (const id of (data.known ?? []) as string[]) {
+      const tech = TECHNOLOGIES[id];
+      if (tech && TECH_ERAS[tech.era].order > TECH_ERAS[best].order) best = tech.era;
+    }
+    this.era = best;
   }
 }

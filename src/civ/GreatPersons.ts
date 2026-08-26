@@ -6,6 +6,7 @@ import { chronicle } from './Chronicle';
 import { events } from '../core/EventBus';
 import { rng, nextId } from '../core/Random';
 import { LEGENDARY_ITEMS } from '../entities/Equipment';
+import { TECH_ERAS } from './TechTree';
 import { TileMap } from '../world/TileMap';
 import { TERRAINS, TerrainType } from '../world/Biomes';
 import { UrbanPlanner } from './UrbanPlanner';
@@ -184,34 +185,36 @@ export class GreatPersonManager {
 
     switch (type) {
       case 'scholar': {
-        // Scientific Breakthrough: Grants +400 Research Points!
-        const techKeys = kingdom.research.availableTechs();
-        if (techKeys.length > 0) {
-          const tech = rng.pick(techKeys);
-          kingdom.research.complete(tech.id);
-          const opus = `O Códice de ${tech.name}`;
+        // A scholar's life's work is the age itself: the realm steps into the
+        // next one early, without having grown into it. This used to complete
+        // one technology out of a tree; the tree is gone, and an era is the
+        // bigger and more visible version of the same gift.
+        const reached = kingdom.research.forceAdvance();
+        if (reached) {
+          const era = TECH_ERAS[reached];
+          const opus = `O Códice da ${era.name}`;
           chronicle.log(
             year,
             'great_person',
-            `${e.title} escreveu "${opus}", completando a descoberta de ${tech.name} para ${kingdom.name}.`,
+            `${e.title} escreveu "${opus}", levando ${kingdom.name} para a ${era.name}.`,
             {
               title: opus,
               importance: 'legendary',
               scope: 'person',
               refs: [
                 { kind: 'person', id: e.id, name: e.title || e.name },
-                { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
-                { kind: 'tech', id: tech.id, name: tech.name }
+                { kind: 'kingdom', id: kingdom.id, name: kingdom.name }
               ],
-              tags: ['magnum opus', 'scholar', 'technology'],
+              tags: ['magnum opus', 'scholar', 'era'],
               causes: [`A erudição de ${e.title} produziu um grande avanço.`],
-              consequences: [`${kingdom.name} concluiu ${tech.name}.`],
+              consequences: [`${kingdom.name} entrou na ${era.name}.`],
               threadId: `person:${e.id}`,
               threadTitle: `Vida e Legado de ${e.title}`
             }
           );
         } else {
-          kingdom.treasury.add('gold', 100);
+          // Already at the last age: the work is worth gold instead.
+          kingdom.addGold(100);
         }
         break;
       }

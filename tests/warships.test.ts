@@ -14,7 +14,7 @@ import {
   WARSHIPS, ALL_WARSHIPS, fleetStats, availableWarships, bestAvailable,
   assembleFleet, flagshipOf, describeFleet, type FleetComposition
 } from '../src/civ/Warships';
-import { TECHNOLOGIES } from '../src/civ/TechTree';
+import { TECHNOLOGIES, ERA_ORDER } from '../src/civ/TechTree';
 import { BUILDINGS } from '../src/civ/Building';
 import { Kingdom } from '../src/civ/Kingdom';
 import { City } from '../src/civ/City';
@@ -60,7 +60,8 @@ import { rng } from '../src/core/Random';
   assert.ok(!noYard.some(s => s.id === 'submarine'));
 
   const modern = new Kingdom('k2', 'Moderna', SpeciesType.HUMAN, '#fff', 'c', 1);
-  for (const t of Object.keys(TECHNOLOGIES)) modern.research.complete(t);
+  // The last age carries everything.
+  for (let i = 0; i < ERA_ORDER.length; i++) modern.research.forceAdvance();
 
   const modernNoYard = availableWarships(modern, false);
   const modernYard = availableWarships(modern, true);
@@ -147,7 +148,7 @@ import { rng } from '../src/core/Random';
   const city = new City('c', 'Arsenal', SpeciesType.HUMAN, 10, 10, 'F', 1);
 
   // Sail era: no yard, only what a village boatwright manages.
-  kingdom.research.complete('sailing');
+  kingdom.research.era = TECHNOLOGIES['sailing'].era;
   city.stock.add('wood', 500);
   const sailFleet = assembleFleet(kingdom, city, false, 20);
   const sailStats = fleetStats(sailFleet);
@@ -160,7 +161,8 @@ import { rng } from '../src/core/Random';
 
   // Modern era with a yard and a full warehouse.
   const navy = new Kingdom('k4', 'Armada', SpeciesType.HUMAN, '#ef4444', 'c2', 1);
-  for (const t of Object.keys(TECHNOLOGIES)) navy.research.complete(t);
+  // The last age carries everything.
+  for (let i = 0; i < ERA_ORDER.length; i++) navy.research.forceAdvance();
   const base = new City('c2', 'Estaleiro', SpeciesType.HUMAN, 10, 10, 'F', 1);
   for (const g of ['steel', 'fuel', 'gunpowder', 'machinery', 'copper', 'rubber', 'wood', 'iron', 'tools', 'cloth', 'coal', 'bronze'] as const) {
     base.stock.add(g, 4000);

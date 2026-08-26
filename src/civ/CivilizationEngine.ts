@@ -5,7 +5,7 @@ import {
   GoodId, GOODS, ALL_GOODS, RAW_GOODS, CRAFTED_GOODS, STRATEGIC_GOODS,
   productionRecipesFor
 } from './Goods';
-import { TECHNOLOGIES, TechDefinition, type ResearchState, techCost, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
+import { TECH_ERAS, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
 import { GOVERNMENTS, chooseGovernment, isRevolution, GovernmentType } from './Government';
 
 import { DiplomacyManager, type PeaceSettlement } from './Diplomacy';
@@ -97,6 +97,14 @@ const CITY_GOLD_RESERVE = 40;
  * famine and migration systems were written for.
  */
 const SPOILAGE_PER_YEAR = 0.35;
+
+/**
+ * Gold a coin-handling building actually mints, per point of its fiscal rating.
+ *
+ * The dial between a world where a crown can field mercenaries and one where
+ * gold only ever comes out of a hillside. Turn it down to make gold precious.
+ */
+const FISCAL_GOLD_YIELD = 0.6;
 /** How far from a building the street plan is worth paving. */
 const STREET_SERVICE_REACH = 2;
 /**
@@ -308,7 +316,7 @@ export class CivilizationEngine {
       this.distributeStaples(kingdom, scoped);
       this.tickFaith(kingdom, scoped);
       this.gatherCrownRevenue(kingdom, scoped);
-      this.tickResearch(kingdom, scoped);
+      this.advanceEra(kingdom, world);
       this.tickEconomy(kingdom, scoped);
       this.tickCulture(kingdom, scoped);
       this.tickSociety(kingdom, scoped);
@@ -2105,9 +2113,23 @@ export class CivilizationEngine {
         if (delivered < hauled) city.stock.add('gold', hauled - delivered);
       }
 
+      // A market, a harbour, a bank, a palace: buildings whose business is coin.
+      // `fiscal` used to be credited to the crown as an abstract tax receipt.
+      // It mints gold onto the settlement's own shelves instead, which is the
+      // only way gold can exist in a world where gold is a good — and it is what
+      // keeps a crown able to hire a mercenary company at all, since the only
+      // other source is a vein in the ground.
+      let minted = 0;
       for (const building of city.buildings.values()) {
         const fiscal = building.definition.fiscal;
-        if (fiscal) output += fiscal * building.outputMultiplier();
+        if (!fiscal) continue;
+        const made = fiscal * building.outputMultiplier();
+        output += made;
+        minted += made;
+      }
+      if (minted > 0) {
+        const stored = city.stock.add('gold', minted * fraction * FISCAL_GOLD_YIELD);
+        if (stored > 0) city.ledger.recordProduced('gold', stored);
       }
     }
 
@@ -2133,236 +2155,6 @@ export class CivilizationEngine {
   // RESEARCH
   // ============================================================
 
-  private tickResearch(kingdom: Kingdom, world: CivWorld): void {
-    /**
-     * What the neighbours already know makes it cheaper to learn.
-     *
-     * Read from the realms this one has actually met, so a civilisation cut off
-     * behind an ocean pays the full price and a crossroads realm pays a fraction.
-     * Refreshed here, once a year, immediately before the year's research is
-     * spent — so a technology that spread across the world last year is cheaper
-     * this year, and the interface charges what the simulation charges.
-     */
-    const peers: ResearchState[] = [];
-    for (const otherId of kingdom.knownKingdoms) {
-      const other = world.kingdoms.get(otherId);
-      if (other && other.id !== kingdom.id) peers.push(other.research);
-    }
-    kingdom.research.refreshDiffusion(peers);
-
-    const fraction = world.seasonFraction ?? 0.25;
-    let output = 0;
-    for (const cityId of kingdom.cityIds) {
-      output += (world.cities.get(cityId)?.researchOutput ?? 0) * fraction;
-    }
-    // The Great Library's advertised +50% national research, which until now
-    // existed only in its description.
-    output *= kingdom.wonderEffects(world.cities).research;
-    kingdom.research.output = output;
-    if (output <= 0) return;
-
-    // Pick something to work on if idle.
-    if (!kingdom.research.current) {
-      const choice = this.chooseTech(kingdom, world);
-      if (!choice) return;
-      kingdom.research.current = choice.id;
-      kingdom.research.progress = 0;
-    }
-
-    const tech = TECHNOLOGIES[kingdom.research.current];
-    if (!tech) {
-      kingdom.research.current = null;
-      return;
-    }
-
-    kingdom.research.progress += output;
-    if (kingdom.research.progress < kingdom.research.costOf(tech, kingdom.cityIds.size)) return;
-
-    // Discovery.
-    kingdom.research.complete(tech.id);
-    events.emit('techDiscovered', { kingdom, tech, year: world.year });
-    chronicle.log(
-      world.year,
-      tech.track === 'politics' ? 'kingdom' : 'tech',
-      `${kingdom.name} ${tech.discovery}.`,
-      {
-        title: `Discovery: ${tech.name}`,
-        importance: 'major',
-        scope: 'kingdom',
-        refs: [
-          { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
-          { kind: 'tech', id: tech.id, name: tech.name }
-        ],
-        tags: ['technology', tech.track, kingdom.research.currentEra()],
-        consequences: [`${tech.name} entered the known body of knowledge of ${kingdom.name}.`],
-        data: { researchOutput: Number(output.toFixed(2)), track: tech.track }
-      }
-    );
-
-  }
-
-  /**
-   * Which technology a realm pursues next.
-   * Cheap techs are preferred, but pressure — war, hunger, poverty — reweights
-   * everything toward whatever would relieve it.
-   */
-  private chooseTech(kingdom: Kingdom, world: CivWorld): TechDefinition | null {
-    const available = kingdom.research.availableTechs();
-    if (available.length === 0) return null;
-
-    const atWar = world.diplomacy.getWarsFor(kingdom.id).length > 0;
-    const poor = kingdom.economy.outputPerCapita < 8;
-    const hungry = [...kingdom.cityIds].some(id => (world.cities.get(id)?.famineYears ?? 0) > 0);
-    const warlike = kingdom.culture.militarism > 0.6;
-
-    /**
-     * How much a realm wants to arm, and it is not only war that makes it want to.
-     *
-     * `atWar` used to be the sole gate on every military weighting below, which
-     * meant a realm at peace assigned a military technology no value whatsoever.
-     * That is the wrong shape for this tree: the barracks — the only building that
-     * produces a soldier — sits behind bronze working, and research takes decades,
-     * so a realm that may only value arms once the fighting starts is a realm that
-     * begins arming forty years after it needed to. A hostile border and a martial
-     * culture are exactly the two things that make a people prepare in advance,
-     * and they are both already measured. War still counts for more than either.
-     */
-    const martial = atWar
-      ? 1
-      : Math.min(0.8, kingdom.externalThreat * 0.6 + kingdom.culture.militarism * 0.5);
-
-    /**
-     * A realm that cannot arm anyone at all.
-     *
-     * This is a categorical gap, not a preference — the same kind as having burned
-     * through the founding stone and holding no quarry, and it gets the same kind
-     * of nudge: enough to unblock, scaled by how much the realm has to fear.
-     */
-    const defenceless = !kingdom.research.unlockedBuildings().has('barracks');
-
-    // A realm that has burned through its founding stone deposit needs mining to
-    // unlock the quarry — without it, half the build tree is permanently barred
-    // and settlements fill up on wood-only houses. Treat stone scarcity like
-    // hunger or war: an economic emergency worth reweighting techs toward.
-    let stoneHeld = 0;
-    for (const id of kingdom.cityIds) {
-      const c = world.cities.get(id);
-      if (!c) continue;
-      stoneHeld += c.stock.get('stone');
-    }
-    // A founding settlement holds 30 stone and a quarry is the only real source
-    // of more. A realm living on its founding deposits (under ~40 a city) is
-    // running on fumes and should dig before it polishes pottery.
-    const stoneStarved = kingdom.cityIds.size > 0 && stoneHeld < kingdom.cityIds.size * 40;
-
-    // Coastal kingdom knows the sea is at its doorstep — sailing becomes strategic
-    // rather than an obscure distant option.
-    const hasCoastalCity = [...kingdom.cityIds].some(id => {
-      const c = world.cities.get(id);
-      if (!c) return false;
-      if (c.architecturalProfile?.coastal) return true;
-      if (world.tileMap.isCoastalLand(Math.floor(c.x), Math.floor(c.y))) return true;
-      for (const b of c.buildings.values()) {
-        if (b.type === 'port' || b.type === 'harbor') return true;
-      }
-      const radius = this.citySurveyRadius(c);
-      const minX = Math.max(0, Math.floor(c.x - radius)), maxX = Math.min(world.tileMap.width - 1, Math.ceil(c.x + radius));
-      const minY = Math.max(0, Math.floor(c.y - radius)), maxY = Math.min(world.tileMap.height - 1, Math.ceil(c.y + radius));
-      for (let x = minX; x <= maxX; x += 2) {
-        for (let y = minY; y <= maxY; y += 2) {
-          if (world.tileMap.isCoastalLand(x, y)) return true;
-        }
-      }
-      return false;
-    });
-
-    // How much of what this realm already knows is sitting idle for want of
-    // buildings or materials. Measured last year by assessTechnologicalCapacity.
-    const idleTechnology = 1 - kingdom.technologicalCapacity();
-
-    let best: TechDefinition | null = null;
-    let bestScore = -Infinity;
-
-    for (const tech of available) {
-      // Cheaper is better, all else being equal — and a technology the
-      // neighbours already have is cheaper, so realms naturally follow the pack
-      // instead of each blazing an unaffordable trail of its own.
-      let score = 1000 / Math.max(1, kingdom.research.costOf(tech, kingdom.cityIds.size));
-
-      const mods = tech.unlocks.modifiers;
-      if (mods) {
-        if (mods.military) score += (mods.military - 1) * martial * (warlike ? 22 : 14);
-        if (hungry && mods.growth) score += (mods.growth - 1) * 25;
-        if (poor && mods.trade) score += (mods.trade - 1) * 16;
-        if (mods.research) score += (mods.research - 1) * 12;
-        if (mods.production) score += (mods.production - 1) * 10;
-      }
-
-      // Political advancement is attractive but never urgent.
-      if (tech.track === 'politics') score += 3;
-
-      // Culture nudges the tree: what a realm values, it researches first.
-      if (warlike && tech.track === 'craft' && tech.unlocks.modifiers?.military) score += 6;
-      if (kingdom.culture.diplomaticTrust > 0.6 && tech.unlocks.features?.includes('diplomacy_pacts')) score += 8;
-      if (kingdom.culture.innovation > 0.6 && tech.id === 'mining') score += 10;
-      if (kingdom.culture.collectivism > 0.6 && tech.unlocks.modifiers?.growth) score += 5;
-
-      // Stone is the gate to masonry, quarry, workshops and walls. A realm that
-      // has none should dig for it instead of polishing pottery.
-      if (stoneStarved) {
-        if (tech.id === 'mining') score += 28;
-        if (tech.id === 'masonry') score += 14;
-      }
-
-      // Whatever opens the barracks, while the realm has no way to house a
-      // professional soldier. Written against the unlock rather than against
-      // `bronze_working` by name, so the rule survives the building moving.
-      if (defenceless && tech.unlocks.buildings?.includes('barracks')) {
-        score += 10 + martial * 26;
-      }
-
-      // Coastal realms chase the sea and the technologies needed to reach it.
-      if (hasCoastalCity) {
-        if (tech.id === 'sailing') score += 40;
-        if (tech.unlocks.features?.includes('maritime_trade')) score += 24;
-        if (!kingdom.research.knows('sailing')) {
-          if (tech.id === 'stone_tools') score += 20;
-        }
-      }
-
-      // Modern strategic and military technologies: radar, rocketry, drones and nuclear fission.
-      if (tech.id === 'radar_systems') score += 12 + martial * 20;
-      if (tech.id === 'rocketry') score += 15 + martial * 25;
-      if (tech.id === 'drone_avionics') score += 12 + martial * 20;
-      if (tech.id === 'nuclear_fission') score += 14 + martial * 28;
-
-      // A realm already sitting on technology it cannot operate should consolidate
-      // rather than read further ahead. Chasing the next era while your factories
-      // stand idle for want of coal is how a paper empire happens.
-      if (idleTechnology > 0.35 && tech.track === 'craft') {
-        score -= idleTechnology * 18;
-      }
-
-      // The capitalism/communism fork is decided by material conditions.
-      if (tech.id === 'capitalism') {
-        score += kingdom.economy.outputPerCapita > 18 ? 25 : -15;
-        score += kingdom.economy.stability > 0.55 ? 12 : -20;
-      }
-      if (tech.id === 'communism') {
-        score += kingdom.economy.stability < 0.5 ? 30 : -18;
-        score += kingdom.economy.inequality > 0.55 ? 22 : -10;
-        score += kingdom.economy.outputPerCapita < 12 ? 14 : -8;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = tech;
-      }
-    }
-
-    return best;
-  }
-
   // ============================================================
   // ECONOMY
   // ============================================================
@@ -2386,6 +2178,33 @@ export class CivilizationEngine {
       if (wanted <= 0) continue;
       kingdom.strategicDemand.set(good, wanted);
     }
+  }
+
+  /**
+   * Moves a realm into the next age when it has grown into it.
+   *
+   * There is nothing to manage and nothing to choose. A realm that feeds more
+   * people out of more buildings than its age can account for has outgrown that
+   * age, and the world says so: new buildings become available, sprites and
+   * units change, and the chronicle records it.
+   */
+  private advanceEra(kingdom: Kingdom, world: CivWorld): void {
+    let buildings = 0;
+    for (const cityId of kingdom.cityIds) buildings += world.cities.get(cityId)?.buildings.size ?? 0;
+
+    const reached = kingdom.research.advance(kingdom.totalPopulation, buildings);
+    if (!reached) return;
+
+    const era = TECH_ERAS[reached];
+    chronicle.log(world.year, 'tech', `${kingdom.name} entrou na ${era.name}.`, {
+      title: `${kingdom.name}: ${era.name}`,
+      importance: 'major',
+      scope: 'kingdom',
+      refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
+      tags: ['era', 'tech'],
+      consequences: [`${kingdom.name} pode construir e armar o que a ${era.name} permite.`]
+    });
+    events.emit('eraAdvanced', { kingdom, era: reached, year: world.year });
   }
 
   /**
@@ -2945,8 +2764,6 @@ export class CivilizationEngine {
     if (clergy.satisfaction < 0.3 && clergy.influence > 0.16 && rng.chance(0.12)) {
       kingdom.legitimacy = clamp(kingdom.legitimacy - 0.11, 0, 1);
       kingdom.economy.stability = clamp(kingdom.economy.stability - 0.05, 0, 1);
-      // Scholarship stops where patronage stops.
-      kingdom.research.progress = Math.max(0, kingdom.research.progress * 0.82);
       clergy.radicalization = clamp(clergy.radicalization + 0.08, 0, 1);
       kingdom.society.lastUnrestYear = world.year;
       chronicle.log(
@@ -3968,8 +3785,6 @@ export class CivilizationEngine {
     colony.government = metropole.government;
     colony.governmentSince = world.year;
     colony.research.deserialize(metropole.research.serialize());
-    colony.research.current = null;
-    colony.research.progress = 0;
     colony.addGold(expeditionCost);
     colony.knownKingdoms.add(metropole.id);
     metropole.knownKingdoms.add(colony.id);
@@ -4717,8 +4532,6 @@ export class CivilizationEngine {
           // A seceding city keeps everything it already knows. Breaking away from
           // an industrial empire must not send a city back to the Stone Age.
           rebelKingdom.research.deserialize(kingdom.research.serialize());
-          rebelKingdom.research.current = null;
-          rebelKingdom.research.progress = 0;
 
           rebelKingdom.addGold(kingdom.takeGold(Math.max(50, kingdom.gold * 0.12)));
 

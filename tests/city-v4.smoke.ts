@@ -1,3 +1,4 @@
+import { TECHNOLOGIES } from '../src/civ/TechTree';
 import assert from 'node:assert/strict';
 import { TileMap } from '../src/world/TileMap';
 import { TerrainType } from '../src/world/Biomes';
@@ -26,7 +27,7 @@ city.kingdomId = kingdom.id;
 kingdom.totalPopulation = 100;
 kingdom.externalThreat = .72;
 kingdom.operatingEra = 'iron';
-kingdom.research.known.add('masonry');
+kingdom.research.era = TECHNOLOGIES['masonry'].era;
 city.population = 10;
 city.prosperity = .9;
 city.updateTier();

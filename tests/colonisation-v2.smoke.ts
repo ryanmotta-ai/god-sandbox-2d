@@ -1,3 +1,4 @@
+import { TECHNOLOGIES } from '../src/civ/TechTree';
 import { TICKS_PER_YEAR } from '../src/core/Clock';
 import assert from 'node:assert/strict';
 import { SimulationEngine } from '../src/ai/EntityAI';
@@ -54,7 +55,7 @@ const metropole = new Kingdom('metro', 'Reino Aurelia', SpeciesType.HUMAN, '#d97
 const colony = new Kingdom('colony', 'Colônia Algodão', SpeciesType.HUMAN, '#d97706', colonyCity.id, 1);
 colony.establishColony(metropole.id, 'overland');
 metropole.addColony(colony.id);
-metropole.research.known.add('pottery');
+metropole.research.era = TECHNOLOGIES['pottery'].era;
 metroCity.kingdomId = metropole.id;
 colonyCity.kingdomId = colony.id;
 metroCity.stock.add('food', 120);

@@ -1,3 +1,4 @@
+import { TECHNOLOGIES } from '../src/civ/TechTree';
 import { TICKS_PER_YEAR } from '../src/core/Clock';
 import assert from 'node:assert/strict';
 import { SimulationEngine } from '../src/ai/EntityAI';
@@ -31,7 +32,7 @@ capital.population = 50;
 capital.stock.add('food', 500);
 capital.stock.add('wood', 200);
 metropole.economy.treasury = 500;
-metropole.research.known.add('sailing');
+metropole.research.era = TECHNOLOGIES['sailing'].era;
 tileMap.getTile(origin.x, origin.y)!.cityId = capital.id;
 tileMap.getTile(origin.x, origin.y)!.kingdomId = metropole.id;
 sim.cities.set(capital.id, capital);
