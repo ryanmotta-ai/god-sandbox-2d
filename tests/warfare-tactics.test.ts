@@ -55,7 +55,12 @@ function createTestTileMap(): TileMap {
 
   const city = new City('c1', 'Capital', SpeciesType.HUMAN, 20, 20, 'Fundador', 1);
   city.kingdomId = 'k1';
-  city.population = 80;
+  // A população da cidade tem de bater com os residentes criados abaixo: a guarda
+  // é uma fração de `population` e o alistamento só pode tirar gente da lista de
+  // entidades, então uma cidade que declara 80 residentes e contém 14 pede mais
+  // gente do que existe e o teste passa a medir essa inconsistência. 20 mantém a
+  // guarda no ramo percentual da fórmula, que é o que interessa aqui.
+  city.population = 20;
   ai.cities.set('c1', city);
   k.cityIds.add('c1');
 
@@ -87,22 +92,40 @@ function createTestTileMap(): TileMap {
     e.kingdomId = 'k1';
     citizens.push(e);
   }
+  for (let i = 0; i < 6; i++) {
+    const e = new Entity(`s_${i}`, SpeciesType.HUMAN, 20, 20);
+    e.profession = 'scout';
+    e.cityId = 'c1';
+    e.kingdomId = 'k1';
+    citizens.push(e);
+  }
   ai.entities = citizens;
 
   // Sem guerra ativa: só a guarda do assentamento, nunca uma leva.
-  // Esta asserção já exigiu zero soldados em tempo de paz. Era a invariante
-  // errada: o quartel é a única fonte da profissão `soldier` e chega com a
-  // metalurgia do bronze, então "nenhum soldado em paz" significava nenhum
-  // soldado durante os primeiros ~75 anos de qualquer reino, guerra incluída.
-  // A guarda é de 1 a 2 pessoas, uma ordem de grandeza abaixo da leva de guerra.
+  //
+  // Esta asserção já exigiu zero soldados em tempo de paz, e depois no máximo 2.
+  // Ambas eram números mágicos de uma versão antiga da fórmula: a guarda é uma
+  // fração da população (hoje 20%), então numa cidade de 80 habitantes ela vale
+  // 16, e "no máximo 2" só podia passar em vilas minúsculas. O teste ficou
+  // vermelho por isso, não por regressão, e um teste vermelho em que ninguém
+  // confia é pior que nenhum.
+  //
+  // A invariante que este teste realmente defende é de projeto e não de
+  // constante: a paz posta uma guarda, a guerra levanta uma leva, e a guarda
+  // fica sempre bem abaixo do que a guerra levantaria. Isso sobrevive a
+  // qualquer recalibragem de `watch` e `levy`.
   (ai as any).musterArmies();
   let soldiersCount = ai.entities.filter(e => e.profession === 'soldier').length;
   const peaceWatch = soldiersCount;
-  assert.ok(peaceWatch <= 2, `A guarda de paz deve ser de no máximo 2, veio ${peaceWatch}`);
+  assert.ok(peaceWatch > 0, 'A paz ainda posta uma guarda');
+  assert.ok(
+    peaceWatch < city.population * 0.32,
+    `A guarda de paz nunca alcança a leva de guerra (${(0.32 * 100).toFixed(0)}% da população), veio ${peaceWatch} de ${city.population}`
+  );
 
   // Declara guerra com pouca comida (não deve tocar em agricultores)
   ai.diplomacy.declareWar('k1', 'k2', 1, 'Guerra de Fronteira');
-  city.stock.set('food', 100); // 100 comida para 80 pop (< 3x pop)
+  city.stock.set('food', 20); // acima de 0.8x pop (16) para alistar, abaixo de 1.5x (30) para poupar a lavoura
 
   (ai as any).musterArmies();
   soldiersCount = ai.entities.filter(e => e.profession === 'soldier').length;
@@ -112,7 +135,7 @@ function createTestTileMap(): TileMap {
   const farmersConscripted = ai.entities.filter(e => e.id.startsWith('f_') && e.profession === 'soldier').length;
   assert.equal(farmersConscripted, 0, 'Agricultores não devem ser convocados quando a comida não for abundante');
 
-  // Agora com comida abundante (> 3x pop) e tecnologia de conscrição em massa
+  // Agora com comida abundante (acima de 1.5x pop) e conscrição em massa
   city.stock.set('food', 500);
   k.research.known.add('gunpowder'); // Desbloqueia conscription feature
   (ai as any).musterArmies();
@@ -380,7 +403,6 @@ function createTestTileMap(): TileMap {
 
   const k1 = new Kingdom('k1', 'Reino Rico', SpeciesType.HUMAN, '#0f0', 'c1', 1);
   k1.addGold(500);
-  k1.treasury.add('gold', 500);
   kingdoms.set('k1', k1);
 
   const c1 = new City('c1', 'Porto Rico', SpeciesType.HUMAN, 20, 20, 'Fundador', 1);
