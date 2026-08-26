@@ -174,6 +174,15 @@ const FORAGE_PER_TILE = 3;
  * Kept well below a camp's output so the camp is always worth building.
  */
 const HAND_WOOD_PER_CITIZEN = 0.4;
+/**
+ * Stone a settlement works loose per head per year without a quarry.
+ *
+ * Just under timber, because rock is heavier work, and far under a quarry's
+ * twelve so the building is still worth putting up.
+ */
+const HAND_STONE_PER_CITIZEN = 0.35;
+/** Most one outcrop gives up to hand tools in a year. */
+const HAND_STONE_PER_TILE = 2;
 
 const HAND_WOOD_PER_TILE = 1.5;
 
@@ -656,7 +665,29 @@ export class CivilizationEngine {
           }
           building.depositExhausted = false;
           building.extractedGood = naturalGood!;
-          const wanted = (def.extractionRate ?? 5) * scale;
+          /**
+           * One rate, not two.
+           *
+           * `produces` is what the inspector shows the player and what
+           * `scoreBuildingSite` values a plot on, while this branch used to read
+           * `extractionRate` — so a quarry advertised twelve stone, won its plot
+           * on the promise of twelve, and then extracted seven. The raise from
+           * seven to twelve is documented in `Building.ts` as the fix that made a
+           * quarryman as productive as a forester; it was written into `produces`
+           * and never reached the engine, so settlements went on sitting at four
+           * stone exactly as the comment describes.
+           *
+           * Reading the advertised figure first keeps the three in step. Of the
+           * four `required` extraction buildings only the quarry ever disagreed,
+           * so nothing else moves.
+           *
+           * ponytail: falls back to the first `produces` entry when the extracted
+           * good is not the advertised one — a quarry on clay works it as hard as
+           * stone. Give the definition a per-good rate if that stops being true.
+           */
+          const advertised = (def.produces?.[naturalGood!]
+            ?? (def.produces ? Object.values(def.produces)[0] : undefined)) as number | undefined;
+          const wanted = (advertised ?? def.extractionRate ?? 5) * scale;
           const extracted = Math.min(wanted, tile.resourceAmount);
           tile.resourceAmount = Math.max(0, tile.resourceAmount - extracted);
           const stored = city.stock.add(naturalGood!, extracted);
@@ -721,6 +752,20 @@ export class CivilizationEngine {
     const cutWood = this.gatherWildWood(city, world);
     output += cutWood * GOODS['wood'].basePrice;
 
+    // Stone worked loose by hand, for exactly the reason wood is.
+    //
+    // Food and timber both had a settlement-level gathering pass and stone had
+    // none, so before its first quarry a settlement's only stone came from
+    // individual citizens walking to an outcrop and carrying back two or three.
+    // Measured: twelve stone per settlement at year 30 with six quarries already
+    // standing, against a barracks that costs thirty — the walls, the smithy and
+    // the keep all waited on a building that itself needs a deposit inside the
+    // build radius. The map was never short of stone; a measured world had
+    // twenty-eight thousand in the ground and had spent five percent of it in
+    // thirty years. What was missing was a way to pick any of it up.
+    const workedStone = this.gatherLooseStone(city, world);
+    output += workedStone * GOODS['stone'].basePrice;
+
     city.economicOutput = output;
   }
 
@@ -747,6 +792,44 @@ export class CivilizationEngine {
       if (entity.aiState === state) count++;
     }
     return count;
+  }
+
+  /**
+   * Stone worked loose from the settlement's own ground, by hand.
+   *
+   * Same shape as `gatherWildWood`: the visible layer's gatherers are subtracted
+   * first so the same people are not harvested twice, and the tiles physically
+   * deplete. Deliberately well under what a quarry returns — this is meant to
+   * unblock the first walls, not to make the quarry pointless.
+   */
+  private gatherLooseStone(city: City, world: CivWorld): number {
+    const fraction = world.seasonFraction ?? 0.25;
+    // `gather_ore` is the state for every hand-gatherable mineral, stone included,
+    // so this over-subtracts slightly: a citizen fetching iron also reduces the
+    // stone effort. That is the safe direction — under-subtracting is what
+    // harvests the same people twice, which is the bug `citizensGatheringByHand`
+    // exists to prevent.
+    // ponytail: split the state per good if the over-subtraction ever shows.
+    const byHand = this.citizensGatheringByHand(city, world, 'gather_ore');
+    let effort = Math.max(0, city.population - byHand) * HAND_STONE_PER_CITIZEN * fraction;
+    if (effort <= 0) return 0;
+
+    let gathered = 0;
+    for (const pos of city.resourcesByGood.get('stone') ?? []) {
+      if (effort <= 0) break;
+      const tile = world.tileMap.getTile(pos.x, pos.y);
+      if (!tile || tile.resourceType !== 'stone' || tile.resourceAmount <= 0) continue;
+      const taken = Math.min(effort, tile.resourceAmount, HAND_STONE_PER_TILE);
+      tile.resourceAmount -= taken;
+      gathered += taken;
+      effort -= taken;
+    }
+    if (gathered > 0) {
+      const stored = city.stock.add('stone', gathered);
+      city.ledger.recordProduced('stone', stored);
+      return stored;
+    }
+    return 0;
   }
 
   private gatherWildWood(city: City, world: CivWorld): number {
