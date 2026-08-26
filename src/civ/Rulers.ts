@@ -149,8 +149,19 @@ export interface CourtState {
   warWeariness: number;
   /** True when an enemy is at the walls of the capital. */
   capitalBesieged: boolean;
-  /** Fighting strength left, against what it started the war with, 0..1. */
+  /**
+   * How mobilised the realm is, against what a realm its size should field, 0..1.
+   *
+   * This is a muster ratio, NOT attrition — a realm that has not raised its levy
+   * yet reads exactly like one that has been annihilated. `warYears` is what
+   * tells the two apart.
+   */
   armyRemaining: number;
+  /**
+   * Years the realm has been in its longest-running war. 0 at peace, and 0 for
+   * a war declared this year.
+   */
+  warYears: number;
 }
 
 export type RoyalDecision =
@@ -182,7 +193,18 @@ export function decideRoyalAction(court: CourtState, neighbours: Neighbour[]): R
   // ---- Losing? Then sue for peace, whatever kind of man he is. ----
   const enemies = neighbours.filter(n => n.atWar);
   if (enemies.length > 0) {
-    const beaten = court.capitalBesieged || court.armyRemaining < 0.3;
+    /**
+     * A war cannot be lost before it is fought.
+     *
+     * `tickGeopolitics` declares wars and `tickRoyalCourts` reviews them in the
+     * SAME statecraft slot, while `musterArmies` runs in the next one. So a king
+     * used to look at an unraised levy the instant war was declared, read the
+     * muster ratio as annihilation, and sue for peace before a single battle —
+     * which is why an 80-year world produced one war that lasted zero years and
+     * never formed a front. A besieged capital is still immediate surrender:
+     * that is real information, not a missing muster.
+     */
+    const beaten = court.capitalBesieged || (court.warYears >= 1 && court.armyRemaining < 0.3);
     // Even a bloodthirsty king tires eventually; a peaceful one tires at once.
     const tired = court.warWeariness > 55 + belligerence * 30;
     if (beaten || tired) {

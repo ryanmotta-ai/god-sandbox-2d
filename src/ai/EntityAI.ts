@@ -2929,7 +2929,9 @@ household.cityId = city.id;
         warWeariness: kingdom.warWeariness,
         capitalBesieged: !!capital?.besiegerId,
         // What is left of the levy, against what a realm this size should field.
-        armyRemaining: Math.min(1, (armies.get(kingdom.id) ?? 0) / Math.max(1, kingdom.totalPopulation * 0.12))
+        armyRemaining: Math.min(1, (armies.get(kingdom.id) ?? 0) / Math.max(1, kingdom.totalPopulation * 0.12)),
+        // Age of his longest-running war, so a fresh war is not mistaken for a lost one.
+        warYears: wars.length === 0 ? 0 : this.currentYear - Math.min(...wars.map(w => w.startYear))
       };
 
       const neighbours: Neighbour[] = [];

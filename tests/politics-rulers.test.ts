@@ -48,23 +48,37 @@ const psyche = (over: Partial<Psyche>): Psyche => ({ ...createPsyche(() => 0.5),
 // ---- losing a war beats any temperament ----
 {
   const enemy: Neighbour = { id: 'e', name: 'E', relation: -80, powerRatio: 2, atWar: true, allied: false, reachable: true };
-  const besieged: CourtState = { trait: 'bloodthirsty', warWeariness: 0, capitalBesieged: true, armyRemaining: 1 };
+  const besieged: CourtState = { trait: 'bloodthirsty', warWeariness: 0, capitalBesieged: true, armyRemaining: 1, warYears: 0 };
   const decision = decideRoyalAction(besieged, [enemy]);
   assert.equal(decision?.kind, 'peace', 'a capital under siege sues for terms even under a bloodthirsty king');
   assert.equal(decision?.kind === 'peace' && decision.reason, 'capital sitiada');
 
-  const wiped: CourtState = { trait: 'warlike', warWeariness: 0, capitalBesieged: false, armyRemaining: 0.1 };
+  const wiped: CourtState = { trait: 'warlike', warWeariness: 0, capitalBesieged: false, armyRemaining: 0.1, warYears: 2 };
   assert.equal(decideRoyalAction(wiped, [enemy])?.kind, 'peace', 'and so does a king with no army left');
 
   // Winning comfortably, so he fights on.
-  const winning: CourtState = { trait: 'warlike', warWeariness: 10, capitalBesieged: false, armyRemaining: 1 };
+  const winning: CourtState = { trait: 'warlike', warWeariness: 10, capitalBesieged: false, armyRemaining: 1, warYears: 1 };
   assert.equal(decideRoyalAction(winning, [enemy]), null, 'a king who is winning does not beg');
+
+  /**
+   * The state every king is in the instant war is declared: at war, levy not
+   * raised, so the muster ratio reads like annihilation. He must NOT surrender
+   * here — `tickGeopolitics` declares and `tickRoyalCourts` reviews in the same
+   * statecraft slot, while `musterArmies` runs in the next one, so this was
+   * every war in the game ending the season it began.
+   */
+  const unmustered: CourtState = { trait: 'warlike', warWeariness: 0, capitalBesieged: false, armyRemaining: 0.1, warYears: 0 };
+  assert.notEqual(
+    decideRoyalAction(unmustered, [enemy])?.kind,
+    'peace',
+    'a king does not sue for peace before his levy has been raised'
+  );
 }
 
 // ---- a grievance he can reach, and a temper that wants it ----
 {
   const hated: Neighbour = { id: 'h', name: 'H', relation: -70, powerRatio: 1, atWar: false, allied: false, reachable: true };
-  const calm: CourtState = { trait: 'peaceful', warWeariness: 0, capitalBesieged: false, armyRemaining: 1 };
+  const calm: CourtState = { trait: 'peaceful', warWeariness: 0, capitalBesieged: false, armyRemaining: 1, warYears: 0 };
   const fierce: CourtState = { ...calm, trait: 'warlike' };
 
   const war = decideRoyalAction(fierce, [hated]);
@@ -89,7 +103,7 @@ const psyche = (over: Partial<Psyche>): Psyche => ({ ...createPsyche(() => 0.5),
 // ---- a friend worth binding ----
 {
   const friend: Neighbour = { id: 'f', name: 'F', relation: 85, powerRatio: 1, atWar: false, allied: false, reachable: true };
-  const court: CourtState = { trait: 'diplomat', warWeariness: 0, capitalBesieged: false, armyRemaining: 1 };
+  const court: CourtState = { trait: 'diplomat', warWeariness: 0, capitalBesieged: false, armyRemaining: 1, warYears: 0 };
   assert.equal(decideRoyalAction(court, [friend])?.kind, 'alliance');
   // Already bound, so there is nothing to sign.
   assert.equal(decideRoyalAction(court, [{ ...friend, allied: true }]), null);
