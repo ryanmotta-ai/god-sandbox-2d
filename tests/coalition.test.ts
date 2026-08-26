@@ -12,7 +12,6 @@ import { SpeciesType } from '../src/entities/Species';
 import { CivilizationEngine } from '../src/civ/CivilizationEngine';
 import { DiplomacyManager } from '../src/civ/Diplomacy';
 import { WorldMarket } from '../src/civ/Economy';
-import { TradeNetwork } from '../src/civ/Trade';
 import { TileMap } from '../src/world/TileMap';
 import { TerrainType } from '../src/world/Biomes';
 
@@ -47,7 +46,7 @@ function scenario(powers: number[]) {
 
   const world: any = {
     year: 1, cities, kingdoms, entities: [], tileMap: map,
-    diplomacy: new DiplomacyManager(), market: new WorldMarket(), trade: new TradeNetwork(),
+    diplomacy: new DiplomacyManager(), market: new WorldMarket(),
     spawn: () => { throw new Error('nao usado'); }
   };
 

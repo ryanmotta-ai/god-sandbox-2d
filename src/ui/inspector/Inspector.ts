@@ -45,7 +45,6 @@ export interface InspectorHost {
   stopFollow(): void;
   isFollowing(entityId: string): boolean;
   openChronicle(): void;
-  openEconomy(good?: GoodId, cityId?: string): void;
   openKingdoms(kingdomId?: string): void;
   /** Opens the full realm dossier. */
   openRealmDossier(kingdomId: string): void;
@@ -297,16 +296,15 @@ export class Inspector implements InspectorHost {
     this.ctx.screens.open('chronicle');
   }
 
-  public openEconomy(good?: GoodId, cityId?: string): void {
-    this.ctx.screens.open('economy', { good, cityId });
-  }
-
   public openKingdoms(kingdomId?: string): void {
     this.ctx.screens.open('kingdoms', { focusKingdom: kingdomId });
   }
 
+  /** A realm is on the map, so following its link goes and looks at it. */
   public openRealmDossier(kingdomId: string): void {
-    this.ctx.screens.open('realm', { focusKingdom: kingdomId });
+    const capital = this.ctx.sim.cities.get(this.ctx.sim.kingdoms.get(kingdomId)?.capitalCityId ?? '');
+    if (!capital) return;
+    this.ctx.focusOn(capital.x, capital.y, 1.4);
   }
 
   public openCityDossier(cityId: string, highlightCondition?: string): void {

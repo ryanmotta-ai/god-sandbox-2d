@@ -243,7 +243,6 @@ export class SaveSystem {
       kingdoms: Array.from(sim.kingdoms.values()).map(k => k.serialize()),
       warfare: sim.warfare.serialize(),
       market: sim.market.serialize(),
-      trade: sim.trade.serialize(),
       // WAR-V2: a front's position is progress, not a derived value — a war
       // reloaded mid-campaign must resume where the lines actually were.
       fronts: sim.fronts.serialize(),
@@ -259,12 +258,9 @@ export class SaveSystem {
        * "Pai Ancestral".
        */
       deceasedAncestors: [...sim.deceasedAncestors.values()],
-      // Freight and hulls in transit, and the supply lines feeding the fronts.
-      caravans: sim.caravans.serialize(),
-      naval: sim.naval.serialize(),
+      // Armies at sea, and the supply lines feeding the fronts.
       invasions: sim.invasions.serialize(),
-      logistics: sim.logistics.serialize(),
-      railways: sim.railways.serialize()
+      logistics: sim.logistics.serialize()
     };
   }
 
@@ -404,14 +400,10 @@ export class SaveSystem {
     if (data.diplomacy) sim.diplomacy.deserialize(data.diplomacy);
     if (data.warfare) sim.warfare.deserialize(data.warfare);
     if (data.market) sim.market.deserialize(data.market);
-    if (data.trade) sim.trade.deserialize(data.trade);
     // Older saves predate fronts; a war in one simply starts its lines at zero.
     sim.fronts.deserialize(data.fronts);
-    sim.caravans.deserialize(data.caravans);
-    sim.naval.deserialize(data.naval);
     sim.invasions.deserialize(data.invasions);
     sim.logistics.deserialize(data.logistics);
-    if (data.railways) sim.railways.deserialize(data.railways);
 
     // The dead, before anything reads a family tree.
     sim.deceasedAncestors.clear();

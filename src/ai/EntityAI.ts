@@ -17,7 +17,6 @@ import { chronicle } from '../civ/Chronicle';
 import { sound } from '../core/SoundSynth';
 import { rng, nextId, hashString, hashToUnit, stableSlot, MARCH_SLOTS } from '../core/Random';
 import { WorldMarket } from '../civ/Economy';
-import { TradeNetwork } from '../civ/Trade';
 import { GoodId, MINEABLE_GOODS, QUARRY_GOODS } from '../civ/Goods';
 import { tileResourceToGood } from '../world/Tile';
 import { events } from '../core/EventBus';
@@ -44,11 +43,8 @@ import { WarfareSystem, SIEGE_RADIUS, terrainCombatModifier, determineUnitRole }
 import { WarFrontSystem, SECTOR_RADIUS } from '../civ/WarFronts';
 import { SIEGE_GATE_PUSH } from '../civ/WarFronts';
 import { MilitaryLogistics } from '../civ/MilitaryLogistics';
-import { NavalSystem } from '../civ/NavalSystem';
 import { AirSystem } from '../civ/AirSystem';
 import { NavalInvasionSystem } from '../civ/NavalInvasion';
-import { CaravanSystem } from '../civ/CaravanSystem';
-import { RailwayNetwork } from '../civ/RailwayNetwork';
 import { EntityRelevanceTracker, RELEVANCE_CADENCE, shouldTickEntity, type RelevanceContext } from '../perf/EntityRelevance';
 import { perfProfiler } from '../perf/PerformanceProfiler';
 import { RegionState } from '../world/WorldChunks';
@@ -217,17 +213,9 @@ export class SimulationEngine {
 
   /** Global price-setting market every realm trades against. */
   public market: WorldMarket = new WorldMarket();
-  /** Trade agreements and caravan routes between realms. */
-  public trade: TradeNetwork = new TradeNetwork();
-  /** Active maritime ships and naval trade routes. */
-  public naval: NavalSystem = new NavalSystem();
   public air: AirSystem = new AirSystem();
   /** Armies at sea. Trade hulls carry goods; these carry people. */
   public invasions: NavalInvasionSystem = new NavalInvasionSystem();
-  /** Active overland caravans. */
-  public caravans: CaravanSystem = new CaravanSystem();
-  /** Railways: track, freight and AI line construction. Derived from tiles. */
-  public railways: RailwayNetwork = new RailwayNetwork();
   /** Families — who lives under one roof. Keyed by householdId. */
   public households: Map<string, Household> = new Map();
   /** Per-head family wealth, held for one year. See `familyWealthPerHead`. */
@@ -584,7 +572,6 @@ export class SimulationEngine {
     perfProfiler.setCounter('coldEntities', coldEntities);
 
     // Update maritime ships, overland caravans and air services
-    this.naval.updateShips(this.trade.routes, this.cities, this.kingdoms, tileMap, particles, this.currentYear);
     this.invasions.update(this.cities, this.entitiesById, this.diplomacy, tileMap, particles, this.currentYear);
     // Overland freight moves under the hood.
     //
@@ -597,15 +584,10 @@ export class SimulationEngine {
     // convoys down is also what stops the world being drawn on.
     //
     // CaravanSystem is left whole rather than deleted: it is the right code for
-    // a job this world may still want — short hauls between a city and its own
-    // mines, which never crossed the wilderness and never caused the problem.
-    this.caravans.standDown();
     // The world's climate era is the flying weather; an ash-choked sky loses
     // aircraft that a golden age would have brought home.
     this.air.weather = this.currentEra;
-    this.air.updateFlights(this.trade.routes, this.cities, this.kingdoms, this.market);
     this.air.updateSorties(this.cities, this.currentYear);
-    this.railways.updateTrains(this.cities, this.kingdoms, tileMap, particles, this.currentYear, this.market);
 
     // Process deaths
     for (const dead of deadEntities) this.handleEntityDeath(dead, particles);
@@ -650,7 +632,6 @@ export class SimulationEngine {
         tileMap,
         diplomacy: this.diplomacy,
         market: this.market,
-        trade: this.trade,
         era: this.currentEra,
         spawn: (species, x, y) => this.spawnEntity(species, x, y),
         sim: this
@@ -691,7 +672,6 @@ export class SimulationEngine {
       perfProfiler.measure('fronts', () => this.fronts.tickYear(warWorld));
       perfProfiler.measure('logistics', () => this.logistics.tickYear({
         ...warWorld,
-        railways: this.railways,
         fronts: this.fronts
       }));
       perfProfiler.measure('fronts', () => this.fronts.resolveYear(warWorld));
@@ -711,46 +691,10 @@ export class SimulationEngine {
   /** Whether the world has ever seen a scheduled flight, so the first is news. */
   private airServiceOpened: boolean = false;
 
-  /**
-   * Records the year's air service.
-   *
-   * The first scheduled flight anywhere in the world is a genuine turning
-   * point — the moment distance stops being the thing that decides what a
-   * realm can reach — so it is chronicled once, by name. After that it is a
-   * yearly line about how much moved, and only when there was enough traffic
-   * to be worth a line at all.
-   */
+  /** What the year cost and did in the air. */
   private reportAirService(): void {
     this.reportAirWar();
     this.reportAirLosses();
-    if (this.air.yearlyFlights === 0) return;
-    const anyFlight = this.air.flights.values().next().value;
-    if (!this.airServiceOpened) {
-      this.airServiceOpened = true;
-      chronicle.log(
-        this.currentYear,
-        'tech',
-        anyFlight
-          ? `The first scheduled service in the world lifted off from ${anyFlight.fromCityName} for ${anyFlight.toCityName}. Distance has stopped deciding what a realm can reach.`
-          : 'The first scheduled air service in the world took off.',
-        {
-          title: 'The First Flight',
-          importance: 'legendary',
-          scope: 'world',
-          tags: ['aviation', 'infrastructure', 'trade']
-        }
-      );
-      events.emit('firstFlight', {
-        from: anyFlight?.fromCityName ?? '', to: anyFlight?.toCityName ?? '', year: this.currentYear
-      });
-      return;
-    }
-    if (this.air.yearlyFlights < 8) return;
-    chronicle.log(
-      this.currentYear,
-      'trade',
-      `Air services flew ${this.air.yearlyFlights} times this year, carrying ${Math.round(this.air.yearlyPassengers)} travellers and ${Math.round(this.air.yearlyFreight)} tonnes of freight.`
-    );
   }
 
   /**

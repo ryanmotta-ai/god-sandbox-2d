@@ -31,7 +31,7 @@ import { CityMetricsCache, type CityMetrics } from '../city/CityMetrics';
 import { buildGoodsTable } from '../city/CityTabs';
 import {
   buildOverview, buildPopulation, buildEconomy, buildIndustry,
-  buildTrade, buildBuildings, buildHistory
+  buildBuildings, buildHistory
 } from '../city/CityTabs';
 import { panel } from '../kit';
 import type { Child } from '../core/Dom';
@@ -44,7 +44,6 @@ import type { GoodId } from '../../civ/Goods';
 export interface CityScreenHost {
   readonly ctx: GameContext;
   /** Opens a good in the economy screen. */
-  openGood(good: GoodId): void;
   /** Closes the dossier, centres the camera on a building and selects it. */
   goToBuilding(buildingId: string, x: number, y: number): void;
   openChronicle(): void;
@@ -52,7 +51,7 @@ export interface CityScreenHost {
   showAllGoods(): void;
 }
 
-type TabId = 'overview' | 'population' | 'economy' | 'industry' | 'trade' | 'buildings' | 'history';
+type TabId = 'overview' | 'population' | 'economy' | 'industry' | 'buildings' | 'history';
 
 export class CityScreen implements Screen, CityScreenHost {
   public readonly id = 'city' as const;
@@ -200,7 +199,7 @@ export class CityScreen implements Screen, CityScreenHost {
       }),
 
       metrics.kingdom
-        ? button('Reino', () => this.ctx.screens.open('realm', { focusKingdom: metrics.kingdom!.id }), {
+        ? button('Reino', () => this.goToRealm(metrics.kingdom!.id), {
             variant: 'ghost', size: 'sm', icon: 'kingdom',
             tooltip: {
               title: metrics.kingdom.name,
@@ -287,9 +286,6 @@ export class CityScreen implements Screen, CityScreenHost {
         badge: metrics.bottlenecks.length || undefined
       });
     }
-    if (metrics.routes.length || metrics.logistics.railTiles > 0 || metrics.logistics.hasPort) {
-      items.push({ id: 'trade', label: 'Comércio', icon: 'trade-route', badge: metrics.routes.length || undefined });
-    }
     if (metrics.buildingsByCategory.length) {
       items.push({ id: 'buildings', label: 'Construções', icon: 'building', badge: metrics.buildingsByCategory.reduce((n, g) => n + g.buildings.length, 0) });
     }
@@ -299,7 +295,7 @@ export class CityScreen implements Screen, CityScreenHost {
   }
 
   private isTabId(value: string): value is TabId {
-    return ['overview', 'population', 'economy', 'industry', 'trade', 'buildings', 'history'].includes(value);
+    return ['overview', 'population', 'economy', 'industry', 'buildings', 'history'].includes(value);
   }
 
   private renderTab(): void {
@@ -344,7 +340,6 @@ export class CityScreen implements Screen, CityScreenHost {
           ]
         : buildEconomy(city, metrics, this);
       case 'industry': return buildIndustry(city, metrics, this);
-      case 'trade': return buildTrade(city, metrics, this);
       case 'buildings': return buildBuildings(city, metrics, this);
       case 'history': return buildHistory(city, metrics, this);
       default: return [];
@@ -401,8 +396,12 @@ export class CityScreen implements Screen, CityScreenHost {
 
   // ============================ HOST ============================
 
-  public openGood(good: GoodId): void {
-    this.ctx.screens.open('economy', { good });
+  /** Clicking a realm goes to look at its capital, not at a table of figures. */
+  public goToRealm(kingdomId: string): void {
+    const capital = this.ctx.sim.cities.get(this.ctx.sim.kingdoms.get(kingdomId)?.capitalCityId ?? '');
+    if (!capital) return;
+    this.ctx.focusOn(capital.x, capital.y, 1.4);
+    this.ctx.screens.closeAll();
   }
 
   public goToBuilding(buildingId: string, x: number, y: number): void {

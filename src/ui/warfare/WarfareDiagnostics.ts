@@ -1,5 +1,5 @@
 import type { Status } from '../kit';
-import type { WarfareUISnapshot, WarView } from './WarfareMetrics';
+import type { WarfareUISnapshot } from './WarfareMetrics';
 
 export interface WarfareCondition {
   id: string;
@@ -10,14 +10,6 @@ export interface WarfareCondition {
   cityId?: string;
   x?: number;
   y?: number;
-}
-
-export interface WarCausalChain {
-  id: string;
-  cause: string;
-  mechanism: string;
-  consequence: string;
-  status: Status;
 }
 
 /**
@@ -43,29 +35,14 @@ export function warfareConditions(snapshot: WarfareUISnapshot): WarfareCondition
       status: 'critical', warId: war.record.id, x: major.x, y: major.y
     });
 
-    const exhausted = war.politics
-      .filter(item => item.kingdom.surviving && item.warWeariness >= 60)
+    const exhausted = [war.attacker, war.defender]
+      .filter(realm => realm.surviving && realm.warWeariness >= 60)
       .sort((a, b) => b.warWeariness - a.warWeariness)[0];
     if (exhausted) conditions.push({
-      id: `weariness:${war.record.id}:${exhausted.kingdom.id}`,
+      id: `weariness:${war.record.id}:${exhausted.id}`,
       title: 'Alto desgaste de guerra',
-      detail: `${exhausted.kingdom.name} · ${Math.round(exhausted.warWeariness)}%`,
+      detail: `${exhausted.name} · ${Math.round(exhausted.warWeariness)}%`,
       status: exhausted.warWeariness >= 80 ? 'critical' : 'warning', warId: war.record.id
-    });
-
-    if (war.economy.closedRoutes.length) conditions.push({
-      id: `trade:${war.record.id}`,
-      title: 'Comércio fechado pela guerra',
-      detail: `${war.economy.closedRoutes.length} rota(s) · ${Math.round(war.economy.suspendedVolume)} capacidade atual suspensa`,
-      status: 'warning', warId: war.record.id
-    });
-
-    const disrupted = war.infrastructure.damagedRailLines.length + war.infrastructure.disruptedPorts.length;
-    if (disrupted) conditions.push({
-      id: `infrastructure:${war.record.id}`,
-      title: 'Infraestrutura de participantes danificada',
-      detail: `${war.infrastructure.damagedRailLines.length} linha(s) ferroviária(s) danificada(s) · ${war.infrastructure.disruptedPorts.length} porto(s) inoperantes`,
-      status: 'warning', warId: war.record.id
     });
 
     if (war.allies.length) conditions.push({
@@ -78,45 +55,4 @@ export function warfareConditions(snapshot: WarfareUISnapshot): WarfareCondition
 
   const priority: Record<Status, number> = { critical: 0, warning: 1, neutral: 2, positive: 3 };
   return conditions.sort((a, b) => priority[a.status] - priority[b.status]).slice(0, 5);
-}
-
-/** Traceable cause → mechanism → consequence chains for one conflict. */
-export function warCausalChains(war: WarView): WarCausalChain[] {
-  const chains: WarCausalChain[] = [];
-  if (war.economy.closedRoutes.length) chains.push({
-    id: 'closed-trade',
-    cause: 'Guerra entre donos de rotas',
-    mechanism: `${war.economy.closedRoutes.length} rota(s) bilateral(is) inativa(s)`,
-    consequence: `${Math.round(war.economy.suspendedVolume)} capacidade de volume de rota atual suspensa`,
-    status: 'warning'
-  });
-  if (war.sieges.length) chains.push({
-    id: 'siege-economy',
-    cause: `${war.sieges.length} cerco(s) ativo(s)`,
-    mechanism: 'O sistema de cerco reduz comida e prosperidade e pode danificar edifícios e estradas',
-    consequence: `${war.economy.damagedBuildings.reduce((sum, item) => sum + item.count, 0)} edifício(s) danificado(s) agora visível(is) nas cidades afetadas`,
-    status: 'critical'
-  });
-  if (war.infrastructure.damagedRailLines.length) chains.push({
-    id: 'rail-damage',
-    cause: 'Ferrovia danificada de participantes do conflito',
-    mechanism: `${war.infrastructure.damagedRailLines.reduce((sum, line) => sum + line.damagedTiles, 0)} bloco(s) danificado(s) através de ${war.infrastructure.damagedRailLines.length} linha(s)`,
-    consequence: 'Capacidade logística atual e conectividade podem ser reduzidas nessas linhas',
-    status: 'warning'
-  });
-  if (war.infrastructure.disruptedPorts.length) chains.push({
-    id: 'port-down',
-    cause: 'Porto de participante não está operacional',
-    mechanism: `${war.infrastructure.disruptedPorts.length} porto(s) não pode(m) lidar com comércio no momento`,
-    consequence: 'Rotas marítimas passando por esses portos não podem operar normalmente',
-    status: 'warning'
-  });
-  if (war.civilianCasualties > 0) chains.push({
-    id: 'capture-civilians',
-    cause: 'Assentamento capturado registrado pela Crônica',
-    mechanism: 'Resolução de captura registrou mortes civis',
-    consequence: `${war.civilianCasualties} morte(s) civil(is) persistida(s) para esta guerra`,
-    status: 'critical'
-  });
-  return chains;
 }

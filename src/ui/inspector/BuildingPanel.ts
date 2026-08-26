@@ -316,8 +316,7 @@ function buildExtraction(
         label: 'Recurso',
         value: GOODS[good]?.name ?? good,
         icon: 'good',
-        onClick: () => host.openEconomy(good),
-        tooltip: { title: GOODS[good]?.name ?? good, description: GOODS[good]?.description, footnote: 'Abrir na Economia' }
+        tooltip: { title: GOODS[good]?.name ?? good, description: GOODS[good]?.description }
       }),
       statRow({ label: 'Restante', value: formatFull(remaining), icon: 'good', status: depleted ? 'critical' : undefined }),
       statRow({

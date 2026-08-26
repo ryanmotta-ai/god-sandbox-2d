@@ -1,7 +1,6 @@
 /** Warfare Command Center + War Dossier 2.0 (UI-9). */
 import { el, type Child } from '../core/Dom';
 import { emptyState, screenShell, searchInput, tabs, tooltip, type TabItem, type TabStrip } from '../kit';
-import { LogisticsMetricsCache } from '../logistics/LogisticsMetrics';
 import {
   WarfareUISnapshotCache, warfareUIPerformance,
   type ArmyForceView, type WarfareUISnapshot, type WarView
@@ -30,7 +29,6 @@ export class WarfareScreen implements Screen, WarfareScreenHost {
   private shell: ReturnType<typeof screenShell> | null = null;
   private strip: TabStrip | null = null;
   private snapshotCache = new WarfareUISnapshotCache();
-  private logisticsCache = new LogisticsMetricsCache();
   private renderedSignature = '';
 
   public build(ctx: GameContext, params?: NavParams): HTMLElement {
@@ -89,9 +87,7 @@ export class WarfareScreen implements Screen, WarfareScreenHost {
   }
 
   private snapshotFor(): WarfareUISnapshot {
-    const now = performance.now();
-    const logistics = this.logisticsCache.get(this.ctx, now);
-    return this.snapshotCache.get(this.ctx, logistics, now);
+    return this.snapshotCache.get(this.ctx, performance.now());
   }
 
   private resolveWar(snapshot: WarfareUISnapshot): WarView | null {
@@ -201,27 +197,14 @@ export class WarfareScreen implements Screen, WarfareScreenHost {
   }
 
   public openRealm(kingdomId: string): void {
-    if (this.ctx.sim.kingdoms.has(kingdomId)) this.ctx.screens.open('realm', { focusKingdom: kingdomId });
+    const capital = this.ctx.sim.cities.get(this.ctx.sim.kingdoms.get(kingdomId)?.capitalCityId ?? '');
+    if (!capital) return;
+    this.ctx.focusOn(capital.x, capital.y, 1.4);
+    this.ctx.screens.closeAll();
   }
 
   public openCity(cityId: string): void {
     if (this.ctx.sim.cities.has(cityId)) this.ctx.screens.open('city', { cityId });
-  }
-
-  public openGood(good: GoodId): void {
-    this.ctx.screens.open('economy', { good });
-  }
-
-  public openInfrastructure(params: { routeId?: string; cityId?: string; tab?: string } = {}): void {
-    this.ctx.screens.open('infrastructure', params);
-  }
-
-  public openPolitics(kingdomId: string): void {
-    if (this.ctx.sim.kingdoms.has(kingdomId)) this.ctx.screens.open('politics', { focusKingdom: kingdomId });
-  }
-
-  public openTechnology(kingdomId: string, techId?: string | null): void {
-    if (this.ctx.sim.kingdoms.has(kingdomId)) this.ctx.screens.open('techtree', { focusKingdom: kingdomId, techId: techId ?? undefined });
   }
 
   public openChronicle(): void {
@@ -236,9 +219,7 @@ export class WarfareScreen implements Screen, WarfareScreenHost {
       cityIds: war.cities.map(city => city.id),
       points: [
         ...war.engagements.map(item => ({ x: item.x, y: item.y, kind: 'engagement' as const })),
-        ...war.sieges.map(item => ({ x: item.x, y: item.y, kind: 'siege' as const })),
-        ...war.infrastructure.damagedRailLines.map(item => ({ x: item.at.x, y: item.at.y, kind: 'infrastructure' as const })),
-        ...war.infrastructure.disruptedPorts.map(item => ({ x: item.x, y: item.y, kind: 'infrastructure' as const }))
+        ...war.sieges.map(item => ({ x: item.x, y: item.y, kind: 'siege' as const }))
       ]
     });
     this.ctx.focusOn(war.mapFocus.x, war.mapFocus.y, 1.25);

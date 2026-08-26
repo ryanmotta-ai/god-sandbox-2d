@@ -1,6 +1,4 @@
 import type { City } from '../../civ/City';
-import type { Ship } from '../../civ/NavalSystem';
-import type { OverlandCaravan } from '../../civ/CaravanSystem';
 import type { Entity } from '../../entities/Entity';
 import type { Kingdom } from '../../civ/Kingdom';
 import { SpatialHash } from '../../core/SpatialHash';
@@ -68,9 +66,6 @@ export interface SnapshotBuildInput {
   entities: Entity[];
   cities: Map<string, City>;
   kingdoms?: Map<string, Kingdom>;
-  ships?: RenderSpatialSource<Ship>;
-  caravans?: RenderSpatialSource<OverlandCaravan>;
-  railActive?: boolean;
   showGrid?: boolean;
   overlayMode: OverlayMode;
   selection: SelectionMark | null;
@@ -194,8 +189,6 @@ export class RenderSnapshotBuilder {
   private readonly visibleEntityScratch: Entity[] = [];
   private readonly visibleInfantMotherIds = new Set<string>();
   private readonly visibleBuildingScratch: IndexedBuilding[] = [];
-  private readonly visibleShipScratch: Ship[] = [];
-  private readonly visibleCaravanScratch: OverlandCaravan[] = [];
   private readonly buildingIndexes = new WeakMap<Map<string, City>, BuildingIndexCache>();
   private staticRevision = 0; private frameNumber = 0; private benchmarkCount = -1;
   private benchmarkData: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
@@ -349,29 +342,6 @@ export class RenderSnapshotBuilder {
         if (region) push(region, 0xffffffff, this.yLayer(entity.y, input.tileMap.height, .635, .12), entity.x-.05, entity.y-.1, 1.1, 1.1, entity.prevX-.05, entity.prevY-.1);
       }
       const fire = this.regions.get('prop:fx_fire'); if (fire) for (let x=minX; x<=maxX; x++) for (let y=minY; y<=maxY; y++) if (input.tileMap.grid[x][y].isOnFire) push(fire, 0xffffffff, .59, x, y-.3, 1, 1.3);
-      const ships = input.ships?.queryRect
-        ? input.ships.queryRect(minX - 2, minY - 2, maxX + 2, maxY + 2, this.visibleShipScratch)
-        : input.ships ?? [];
-      for (const ship of ships) if (ship.x >= minX && ship.x <= maxX && ship.y >= minY && ship.y <= maxY) {
-        const source = this.regions.get(`vehicle:ship:${ship.tier}`);
-        const region = source && ship.direction < 0 ? { ...source, u0: source.u1, u1: source.u0 } : source;
-        if (region) push(region, 0xffffffff, this.yLayer(ship.y, input.tileMap.height, .635, .12), ship.x-.15, ship.y-.25, 1.3, 1.3);
-      }
-      const caravans = input.caravans?.queryRect
-        ? input.caravans.queryRect(minX - 2, minY - 2, maxX + 2, maxY + 2, this.visibleCaravanScratch)
-        : input.caravans ?? [];
-      for (const caravan of caravans) if (caravan.x >= minX && caravan.x <= maxX && caravan.y >= minY && caravan.y <= maxY) {
-        const view = Math.abs(caravan.headingX) > Math.abs(caravan.headingY) ? 'side' : caravan.headingY < 0 ? 'back' : 'front';
-        const frame = Math.floor(caravan.progress * caravan.routeTiles / .225) % 4;
-        const source = this.regions.get(`vehicle:caravan:${caravan.caravanType}:${view}:${frame}`);
-        const region = source && view === 'side' && caravan.headingX < 0 ? { ...source, u0: source.u1, u1: source.u0 } : source;
-        if (region) push(region, 0xffffffff, this.yLayer(caravan.y, input.tileMap.height, .635, .12), caravan.x-.075, caravan.y-.52, 1.15, 1.15);
-      }
-      if (input.railActive) {
-        let trainX = -1, trainY = -1;
-        for (let y=minY; y<=maxY && trainX < 0; y++) for (let x=minX; x<=maxX; x++) if (input.tileMap.grid[x][y].railLevelEffective > 0) { trainX=x; trainY=y; break; }
-        const train = this.regions.get('vehicle:train:steam:right') ?? this.regions.get('vehicle:train'); if (train && trainX >= 0) { const phase = (this.frameNumber % 48) / 48; push(train, 0xffffffff, .56, trainX + phase - .2, trainY-.15, .9, .9); }
-      }
     }
     if (input.selection) { const mark=input.selection, region=this.requiredRegion('overlay:selection'), d=Math.max(.75, mark.radius*2); push(region, packTint(mark.color), .02, mark.x-mark.radius, mark.y-mark.radius, d, d); }
     const pages = new Map<number, Uint8Array>(); for (const [page, writer] of this.dynamicWriters) if (writer.count) pages.set(page, writer.bytes()); return pages;

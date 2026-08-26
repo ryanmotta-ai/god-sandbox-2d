@@ -160,16 +160,13 @@ export class WebGPUWorldRenderer implements WorldRenderer {
     if (this.previousFrameStarted > 0) this.telemetry.frameIntervalMs = frameStarted - this.previousFrameStarted;
     this.previousFrameStarted = frameStarted;
     try {
-      const [camera, tileMap, entities, cities, kingdoms, , overlayMode, , , , , ships, caravans, railways, , , , entityIndex] = args;
+      const [camera, tileMap, entities, cities, kingdoms, , overlayMode, , , , , , , , entityIndex] = args;
       const snapshot = this.snapshots.build({
         camera,
         tileMap,
         entities,
         cities,
         kingdoms,
-        ships,
-        caravans,
-        railActive: !!railways && railways.yearlyFreight > 0,
         showGrid: !!this.renderOptions.showGrid,
         overlayMode,
         selection: this.selection,

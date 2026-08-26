@@ -2,7 +2,7 @@
  * Journey audit: plays the REAL simulation loop (tickAI, same as the game)
  * for 120 years with two founding species and checks that the full journey
  * works: cities founded, buildings built, tech researched, armies raised,
- * economy moving and trade routes opening.
+ * economy moving.
  */
 import { TileMap } from '../src/world/TileMap';
 import { SimulationEngine, TICKS_PER_YEAR } from '../src/ai/EntityAI';
@@ -68,17 +68,13 @@ interface Sample {
   techs: number;
   soldiers: number;
   treasury: number;
-  routes: number;
-  caravans: number;
-  ships: number;
   wars: number;
-  tradedGoods: number;
   pricesDrifted: number;
   avgSatisfaction: number;
 }
 
 const samples: Sample[] = [];
-let peaks = { civilised: 0, cities: 0, buildings: 0, techs: 0, soldiers: 0, routes: 0 };
+let peaks = { civilised: 0, cities: 0, buildings: 0, techs: 0, soldiers: 0 };
 
 const start = Date.now();
 for (let y = 1; y <= YEAR_LIMIT; y++) {
@@ -106,7 +102,7 @@ for (let y = 1; y <= YEAR_LIMIT; y++) {
   if (y % SAMPLE_EVERY === 0) {
     let civilised = 0;
     for (const e of sim.entities) if (SPECIES_DEFINITIONS[e.species].isHumanoid && e.hp > 0) civilised++;
-    progress(`year ${y}: entities=${sim.entities.length} civilised=${civilised} cities=${sim.cities.size} kingdoms=${sim.kingdoms.size} routes=${sim.trade.routes.size}`);
+    progress(`year ${y}: entities=${sim.entities.length} civilised=${civilised} cities=${sim.cities.size} kingdoms=${sim.kingdoms.size}`);
   }
 
   if (y % SAMPLE_EVERY === 0 || y === YEAR_LIMIT) {
@@ -130,7 +126,6 @@ for (let y = 1; y <= YEAR_LIMIT; y++) {
     let civilised = 0;
     for (const e of sim.entities) if (SPECIES_DEFINITIONS[e.species].isHumanoid && e.hp > 0) civilised++;
 
-    const tradedGoods = ALL_GOODS.filter(g => sim.market.supplyOf(g) > 0 || sim.market.demandOf(g) > 0).length;
     const drifted = ALL_GOODS.filter(g => {
       const p = sim.market.price(g);
       const base = GOODS[g].basePrice;
@@ -140,9 +135,8 @@ for (let y = 1; y <= YEAR_LIMIT; y++) {
     const s: Sample = {
       year: y, civilised, cities: sim.cities.size, kingdoms: sim.kingdoms.size,
       buildings, techs, soldiers, treasury: Math.round(treasury),
-      routes: sim.trade.routes.size, caravans: sim.caravans.activeCaravans.size,
-      ships: sim.naval.activeShips.size, wars: sim.diplomacy.warHistory.length,
-      tradedGoods, pricesDrifted: drifted,
+      wars: sim.diplomacy.warHistory.length,
+      pricesDrifted: drifted,
       avgSatisfaction: satisfaction
     };
     samples.push(s);
@@ -151,7 +145,6 @@ for (let y = 1; y <= YEAR_LIMIT; y++) {
     peaks.buildings = Math.max(peaks.buildings, buildings);
     peaks.techs = Math.max(peaks.techs, techs);
     peaks.soldiers = Math.max(peaks.soldiers, soldiers);
-    peaks.routes = Math.max(peaks.routes, sim.trade.routes.size);
   }
 
   if (y % 20 === 0) {
@@ -178,20 +171,17 @@ for (let y = 1; y <= YEAR_LIMIT; y++) {
 
 function worldAgreements(sim: SimulationEngine, kingdomId: string): number {
   let n = 0;
-  for (const a of sim.trade.agreements.values()) {
-    if (a.kingdomA === kingdomId || a.kingdomB === kingdomId) n++;
-  }
   return n;
 }
 const elapsed = Date.now() - start;
-console.log(`\n=== JOURNEY REPORT (${YEAR_LIMIT} years in ${Math.round(elapsed / 1000)}s) ===`);console.log(`year | pop | cities | kdoms | bldgs | tech | sold | tresaury | routes | carav | ships | wars | traded | drift | happy`);
+console.log(`\n=== JOURNEY REPORT (${YEAR_LIMIT} years in ${Math.round(elapsed / 1000)}s) ===`);console.log(`year | pop | cities | kdoms | bldgs | tech | sold | tresaury | wars | drift | happy`);
 for (const s of samples) {
   console.log(
-    `${String(s.year).padStart(4)} | ${String(s.civilised).padStart(3)} | ${String(s.cities).padStart(4)} | ${String(s.kingdoms).padStart(3)} | ${String(s.buildings).padStart(5)} | ${String(s.techs).padStart(4)} | ${String(s.soldiers).padStart(3)} | ${String(s.treasury).padStart(8)} | ${String(s.routes).padStart(4)} | ${String(s.caravans).padStart(4)} | ${String(s.ships).padStart(3)} | ${String(s.wars).padStart(3)} | ${String(s.tradedGoods).padStart(5)} | ${String(s.pricesDrifted).padStart(4)} | ${s.avgSatisfaction.toFixed(2)}`
+    `${String(s.year).padStart(4)} | ${String(s.civilised).padStart(3)} | ${String(s.cities).padStart(4)} | ${String(s.kingdoms).padStart(3)} | ${String(s.buildings).padStart(5)} | ${String(s.techs).padStart(4)} | ${String(s.soldiers).padStart(3)} | ${String(s.treasury).padStart(8)} | ${String(s.wars).padStart(3)} | ${String(s.pricesDrifted).padStart(4)} | ${s.avgSatisfaction.toFixed(2)}`
   );
 }
 
-console.log(`\npeaks: civilised=${peaks.civilised} cities=${peaks.cities} buildings=${peaks.buildings} techs=${peaks.techs} soldiers=${peaks.soldiers} routes=${peaks.routes}`);
+console.log(`\npeaks: civilised=${peaks.civilised} cities=${peaks.cities} buildings=${peaks.buildings} techs=${peaks.techs} soldiers=${peaks.soldiers}`);
 console.log(`final entity count=${sim.entities.length}; totalBirths=${sim.totalBirths}`);
 
 // -------------------- economy diagnosis --------------------
@@ -200,7 +190,7 @@ if (process.env.DUMP === '1') {
     const lat = k.economy.latest();
     console.log(`\n[${k.name}] treasury=${Math.round(k.economy.treasury).toLocaleString()}g output=${Math.round(k.economy.output).toLocaleString()}`);
     if (lat) {
-      console.log(`  latest ledger: tax=${lat.taxIncome.toFixed(1)} trade=${lat.tradeIncome.toFixed(1)} upkeep=${lat.upkeep.toFixed(1)} net=${lat.net.toFixed(1)} gdp=${lat.gdp.toFixed(1)}`);
+      console.log(`  latest ledger: tax=${lat.taxIncome.toFixed(1)} trade=${lat.tradeIncome.toFixed(1)} upkeep=${lat.upkeep.toFixed(1)} net=${lat.net.toFixed(1)} output=${lat.output.toFixed(1)}`);
     }
     for (const cid of k.cityIds) {
       const c = sim.cities.get(cid)!;
@@ -224,7 +214,6 @@ if (peaks.cities < 2) fails.push(`cities never grew (peak ${peaks.cities})`);
 if (peaks.buildings < 1) fails.push(`no buildings were ever constructed`);
 if (peaks.techs < 2) fails.push(`research never advanced (peak ${peaks.techs} techs incl. tribalism)`);
 if (last.avgSatisfaction <= 0) fails.push(`society never produced satisfaction data`);
-if (peaks.routes < 1) fails.push(`no trade route ever opened`);
 if (peaks.soldiers < 1) fails.push(`no soldier was ever raised`);
 if (PROVOKE_YEAR > 0) {
   if (sim.diplomacy.warHistory.length < 1) fails.push(`provoked war never happened`);
@@ -240,4 +229,4 @@ if (fails.length > 0) {
   for (const f of fails) console.log('  -', f);
   process.exit(1);
 }
-console.log('\nJOURNEY OK: cities, buildings, tech, army, economy and trade all worked.');
+console.log('\nJOURNEY OK: cities, buildings, tech, army and economy all worked.');

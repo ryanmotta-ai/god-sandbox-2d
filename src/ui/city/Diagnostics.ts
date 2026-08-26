@@ -46,7 +46,6 @@ export function diagnose(metrics: CityMetrics): Condition[] {
     diagnoseEmployment(metrics),
     diagnoseHousing(metrics),
     diagnoseIndustry(metrics),
-    diagnoseTrade(metrics),
     diagnoseSecurity(metrics)
   ];
 }
@@ -280,48 +279,6 @@ function diagnoseIndustry(metrics: CityMetrics): Condition {
   };
 }
 
-// ============================ TRADE ============================
-
-function diagnoseTrade(metrics: CityMetrics): Condition {
-  const routes = metrics.routes;
-  if (routes.length === 0) {
-    return {
-      id: 'trade', label: 'Comércio', icon: 'trade-route', status: 'unknown',
-      // Isolation is a fact, not a failure — a self-sufficient inland settlement
-      // may never open a route.
-      finding: 'Sem rotas de comércio'
-    };
-  }
-
-  const suspended = routes.filter(r => r.status === 'suspended');
-  const reduced = routes.filter(r => r.status === 'reduced');
-  const terms = [
-    { label: 'Rotas', value: `${routes.length}` },
-    { label: 'Ativas', value: `${routes.filter(r => r.status === 'active').length}`, status: 'positive' as Status },
-    { label: 'Reduzidas', value: `${reduced.length}`, status: (reduced.length ? 'warning' : 'positive') as Status },
-    { label: 'Suspensas', value: `${suspended.length}`, status: (suspended.length ? 'critical' : 'positive') as Status }
-  ];
-
-  if (suspended.length) {
-    return {
-      id: 'trade', label: 'Comércio', icon: 'trade-route', status: 'critical',
-      finding: `${suspended.length} de ${routes.length} rota(s) fechada(s) por guerra ou embargo`,
-      terms, good: suspended[0].route.good
-    };
-  }
-  if (reduced.length > routes.length / 2) {
-    return {
-      id: 'trade', label: 'Comércio', icon: 'trade-route', status: 'warning',
-      finding: `${reduced.length} rota(s) abaixo da capacidade`,
-      terms
-    };
-  }
-  return {
-    id: 'trade', label: 'Comércio', icon: 'trade-route', status: 'positive',
-    finding: `${routes.length} rota(s) em operação`,
-    terms
-  };
-}
 
 // ============================ SECURITY ============================
 
@@ -334,12 +291,6 @@ function diagnoseSecurity(metrics: CityMetrics): Condition {
         { label: 'Progresso do cerco', value: `${Math.round(metrics.siege.progress * 100)}%`, status: 'critical' },
         { label: 'Anos sob cerco', value: `${metrics.siege.years}` }
       ]
-    };
-  }
-  if (metrics.logistics.railTiles > 0 && metrics.logistics.railDamage >= 0.5) {
-    return {
-      id: 'security', label: 'Segurança', icon: 'defence', status: 'warning',
-      finding: `Ferrovia danificada em ${Math.round(metrics.logistics.railDamage * 100)}%`
     };
   }
   return {

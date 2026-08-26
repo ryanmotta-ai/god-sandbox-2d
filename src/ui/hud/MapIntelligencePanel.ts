@@ -81,10 +81,6 @@ export class MapIntelligencePanel {
           .map(good => [good, GOODS[good].name] as [string, string])
       ], value => overlays.setResourceGood(value as GoodId | 'all'));
     }
-    if (overlays.layers.has('trade')) {
-      const goods = [...new Set([...this.ctx.sim.trade.routes.values()].map(route => route.good))];
-      return selector('Bem comercial', overlays.tradeGood, [['all', 'Todos os bens'], ...goods.map(good => [good, GOODS[good]?.name ?? good] as [string, string])], value => overlays.setTradeGood(value as GoodId | 'all'));
-    }
     if (overlays.activeMode === 'diplomacy') {
       return selector('Reino de referência', overlays.selectedRealmId ?? '', [...this.ctx.sim.kingdoms.values()].map(kingdom => [kingdom.id, kingdom.name]), value => overlays.open({ mode: 'diplomacy', realmId: value }));
     }

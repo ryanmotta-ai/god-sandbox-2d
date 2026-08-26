@@ -8,7 +8,6 @@ import {
 import { TECHNOLOGIES, TechDefinition, type ResearchState, techCost, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
 import { GOVERNMENTS, chooseGovernment, isRevolution, GovernmentType } from './Government';
 import { WorldMarket } from './Economy';
-import { TradeNetwork, transportCostPerUnit } from './Trade';
 import { DiplomacyManager, type PeaceSettlement } from './Diplomacy';
 import { culturalAffinity, rememberCulture, updateCulture } from './Culture';
 import { updateSociety } from './Society';
@@ -26,11 +25,7 @@ import { tileResourceToGood } from '../world/Tile';
 import { events } from '../core/EventBus';
 import { rng, nextId } from '../core/Random';
 import { SimplePathfinder } from '../ai/Pathfinding';
-import {
-  roadCapacityFactor, portCapacityFactor, portOperational,
-  avgEffectiveRoadLevel, repairInfrastructure
-} from './Infrastructure';
-import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadEngineering';
+import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadBuilding';
 import { UrbanPlanner, type UrbanStreetClass } from './UrbanPlanner';
 import { perfProfiler } from '../perf/PerformanceProfiler';
 import { buildingArchitecturalStamp, refreshArchitecturalProfile } from './ArchitecturalProfile';
@@ -67,10 +62,9 @@ export interface CivWorld {
   tileMap: TileMap;
   diplomacy: DiplomacyManager;
   market: WorldMarket;
-  trade: TradeNetwork;
   /** Creates an entity of the given species at a position. */
   spawn: (species: SpeciesType, x: number, y: number) => Entity;
-  /** Simulation engine (for caravan road decay access). */
+  /** Simulation engine. */
   sim?: import('../ai/EntityAI').SimulationEngine;
 }
 
@@ -225,29 +219,20 @@ export class CivilizationEngine {
     this.tickAntiHegemonicCoalitions(world);
     this.tickSoftPowerDefection(world);
     this.tickStrategicDiplomacy(world);
-    // Rail freight runs before trade settles so imports land in the current ledger year
-    world.sim?.railways.tickRailways(world);
-    perfProfiler.measure('trade', () => this.tickTrade(world));
     this.tickVassalage(world);
     this.tickColonisation(world);
     this.tickColonialFoundations(world);
     this.tickColonialMigration(world);
     this.tickColonialPolitics(world);
     this.tickRebellions(world);
-    this.tickTradeBanditry(world);
     GreatPersonManager.checkAscension(world.entities, world.kingdoms, world.cities, world.tileMap, world.year, world.diplomacy);
 
     world.market.settle(world.year);
-    // Books close after trade has run, so a year's imports and exports land in
-    // the same record as the production and consumption they paid for.
     for (const city of world.cities.values()) city.ledger.rollOver();
     // Clearing settles before regrowth, so a stand felled this year becomes open
     // ground now and has to be re-seeded from a surviving neighbour later.
     world.tileMap.settleDeforestation();
     world.tileMap.regrowResources();
-
-    // Road decay: unused roads lose traffic and degrade yearly
-    world.sim?.caravans.decayRoadTraffic(world.tileMap);
 
     // Rebuild per-city resource caches (used by worker AI)
     for (const city of world.cities.values()) {
@@ -322,7 +307,6 @@ export class CivilizationEngine {
     this.produceGoods(city, world, productionMult * city.wonderHarvestBonus() * fraction, climate.food);
     this.consumeGoods(city, world, fraction);
     this.runConstruction(city, world, kingdom);
-    this.repairCityInfrastructure(city, world);
     this.paveStreetPlan(city, world);
     this.expandTerritory(city, world, (techMods.territory + (gov?.expansion ?? 8) + expansionCulture + (lawEffects?.expansion ?? 0)) * fraction);
 
@@ -1280,11 +1264,6 @@ export class CivilizationEngine {
     return survey.path.length === 0 ? [] : survey.path;
   }
 
-  /** Repairs buildings and roads damaged in war, spending real materials. */
-  private repairCityInfrastructure(city: City, world: CivWorld): void {
-    repairInfrastructure(city, world.tileMap);
-  }
-
   /**
    * Lays a little of the street plan each year.
    *
@@ -2070,9 +2049,6 @@ export class CivilizationEngine {
 
     // Discovery.
     kingdom.research.complete(tech.id);
-    if (tech.id === 'steam_power' || tech.id === 'industrialization') {
-      world.sim?.railways.connectKingdomNetwork(kingdom, world, true);
-    }
     events.emit('techDiscovered', { kingdom, tech, year: world.year });
     chronicle.log(
       world.year,
@@ -2388,12 +2364,6 @@ export class CivilizationEngine {
     const adminTarget = clamp(1 - avgDistance / Math.max(20, adminCapacity) - cityBurden, 0.18, ceiling);
     kingdom.administrativeReach += (adminTarget - kingdom.administrativeReach) * 0.25;
 
-    const tradeRouteValue = world.trade.routesFor(kingdom.id)
-      .filter(route => route.active)
-      .reduce((sum, route) => sum + route.volume * world.market.price(route.good), 0);
-    const tradeDependencyTarget = clamp(tradeRouteValue / Math.max(1, economy.output) * 1.15, 0, 1);
-    kingdom.tradeDependency += (tradeDependencyTarget - kingdom.tradeDependency) * 0.2;
-
     let threatTarget = 0;
     for (const otherId of kingdom.knownKingdoms) {
       const other = world.kingdoms.get(otherId);
@@ -2658,9 +2628,8 @@ export class CivilizationEngine {
 
     const unemployment = workers > 0 ? clamp((workers - filled) / workers, 0, 1) : 0;
     const labourShortage = jobs > 0 ? clamp((jobs - filled) / jobs, 0, 1) : 0;
-    const embargoes = world.trade.embargoes.filter(e => e.againstKingdom === kingdom.id).length;
 
-    return { foodPriceIndex, unemployment, labourShortage, embargoes };
+    return { foodPriceIndex, unemployment, labourShortage, embargoes: 0 };
   }
 
   private tickSocietyFlashpoints(kingdom: Kingdom, world: CivWorld): void {
@@ -3501,12 +3470,10 @@ export class CivilizationEngine {
         const ideologicalConflict =
           (govA.economy === 'planned' && govB.economy === 'market') ||
           (govA.economy === 'market' && govB.economy === 'planned');
-        const tradeAgreement = world.trade.hasAgreement(a.id, b.id);
         const commonEnemy = this.haveCommonEnemy(a.id, b.id, world);
         const affinity = culturalAffinity(a.culture, b.culture);
         const avgOpenness = (a.culture.openness + b.culture.openness) / 2;
         const avgTrust = (a.culture.diplomaticTrust + b.culture.diplomaticTrust) / 2;
-        const avgMercantilism = (a.culture.mercantilism + b.culture.mercantilism) / 2;
         const avgSocialWar = (a.society.warPressure + b.society.warPressure) / 2;
         const avgSocialPeace = (a.society.peacePressure + b.society.peacePressure) / 2;
         const borderAmbition =
@@ -3526,7 +3493,6 @@ export class CivilizationEngine {
         drift += ideologicalConflict ? -0.9 : 0;
         drift += (affinity - 0.5) * 1.0;
         drift += avgTrust > 0.58 ? 0.15 : -Math.max(0, 0.45 - avgTrust) * 0.5;
-        drift += tradeAgreement ? 0.4 + avgMercantilism * 0.2 : 0;
         drift += commonEnemy ? 0.65 : 0;
         drift += Math.max(0, avgSocialPeace - 0.52) * 0.42;
         drift -= proximity * (govA.aggression + govB.aggression) * 0.34;
@@ -3542,8 +3508,6 @@ export class CivilizationEngine {
         // Allies don't drift further into infatuation; their pact is stable
         // unless the negatives above pull it down (then it can dissolve).
         let finalDrift = alreadyAllied ? Math.min(0, drift) : drift;
-        if (world.trade.isEmbargoed(a.id, b.id)) finalDrift -= 1.0;
-
         if (Math.abs(finalDrift) >= 0.15) world.diplomacy.changeRelation(a.id, b.id, finalDrift);
 
         const newRelation = world.diplomacy.getRelation(a.id, b.id);
@@ -3551,7 +3515,6 @@ export class CivilizationEngine {
         if (canPact && !alreadyAllied && !truce && newRelation >= 62) {
           const pactPressure =
             (commonEnemy ? 0.08 : 0) +
-            (tradeAgreement ? 0.035 : 0) +
             Math.max(0, affinity - 0.55) * 0.08 +
             Math.max(0, avgTrust - 0.55) * 0.06 +
             Math.max(0, avgSocialPeace - 0.52) * 0.04 +
@@ -3695,19 +3658,6 @@ export class CivilizationEngine {
   // TRADE
   // ============================================================
 
-  private tickTrade(world: CivWorld): void {
-    world.trade.resetYearlyVolume();
-    for (const route of world.trade.routes.values()) route.deliveredThisYear = 0;
-    world.trade.pruneRoutes(id => world.cities.has(id));
-    world.trade.updateRouteStatus((a, b) => world.diplomacy.isAtWar(a, b));
-
-    this.ensureColonialTradeAgreements(world);
-    this.openColonialTradeRoutes(world);
-    this.negotiateTradeAgreements(world);
-    this.openTradeRoutes(world);
-    this.runTradeRoutes(world);
-  }
-
   /** CITY-V3 profile changes are event/year driven; existing buildings retain their stamps. */
   private refreshCityArchitecture(city: City, kingdom: Kingdom | null, world: CivWorld): void {
     const metropole = kingdom?.metropoleId ? world.kingdoms.get(kingdom.metropoleId) ?? null : null;
@@ -3724,201 +3674,6 @@ export class CivilizationEngine {
       backfilled = true;
     }
     if (backfilled) city.markBuildingTopologyChanged();
-  }
-
-  /** Colonial commerce is a preferential use of the normal treaty and route network. */
-  private ensureColonialTradeAgreements(world: CivWorld): void {
-    for (const metropole of world.kingdoms.values()) {
-      for (const colonyId of metropole.colonyIds) {
-        const colony = world.kingdoms.get(colonyId);
-        if (!colony || !colony.isColony || colony.metropoleId !== metropole.id) continue;
-        if (world.trade.isEmbargoed(metropole.id, colony.id)) continue;
-        // Internal commerce is preferential, not costless: the 1% treaty rate
-        // still gives the ordinary trade accounting a real price to settle.
-        if (!world.trade.hasAgreement(metropole.id, colony.id)) {
-          world.trade.signAgreement(metropole.id, colony.id, world.year, 0.01);
-        }
-      }
-    }
-  }
-
-  /** Opens at most one raw export and one manufactured import per colonial relation. */
-  private openColonialTradeRoutes(world: CivWorld): void {
-    for (const metropole of world.kingdoms.values()) {
-      for (const colonyId of metropole.colonyIds) {
-        const colony = world.kingdoms.get(colonyId);
-        if (!colony || !colony.isColony || colony.metropoleId !== metropole.id) continue;
-        if (world.trade.isEmbargoed(metropole.id, colony.id)) continue;
-        if (world.diplomacy.isAtWar(metropole.id, colony.id)) continue;
-        this.openColonialTradeRoute(colony, metropole, 'colony_to_metropole', world);
-        this.openColonialTradeRoute(metropole, colony, 'metropole_to_colony', world);
-      }
-    }
-  }
-
-  private openColonialTradeRoute(
-    seller: Kingdom, buyer: Kingdom,
-    direction: 'colony_to_metropole' | 'metropole_to_colony',
-    world: CivWorld
-  ): void {
-    const goods = direction === 'colony_to_metropole' ? RAW_GOODS : CRAFTED_GOODS;
-    const sourceCities = [...seller.cityIds].map(id => world.cities.get(id)).filter((city): city is City => !!city);
-    const targetCities = [...buyer.cityIds].map(id => world.cities.get(id)).filter((city): city is City => !!city);
-    if (!sourceCities.length || !targetCities.length) return;
-
-    let best: { from: City; to: City; good: GoodId; volume: number; kind: 'overland' | 'maritime'; path?: { x: number; y: number }[]; score: number } | null = null;
-    for (const from of sourceCities) for (const to of targetCities) {
-      const distance = Math.hypot(from.x - to.x, from.y - to.y);
-      const landPath = SimplePathfinder.findPath(from.x, from.y, to.x, to.y, world.tileMap, 'land');
-      const kind = this.determineRouteKind(from, to, world.tileMap, landPath);
-      if (!kind) continue;
-      if (kind === 'maritime' && (!portOperational(from) || !portOperational(to))) continue;
-      const capacity = kind === 'maritime' ? portCapacityFactor(from, to) : roadCapacityFactor(landPath, world.tileMap);
-      const avgRoad = kind === 'maritime' ? 1.5 : avgEffectiveRoadLevel(landPath, world.tileMap);
-      for (const good of goods) {
-        if (world.trade.hasRouteBetween(from.id, to.id, good)) continue;
-        const reserve = Math.max(8, from.population * (GOODS[good].kind === 'raw' ? 0.22 : 0.12));
-        const available = from.stock.get(good) - reserve;
-        if (available < 4) continue;
-        const destinationNeed = this.colonialDestinationNeed(to, good, direction);
-        if (destinationNeed <= 0) continue;
-        const transport = transportCostPerUnit(kind, distance, world.market.price(good), avgRoad);
-        const volume = Math.min(24, Math.max(3, Math.floor(Math.min(available, destinationNeed) * capacity)));
-        if (volume <= 0) continue;
-        const strategicWeight = GOODS[good].strategic ? 3 : GOODS[good].tier === 'regional' ? 1.55 : 1;
-        const industrialWeight = direction === 'colony_to_metropole' && this.realmUsesAsIndustrialInput(buyer, good, world) ? 2.25 : 1;
-        const score = volume * world.market.price(good) * strategicWeight * industrialWeight - transport * volume;
-        if (!best || score > best.score) best = { from, to, good, volume, kind, path: kind === 'overland' ? landPath : undefined, score };
-      }
-    }
-    if (!best) return;
-    const path = best.kind === 'overland' ? this.surveyTradeRoute(best.from, best.to, world) : undefined;
-    const route = world.trade.openRoute({
-      fromCityId: best.from.id, toCityId: best.to.id,
-      fromKingdomId: seller.id, toKingdomId: buyer.id,
-      kind: best.kind, good: best.good, volume: best.volume, year: world.year,
-      path: path ?? best.path, colonialRoute: true, colonialDirection: direction
-    });
-    chronicle.log(world.year, 'trade', `${GOODS[best.good].name} passou a ligar ${seller.name} e ${buyer.name} pela rota colonial ${best.kind}.`, {
-      title: `Rota Colonial de ${GOODS[best.good].name}`,
-      importance: GOODS[best.good].strategic ? 'major' : 'notable', scope: 'international',
-      refs: [{ kind: 'kingdom', id: seller.id, name: seller.name }, { kind: 'kingdom', id: buyer.id, name: buyer.name }, { kind: 'good', id: best.good, name: GOODS[best.good].name }],
-      tags: ['colonisation', 'colonial-trade', best.kind, best.good],
-      consequences: [`A rota ${route.id} move excedente real de ${best.from.name} para ${best.to.name}.`],
-      data: { direction, volume: best.volume, kind: best.kind }
-    });
-  }
-
-  /** Demand is inferred from real stocks and recipes, never assigned as a colonial quota. */
-  private colonialDestinationNeed(city: City, good: GoodId, direction: 'colony_to_metropole' | 'metropole_to_colony'): number {
-    const baseTarget = direction === 'colony_to_metropole'
-      ? Math.max(18, city.population * 0.5)
-      : Math.max(10, city.population * 0.28);
-    const shortfall = Math.max(0, baseTarget - city.stock.get(good));
-    if (direction === 'colony_to_metropole') {
-      const industrialUse = [...city.buildings.values()].some(building =>
-        CRAFTED_GOODS.some(output => GOODS[output].producedBy === building.type && productionRecipesFor(output).some(recipe => Object.prototype.hasOwnProperty.call(recipe.inputs, good)))
-      );
-      return industrialUse ? Math.max(shortfall, baseTarget * 0.75) : shortfall;
-    }
-    return shortfall;
-  }
-
-  private realmUsesAsIndustrialInput(realm: Kingdom, good: GoodId, world: CivWorld): boolean {
-    for (const cityId of realm.cityIds) {
-      const city = world.cities.get(cityId);
-      if (!city) continue;
-      if (this.colonialDestinationNeed(city, good, 'colony_to_metropole') > 0 && [...city.buildings.values()].some(building =>
-        CRAFTED_GOODS.some(output => GOODS[output].producedBy === building.type && productionRecipesFor(output).some(recipe => Object.prototype.hasOwnProperty.call(recipe.inputs, good)))
-      )) return true;
-    }
-    return false;
-  }
-
-  private negotiateTradeAgreements(world: CivWorld): void {
-    const kingdoms = [...world.kingdoms.values()];
-
-    for (let i = 0; i < kingdoms.length; i++) {
-      for (let j = i + 1; j < kingdoms.length; j++) {
-        const a = kingdoms[i];
-        const b = kingdoms[j];
-
-        if (!a.knownKingdoms.has(b.id)) continue;
-
-        const atWar = world.diplomacy.isAtWar(a.id, b.id);
-        const relation = world.diplomacy.getRelation(a.id, b.id);
-        const hasAgreement = world.trade.hasAgreement(a.id, b.id);
-
-        // War ends commerce.
-        if (atWar && hasAgreement) {
-          world.trade.cancelAgreement(a.id, b.id, world.year, 'war');
-          chronicle.log(
-            world.year,
-            'economy',
-            `O comércio entre ${a.name} e ${b.name} entrou em colapso com o início da guerra.`,
-            {
-              title: `Colapso Comercial entre ${a.name} e ${b.name}`,
-              importance: 'major',
-              scope: 'international',
-              refs: [
-                { kind: 'kingdom', id: a.id, name: a.name },
-                { kind: 'kingdom', id: b.id, name: b.name }
-              ],
-              tags: ['trade', 'war', 'commerce'],
-              causes: ['A guerra tornou o acordo comercial existente impossível de ser mantido.'],
-              consequences: ['A troca comercial entre os dois reinos foi suspensa.']
-            }
-          );
-          continue;
-        }
-        if (atWar || hasAgreement) continue;
-
-        // Friendly realms sign barter/trade agreements
-        if (relation >= 0 && rng.chance(0.35)) {
-          // A treaty splits the difference between the two realms' own border
-          // rates, then friendship shaves it further.
-          const tariff = Math.max(0.01, (a.tariffRate() + b.tariffRate()) / 2 - Math.min(0.09, relation / 1200));
-          world.trade.signAgreement(a.id, b.id, world.year, tariff);
-          world.diplomacy.changeRelation(a.id, b.id, 6);
-          chronicle.log(
-            world.year,
-            'trade',
-            `${a.name} e ${b.name} assinaram um acordo comercial.`,
-            {
-              title: `Trade Agreement: ${a.name}–${b.name}`,
-              importance: 'notable',
-              scope: 'international',
-              refs: [
-                { kind: 'kingdom', id: a.id, name: a.name },
-                { kind: 'kingdom', id: b.id, name: b.name }
-              ],
-              tags: ['acordo comercial', 'commerce'],
-              consequences: ['Os dois reinos puderam começar a abrir rotas de comércio formais.'],
-              data: { tariff: Number(tariff.toFixed(3)) }
-            }
-          );
-        } else if (relation <= -55 && rng.chance(0.12) && !world.trade.isEmbargoed(a.id, b.id)) {
-          world.trade.declareEmbargo(a.id, b.id, world.year, 'hostilidade diplomática');
-          chronicle.log(
-            world.year,
-            'economy',
-            `${a.name} impôs um embargo a ${b.name}.`,
-            {
-              title: `Embargo a ${b.name}`,
-              importance: 'major',
-              scope: 'international',
-              refs: [
-                { kind: 'kingdom', id: a.id, name: a.name },
-                { kind: 'kingdom', id: b.id, name: b.name }
-              ],
-              tags: ['embargo', 'trade', 'hostility'],
-              causes: ['A hostilidade diplomática cruzou o limite para coerção econômica.'],
-              consequences: ['O comércio formal entre os dois reinos foi restrito.']
-            }
-          );
-        }
-      }
-    }
   }
 
   /**
@@ -3994,261 +3749,6 @@ export class CivilizationEngine {
           receiver.ledger.recordImported(good, arrived);
           wanted -= arrived;
         }
-      }
-    }
-  }
-
-  private openTradeRoutes(world: CivWorld): void {
-    for (const agreement of world.trade.agreements.values()) {
-      const a = world.kingdoms.get(agreement.kingdomA);
-      const b = world.kingdoms.get(agreement.kingdomB);
-      if (!a || !b) continue;
-      if (!world.trade.canOpenRoute(a.id) || !world.trade.canOpenRoute(b.id)) continue;
-      /**
-       * Trade routes as an institution.
-       *
-       * `trade_routes` is granted by both the wheel and currency, and was read by
-       * nothing at all: a stone-age realm with a trade agreement opened caravan
-       * lines exactly as readily as a mercantile empire. It is what a standing
-       * route *is* — an agreed road with agreed terms — so a realm without it can
-       * still trade, just slowly and opportunistically, while one that has it
-       * opens lines at more than twice the rate.
-       */
-      const institutions =
-        (a.research.knowsFeature('trade_routes') ? 1 : 0) +
-        (b.research.knowsFeature('trade_routes') ? 1 : 0);
-      if (!rng.chance(0.14 + institutions * 0.16)) continue;
-
-      // Match a surplus in one realm against a shortage in the other.
-      const pairing = this.findTradePairing(a, b, world);
-      if (!pairing) continue;
-
-      const { fromCity, toCity, good, volume, kind } = pairing;
-      if (world.trade.hasRouteBetween(fromCity.id, toCity.id, good)) continue;
-
-      // Survey what the route physically crosses so its capacity can be
-      // re-evaluated every year against the live condition of the road.
-      // Maritime routes are capped by port capacity instead of a land path.
-      const routePath = kind === 'overland'
-        ? this.surveyTradeRoute(fromCity, toCity, world)
-        : undefined;
-
-      const route = world.trade.openRoute({
-        fromCityId: fromCity.id,
-        toCityId: toCity.id,
-        fromKingdomId: fromCity.kingdomId!,
-        toKingdomId: toCity.kingdomId!,
-        kind,
-        good,
-        volume,
-        year: world.year,
-        path: routePath
-      });
-
-      chronicle.log(
-        world.year,
-        'trade',
-        `Uma rota de comércio ${kind} foi aberta: ${GOODS[good].name} de ${fromCity.name} para ${toCity.name}.`,
-        {
-          title: `${GOODS[good].name} Route: ${fromCity.name}–${toCity.name}`,
-          importance: volume >= 20 ? 'major' : 'notable',
-          scope: 'international',
-          refs: [
-            { kind: 'city', id: fromCity.id, name: fromCity.name },
-            { kind: 'city', id: toCity.id, name: toCity.name },
-            { kind: 'kingdom', id: fromCity.kingdomId!, name: a.name },
-            { kind: 'kingdom', id: toCity.kingdomId!, name: b.name },
-            { kind: 'good', id: good, name: GOODS[good].name }
-          ],
-          tags: ['rota de comércio', kind, good],
-          consequences: [`${GOODS[good].name} começou a transitar regularmente entre os dois assentamentos.`],
-          threadId: `trade:${fromCity.id}:${toCity.id}:${good}`,
-          threadTitle: `Comércio de ${GOODS[good].name} entre ${fromCity.name} e ${toCity.name}`,
-          data: { volume, kind }
-        }
-      );
-    }
-  }
-
-  private findTradePairing(a: Kingdom, b: Kingdom, world: CivWorld): {
-    fromCity: City;
-    toCity: City;
-    good: GoodId;
-    volume: number;
-    kind: 'overland' | 'maritime';
-  } | null {
-    const citiesA = [...a.cityIds].map(id => world.cities.get(id)).filter((c): c is City => !!c);
-    const citiesB = [...b.cityIds].map(id => world.cities.get(id)).filter((c): c is City => !!c);
-    if (citiesA.length === 0 || citiesB.length === 0) return null;
-
-    const maxDistance = 90;
-
-    let bestPairing: { fromCity: City; toCity: City; good: GoodId; volume: number; kind: 'overland' | 'maritime' } | null = null;
-    let bestGain = 0;
-
-    // A treaty tariff overrides the border rate; otherwise each buyer charges
-    // whatever its own trade law says, so protectionism really does close routes.
-    const treaty = world.trade.getAgreement(a.id, b.id)?.tariff;
-
-    for (const [source, destination, seller, buyer] of [
-      [citiesA, citiesB, a, b],
-      [citiesB, citiesA, b, a]
-    ] as [City[], City[], Kingdom, Kingdom][]) {
-      for (const from of source) {
-        for (const to of destination) {
-          const distance = Math.hypot(from.x - to.x, from.y - to.y);
-          if (distance > maxDistance) continue;
-
-          // Reachability and infrastructure capacity belong to the city pair,
-          // not to an individual good. Compute A* once, then price every good.
-          const landPath = SimplePathfinder.findPath(from.x, from.y, to.x, to.y, world.tileMap, 'land');
-          const kind = this.determineRouteKind(from, to, world.tileMap, landPath);
-          if (!kind) continue;
-          const capacity = kind === 'maritime'
-            ? portCapacityFactor(from, to)
-            : roadCapacityFactor(landPath, world.tileMap);
-          const avgRoad = kind === 'maritime' ? 1.5 : avgEffectiveRoadLevel(landPath, world.tileMap);
-
-          for (const good of ALL_GOODS) {
-            const surplus = from.stock.get(good);
-            if (surplus < 15) continue;
-
-            // A route exists because someone profits, not because a stock is large.
-            // The seller's realm is cheap in this good and the buyer's is dear; the
-            // gap has to survive hauling it and the tariff at the border.
-            const worldPrice = world.market.price(good);
-            const sellPrice = seller.economy.market.price(good, worldPrice);
-            const buyPrice = buyer.economy.market.price(good, worldPrice);
-
-            // Infrastructure sets the economics of the haul: better roads cut the
-            // cost per tile, and the route can only carry what the road or ports
-            // physically move (0.7× on a dirt trail, 1.0× stone, 1.3× imperial).
-            const transport = transportCostPerUnit(kind, distance, worldPrice, avgRoad);
-            const tariff = treaty ?? buyer.tariffRate();
-            const marginPerUnit = buyPrice - sellPrice - transport - buyPrice * tariff;
-            if (marginPerUnit <= 0) continue;
-
-            const volume = Math.min(20, Math.max(3, Math.floor((surplus / 4) * capacity)));
-            const gain = volume * marginPerUnit;
-
-            if (gain > bestGain) {
-              bestGain = gain;
-              bestPairing = {
-                fromCity: from,
-                toCity: to,
-                good,
-                volume,
-                kind
-              };
-            }
-          }
-        }
-      }
-    }
-
-    return bestPairing;
-  }
-
-  private runTradeRoutes(world: CivWorld): void {
-    for (const route of world.trade.routes.values()) {
-      if (!route.active) {
-        this.recordColonialRouteInterruption(route, world, 'guerra, embargo ou bloqueio diplomático');
-        continue;
-      }
-
-      const from = world.cities.get(route.fromCityId);
-      const to = world.cities.get(route.toCityId);
-      const sellerKingdom = world.kingdoms.get(route.fromKingdomId);
-      const buyerKingdom = world.kingdoms.get(route.toKingdomId);
-      if (!from || !to || !sellerKingdom || !buyerKingdom) continue;
-
-      // Infrastructure carries capacity: the route moves only as much as its
-      // road or its ports can physically handle this year. A destroyed port
-      // collapses maritime trade to zero immediately.
-      const capacity = route.kind === 'maritime'
-        ? portCapacityFactor(from, to)
-        : roadCapacityFactor(route.path, world.tileMap);
-
-      if (capacity <= 0.01) {
-        this.recordColonialRouteInterruption(route, world, 'a infraestrutura logística ficou inoperante');
-        if (!this.collapsedRoutes.has(route.id)) {
-          this.collapsedRoutes.add(route.id);
-          chronicle.log(
-            world.year,
-            'disaster',
-            `Maritime trade through ${GOODS[route.good].name} route ${from.name}–${to.name} collapsed: the harbor at ${portOperational(from) ? to.name : from.name} lies in ruins.`,
-            {
-              title: `Trade Collapse: ${from.name}–${to.name}`,
-              importance: 'major',
-              scope: 'international',
-              refs: [
-                { kind: 'city', id: from.id, name: from.name },
-                { kind: 'city', id: to.id, name: to.name },
-                { kind: 'good', id: route.good, name: GOODS[route.good].name }
-              ],
-              tags: ['colapso comercial', 'infrastructure', 'port'],
-              causes: ['Um porto foi destruído ou caiu para menos da metade de sua integridade.'],
-              consequences: [`Imports and exports through ${from.name}–${to.name} stopped.`]
-            }
-          );
-        }
-        continue;
-      }
-      this.collapsedRoutes.delete(route.id);
-      this.disruptedColonialRoutes.delete(route.id);
-
-      const shipped = from.stock.take(route.good, route.volume * capacity);
-      if (shipped <= 0) continue;
-      const delivered = to.stock.add(route.good, shipped);
-
-      // Anything that couldn't be unloaded goes back on the cart.
-      if (delivered < shipped) from.stock.add(route.good, shipped - delivered);
-      route.deliveredThisYear += delivered;
-
-      from.ledger.recordExported(route.good, delivered);
-      to.ledger.recordImported(route.good, delivered);
-
-      const value = delivered * world.market.price(route.good);
-      world.market.reportDemand(route.good, delivered);
-      world.trade.recordTrade(route, value);
-
-      // Colonial freight pays the distance cost that selected its route. This
-      // is deducted from the export revenue, so a far colony is useful only
-      // when its real surplus and resource value justify moving it.
-      const averageRoad = route.kind === 'maritime' ? 1.5 : avgEffectiveRoadLevel(route.path, world.tileMap);
-      const logisticsCost = route.colonialRoute
-        ? delivered * transportCostPerUnit(route.kind, Math.hypot(from.x - to.x, from.y - to.y), world.market.price(route.good), averageRoad)
-        : 0;
-      const sellerRevenue = Math.max(0, value - logisticsCost);
-
-      // Revenue lands once a year, in the same currency the goods were valued
-      // at, and only for goods that actually crossed the border. It used to be
-      // paid on every caravan/ship arrival — tens of round trips a year per
-      // route — multiplied by a solvency check that inflated revenue whenever
-      // the buyer had any gold stock, so a few routes minted hundreds of
-      // thousands of gold for a realm of twenty people.
-      // Booked as gold. The matching
-      // `treasury.add('gold', ...)` is gone: a grain sale paid the seller twice,
-      // once in coin and once in bullion that appeared in its warehouse.
-      sellerKingdom.exportVolume += sellerRevenue;
-      sellerKingdom.economy.treasury += sellerRevenue;
-      if (buyerKingdom.id !== sellerKingdom.id) {
-        const tariffRate = world.trade.getAgreement(sellerKingdom.id, buyerKingdom.id)?.tariff ?? buyerKingdom.tariffRate();
-        const tariff = value * tariffRate;
-        buyerKingdom.tariffRevenue += tariff;
-        buyerKingdom.economy.treasury += tariff;
-        buyerKingdom.importVolume += value;
-        // And the buyer pays for what it imported. This debit simply was not
-        // here: the seller was credited and the buyer collected a tariff, so
-        // both sides ended a trade richer than they started and the world
-        // minted gold on every route, every year. No realm ever had a budget.
-        buyerKingdom.economy.treasury -= value;
-      }
-      this.settleColonialTribute(route, sellerKingdom, buyerKingdom, value);
-
-      // Commerce quietly improves relations.
-      if (rng.chance(0.25)) {
-        world.diplomacy.changeRelation(route.fromKingdomId, route.toKingdomId, 1);
       }
     }
   }
@@ -4377,35 +3877,6 @@ export class CivilizationEngine {
       const site = this.findColonialFoundationSite(parent, world, metropole);
       if (site) this.foundColonialRealm(parent, site, metropole, world);
     }
-  }
-
-  /** Colonial tribute is paid from actual export revenue after the goods arrive. */
-  private settleColonialTribute(route: { colonialRoute?: boolean; colonialDirection?: string }, seller: Kingdom, buyer: Kingdom, value: number): void {
-    if (!route.colonialRoute || route.colonialDirection !== 'colony_to_metropole') return;
-    if (seller.metropoleId !== buyer.id || !seller.isColony) return;
-    // The bullion legs were removed with the rest of the gold alchemy: a colony
-    // shipping timber home did not also ship ore out of thin air.
-    const tribute = Math.min(value * 0.08, seller.economy.treasury);
-    seller.economy.payAcrossBorder(buyer.economy, tribute);
-  }
-
-  private recordColonialRouteInterruption(route: { id: string; colonialRoute?: boolean; good: GoodId; fromCityId: string; toCityId: string }, world: CivWorld, reason: string): void {
-    if (!route.colonialRoute || this.disruptedColonialRoutes.has(route.id)) return;
-    this.disruptedColonialRoutes.add(route.id);
-    const from = world.cities.get(route.fromCityId);
-    const to = world.cities.get(route.toCityId);
-    chronicle.log(world.year, 'economy', `A rota colonial de ${GOODS[route.good].name} foi interrompida: ${reason}.`, {
-      title: `Interrupção Colonial de ${GOODS[route.good].name}`,
-      importance: 'major', scope: 'international',
-      refs: [
-        ...(from ? [{ kind: 'city' as const, id: from.id, name: from.name }] : []),
-        ...(to ? [{ kind: 'city' as const, id: to.id, name: to.name }] : []),
-        { kind: 'good' as const, id: route.good, name: GOODS[route.good].name }
-      ],
-      tags: ['colonisation', 'colonial-trade', 'interruption', route.good],
-      consequences: [`A disponibilidade de ${GOODS[route.good].name} nas cidades dependentes cairá até que a rota volte.`],
-      data: { routeId: route.id, reason }
-    });
   }
 
   private foundColonialRealm(parent: City, site: { x: number; y: number; access: Exclude<ColonialAccess, null>; distance: number }, metropole: Kingdom, world: CivWorld): void {
@@ -4843,14 +4314,15 @@ export class CivilizationEngine {
     return count ? total / count : 0;
   }
 
-  /** Only deliveries actually completed on colonial routes count as exploitation pressure. */
+  /**
+   * How hard the metropole leans on this colony.
+   *
+   * With no route ledger to read, the pressure is what it always physically
+   * was: a colony that is poor while its parent is rich is a colony being
+   * stripped, and that is the thing the colonists actually resent.
+   */
   private colonialExtractionPressure(colony: Kingdom, metropole: Kingdom, world: CivWorld): number {
-    let value = 0;
-    for (const route of world.trade.routesFor(colony.id)) {
-      if (!route.active || !route.colonialRoute || route.colonialDirection !== 'colony_to_metropole') continue;
-      if (route.fromKingdomId !== colony.id || route.toKingdomId !== metropole.id) continue;
-      value += route.deliveredThisYear * world.market.price(route.good);
-    }
+    let value = Math.max(0, metropole.economy.outputPerCapita - colony.economy.outputPerCapita) * colony.totalPopulation * 0.02;
     const output = [...colony.cityIds].reduce((sum, id) => sum + (world.cities.get(id)?.economicOutput ?? 0), 0);
     return clamp(value / Math.max(30, output + 20), 0, 1);
   }
@@ -4959,18 +4431,9 @@ export class CivilizationEngine {
 
     const governments = colony.research.unlockedGovernments();
     if (governments.includes('republic')) colony.adoptGovernment('republic', world.year);
-    const agreement = world.trade.getAgreement(colony.id, metropole.id);
-    if (peaceful && agreement) {
-      agreement.tariff = Math.max(0.02, (colony.tariffRate() + metropole.tariffRate()) / 2);
-      for (const route of world.trade.routesFor(colony.id)) {
-        if ((route.fromKingdomId === colony.id && route.toKingdomId === metropole.id) || (route.fromKingdomId === metropole.id && route.toKingdomId === colony.id)) {
-          route.colonialRoute = false;
-          route.colonialDirection = undefined;
-        }
-      }
+    if (peaceful) {
       world.diplomacy.setRelation(colony.id, metropole.id, 25);
     } else {
-      world.trade.cancelAgreement(colony.id, metropole.id, world.year, 'independence war');
       world.diplomacy.settleWar(colony.id, metropole.id, world.year, 'independence', colony.id, -65, 10);
     }
     chronicle.log(world.year, 'kingdom', `${oldName} tornou-se ${colony.name}, um reino independente.`, {
@@ -5280,39 +4743,6 @@ export class CivilizationEngine {
   // CARAVAN BANDITRY & TRADE RAIDS
   // ============================================================
 
-  /**
-   * Active trade routes traversing unpoliced territory can be raided by bandits,
-   * reducing route efficiency and creating economic tension.
-   */
-  private tickTradeBanditry(world: CivWorld): void {
-    if (world.trade.routes.size === 0) return;
-
-    for (const route of world.trade.routes.values()) {
-      if (!route.active) continue;
-
-      const fromCity = world.cities.get(route.fromCityId);
-      const toCity = world.cities.get(route.toCityId);
-      if (!fromCity || !toCity) continue;
-
-      const distance = Math.hypot(fromCity.x - toCity.x, fromCity.y - toCity.y);
-      const raidChance = Math.min(0.2, (distance / 60) * 0.1);
-
-      if (rng.chance(raidChance)) {
-        route.volume = Math.max(2, Math.floor(route.volume * 0.6));
-        if (rng.chance(0.3)) {
-          chronicle.log(
-            world.year,
-            'disaster',
-            `Bandidos atacaram a rota comercial ${route.kind} entre ${fromCity.name} e ${toCity.name}.`
-          );
-        }
-      } else if (route.volume < route.maxVolume) {
-        // A year of peace lets commerce rebuild toward its original capacity.
-        route.volume = Math.min(route.maxVolume, route.volume + 2);
-      }
-    }
-  }
-
   public closestRealmDistance(k1: Kingdom, k2: Kingdom, cities: Map<string, City>): number {
     let minDist = Infinity;
     for (const c1Id of k1.cityIds) {
@@ -5331,46 +4761,6 @@ export class CivilizationEngine {
   // ============================================================
   // ROUTE TYPE DETERMINATION (connectivity, not distance)
   // ============================================================
-
-  /**
-   * Decide whether a trade route between two cities should be overland or maritime.
-   *
-   * Uses real pathfinding:
-   *  - If a land path exists between the city centres → 'overland'
-   *  - If no land path, but the cities each have a coastal port tile and a sea
-   *    path exists between those ports, pick the first coastal tile from each city
-   *    and route 'maritime'
-   *  - 2b: If both exist and the sea path is >40% shorter, prefer 'maritime'
-   *  - Returns null if no path exists at all (cities are unreachable).
-   */
-  private determineRouteKind(
-    from: City, to: City, tileMap: TileMap, landPath?: { x: number; y: number }[]
-  ): 'overland' | 'maritime' | null {
-    const landPathComputed = landPath ?? SimplePathfinder.findPath(from.x, from.y, to.x, to.y, tileMap, 'land');
-    const landDist = landPathComputed.length > 1
-      ? landPathComputed.reduce((sum, _, i, arr) => i > 0 ? sum + Math.hypot(arr[i].x - arr[i - 1].x, arr[i].y - arr[i - 1].y) : 0, 0)
-      : Infinity;
-
-    // Sea trade is infrastructure, not a free property of living near water.
-    const fromPort = this.findCityPortWaterTile(from, tileMap);
-    const toPort = this.findCityPortWaterTile(to, tileMap);
-    let seaDist = Infinity;
-    if (fromPort && toPort) {
-      const seaPath = SimplePathfinder.findPath(fromPort.x, fromPort.y, toPort.x, toPort.y, tileMap, 'sea');
-      if (seaPath.length > 1) {
-        seaDist = seaPath.reduce((sum, _, i, arr) => i > 0 ? sum + Math.hypot(arr[i].x - arr[i - 1].x, arr[i].y - arr[i - 1].y) : 0, 0);
-      }
-    }
-
-    if (landPathComputed.length > 1 && seaDist === Infinity) return 'overland';
-    if (landPathComputed.length <= 1 && seaDist < Infinity) return 'maritime';
-    if (landPathComputed.length <= 1 && seaDist === Infinity) return null;
-
-    // Both land and sea connections exist. If both cities have built ports,
-    // maritime trade provides higher cargo volume and lower transport cost per tile.
-    // Prefer maritime unless the sea route is significantly longer (> 35% longer than land).
-    return seaDist <= landDist * 1.35 ? 'maritime' : 'overland';
-  }
 
   private findCityPortWaterTile(city: City, tileMap: TileMap): { x: number; y: number } | null {
     const facilities = [...city.buildings.values()]

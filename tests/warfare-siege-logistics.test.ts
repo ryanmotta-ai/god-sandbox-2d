@@ -7,7 +7,6 @@ import { Entity } from '../src/entities/Entity';
 import { SpeciesType } from '../src/entities/Species';
 import { DiplomacyManager } from '../src/civ/Diplomacy';
 import { Building } from '../src/civ/Building';
-import { RailwayNetwork } from '../src/civ/RailwayNetwork';
 import { WarFrontSystem, SIEGE_GATE_PUSH, SECTOR_RADIUS } from '../src/civ/WarFronts';
 import { MilitaryLogistics } from '../src/civ/MilitaryLogistics';
 import { WarfareSystem, SIEGE_RADIUS } from '../src/civ/Warfare';
@@ -43,7 +42,6 @@ interface TestHarness {
   kingdoms: Map<string, Kingdom>;
   entities: Entity[];
   diplomacy: DiplomacyManager;
-  railways: RailwayNetwork;
   fronts: WarFrontSystem;
   logistics: MilitaryLogistics;
   warfare: WarfareSystem;
@@ -58,7 +56,6 @@ function createHarness(): TestHarness {
     kingdoms: new Map(),
     entities: [],
     diplomacy: new DiplomacyManager(),
-    railways: new RailwayNetwork(),
     fronts: new WarFrontSystem(),
     logistics: new MilitaryLogistics(),
     warfare: new WarfareSystem(),

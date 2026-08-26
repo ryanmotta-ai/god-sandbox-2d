@@ -11,7 +11,7 @@ import { events } from '../core/EventBus';
 import { rng, nextId } from '../core/Random';
 import { ALL_GOODS } from './Goods';
 import { TraitId } from '../entities/Traits';
-import { damageRoadsAround, damageRailAround, damagePrimaryRoads, damageStrategicBuildings } from './Infrastructure';
+import { damageRoadsAround, damagePrimaryRoads, damageStrategicBuildings } from './WarDamage';
 import { WarFrontSystem, SIEGE_GATE_PUSH } from './WarFronts';
 
 /**
@@ -1052,7 +1052,6 @@ export class WarfareSystem {
 
     damageRoadsAround(world.tileMap, city.x, city.y, 5);
     damagePrimaryRoads(world.tileMap, city.x, city.y, 5);
-    damageRailAround(world.tileMap, city.x, city.y, 5);
     damageStrategicBuildings(city, world.tileMap, world.year);
 
     // Being cut off always unlocks the walls. The front's opinion on the
@@ -1339,7 +1338,6 @@ export class WarfareSystem {
     }
 
     damageRoadsAround(world.tileMap, city.x, city.y, 7);
-    damageRailAround(world.tileMap, city.x, city.y, 7);
 
     from.removeCity(city.id);
     to.addCity(city.id);

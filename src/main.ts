@@ -31,7 +31,6 @@ import { WorldSetupScreen } from './ui/screens/WorldSetupScreen';
 import { LoadingScreen } from './ui/screens/LoadingScreen';
 import { PauseScreen } from './ui/screens/PauseScreen';
 import { KingdomsScreen } from './ui/screens/KingdomsScreen';
-import { DiplomacyScreen } from './ui/screens/DiplomacyScreen';
 import { StatsScreen } from './ui/screens/StatsScreen';
 import { BestiaryScreen } from './ui/screens/BestiaryScreen';
 import { ChronicleScreen } from './ui/screens/ChronicleScreen';
@@ -41,16 +40,11 @@ import { SaveLoadScreen } from './ui/screens/SaveLoadScreen';
 import { CreditsScreen } from './ui/screens/CreditsScreen';
 import { GameOverScreen } from './ui/screens/GameOverScreen';
 
-import { PoliticsScreen } from './ui/screens/PoliticsScreen';
-import { EconomyScreen } from './ui/screens/EconomyScreen';
 import { WarfareScreen } from './ui/screens/WarfareScreen';
 import { DynastyScreen } from './ui/screens/DynastyScreen';
 import { EcosystemScreen } from './ui/screens/EcosystemScreen';
-import { TechTreeScreen } from './ui/screens/TechTreeScreen';
-import { InfrastructureScreen } from './ui/screens/InfrastructureScreen';
 import { UIKitScreen } from './ui/screens/UIKitScreen';
 import { CityScreen } from './ui/screens/CityScreen';
-import { RealmScreen } from './ui/screens/RealmScreen';
 import { TimeSkipScreen } from './ui/screens/TimeSkipScreen';
 import { SelectionManager } from './ui/hud/Selection';
 import { WorldSnapshotProvider } from './ui/core/WorldSnapshot';
@@ -111,7 +105,6 @@ class AethoriaGame implements GameContext {
   private toasts: ToastManager;
   private hud!: HUD;
   private loadingScreen = new LoadingScreen();
-  private economyScreen = new EconomyScreen();
 
   // ---- Runtime ----
   private state: AppState = 'menu';
@@ -167,9 +160,6 @@ class AethoriaGame implements GameContext {
     // moving the camera. Registered after, because `registerOpener` replaces by
     // kind and the more capable handler must win.
     this.hud.inspector.registerLinkNavigation();
-    // `good` is the last object kind with no opener: UI-5 owns it, so every goods
-    // link in the game becomes navigable here rather than rendering inert.
-    this.economyScreen.registerLinkNavigation();
     this.applySettings();
 
     this.screens.replace('main-menu');
@@ -188,7 +178,6 @@ class AethoriaGame implements GameContext {
     this.screens.register(this.loadingScreen);
     this.screens.register(new PauseScreen());
     this.screens.register(new KingdomsScreen());
-    this.screens.register(new DiplomacyScreen());
     this.screens.register(new StatsScreen());
     this.screens.register(new BestiaryScreen());
     this.screens.register(new ChronicleScreen());
@@ -198,15 +187,10 @@ class AethoriaGame implements GameContext {
     this.screens.register(new CreditsScreen());
     this.screens.register(new GameOverScreen());
 
-    this.screens.register(new PoliticsScreen());
-    this.screens.register(this.economyScreen);
     this.screens.register(new WarfareScreen());
     this.screens.register(new DynastyScreen());
     this.screens.register(new EcosystemScreen());
-    this.screens.register(new TechTreeScreen());
-    this.screens.register(new InfrastructureScreen());
     this.screens.register(new CityScreen());
-    this.screens.register(new RealmScreen());
     this.screens.register(new TimeSkipScreen());
     // Development gallery for the UI kit. Not on any navigation path — opened
     // from the debug panel.
@@ -538,13 +522,15 @@ class AethoriaGame implements GameContext {
       this.focusOn(city.x, city.y);
     });
 
-    // A realm reference opens the UI-4 dossier. Before it existed the best a
-    // kingdom link could do was move the camera to the capital, which answered a
-    // different question than the one the player asked by clicking a realm's name.
+    // Clicking a realm selects it and goes to look at its capital. The dossier
+    // screen it used to open was a table of figures; the realm itself is on the
+    // map, so that is where a click takes you.
     objectNav.registerOpener('kingdom', ref => {
-      if (!this.sim.kingdoms.has(ref.id)) return;
+      const kingdom = this.sim.kingdoms.get(ref.id);
+      if (!kingdom) return;
       this.selection.select({ kind: 'kingdom', id: ref.id });
-      this.screens.open('realm', { focusKingdom: ref.id });
+      const capital = this.sim.cities.get(kingdom.capitalCityId);
+      if (capital) this.focusOn(capital.x, capital.y);
     });
 
     objectNav.registerOpener('citizen', ref => {
@@ -558,9 +544,6 @@ class AethoriaGame implements GameContext {
       this.screens.open('warfare', { warId: ref.id });
     });
 
-    objectNav.registerOpener('technology', ref => {
-      this.screens.open('techtree', { techId: ref.id });
-    });
   }
 
   public applySettings(): void {
@@ -752,18 +735,13 @@ class AethoriaGame implements GameContext {
       case 'v': this.hud.cycleOverlay(); return;
       case 'c': this.screens.open('chronicle'); return;
       case 'k': this.screens.open('kingdoms'); return;
-      case 'l': case 'y': this.screens.open('diplomacy'); return;
       case 'g': this.screens.open('stats'); return;
       case 'b': this.screens.open('bestiary'); return;
-      case 'n': this.screens.open('infrastructure'); return;
       // The old dock drew key caps for P, E, W and T on its buttons, but nothing
       // ever bound them — the hints were decoration. UI-1 shows shortcuts in
       // tooltips, and a tooltip that names a key that does nothing is worse than
       // no tooltip, so these are now real.
-      case 'p': this.screens.open('politics'); return;
-      case 'e': this.screens.open('economy'); return;
       case 'w': this.screens.open('warfare'); return;
-      case 't': this.screens.open('techtree'); return;
       case 'm':
         this.hud.minimap.toggle();
         return;
@@ -903,9 +881,6 @@ class AethoriaGame implements GameContext {
       showBrush ? this.hoverWorldPos?.x ?? null : null,
       showBrush ? this.hoverWorldPos?.y ?? null : null,
       this.brush.brushSize,
-      this.sim.naval,
-      this.sim.caravans,
-      this.sim.railways,
       undefined,
       undefined,
       undefined,

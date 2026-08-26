@@ -123,18 +123,7 @@ const GROUPS: DockGroup[] = [
     icon: 'politics',
     description: 'Os sistemas que movem os reinos.',
     entries: ctx => [
-      {
-        // Opens on whatever realm the player is looking at, falling back to the
-        // largest — the dossier then handles switching between realms itself.
-        label: 'Dossiê do reino', icon: 'kingdom',
-        description: 'O reino selecionado por dentro: economia, sociedade, política, exército e técnica.',
-        run: () => ctx.screens.open('realm', { focusKingdom: focusedRealm(ctx) })
-      },
-      { label: 'Política', icon: 'politics', description: 'Facções, leis e legitimidade.', shortcut: 'P', run: () => ctx.screens.open('politics') },
-      { label: 'Economia', icon: 'economy', description: 'Preços, produção, escassez e tesouro.', shortcut: 'E', run: () => ctx.screens.open('economy') },
-      { label: 'Diplomacia', icon: 'diplomacy', description: 'Tratados, rivalidades e a opinião das cortes.', shortcut: 'L', run: () => ctx.screens.open('diplomacy') },
       { label: 'Dinastias', icon: 'dynasty', description: 'Linhagens, sucessões e casas governantes.', run: () => ctx.screens.open('dynasty') },
-      { label: 'Infraestrutura', icon: 'trade-route', description: 'Estradas, ferrovias e rotas de comércio.', shortcut: 'N', run: () => ctx.screens.open('infrastructure') },
       { label: 'Guerra', icon: 'war', description: 'Exércitos, cercos e o custo das campanhas.', shortcut: 'U', run: () => ctx.screens.open('warfare') }
     ]
   },
@@ -146,7 +135,6 @@ const GROUPS: DockGroup[] = [
     entries: ctx => [
       { label: 'Crônica', icon: 'history', description: 'A história do mundo, registrada conforme acontece.', shortcut: 'C', run: () => ctx.screens.open('chronicle') },
       { label: 'Estatísticas', icon: 'statistics', description: 'Séries históricas de população, reinos e guerras.', shortcut: 'G', run: () => ctx.screens.open('stats') },
-      { label: 'Ciência', icon: 'technology', description: 'O que cada reino descobriu e o que persegue.', shortcut: 'T', run: () => ctx.screens.open('techtree') },
       { label: 'Ecossistema', icon: 'ecosystem', description: 'Biomas, fauna e a pressão sobre eles.', run: () => ctx.screens.open('ecosystem') },
       { label: 'Bestiário', icon: 'education', description: 'As espécies deste mundo.', shortcut: 'B', run: () => ctx.screens.open('bestiary') },
       { label: 'Reinos', icon: 'kingdom', description: 'Todos os reinos, comparados.', shortcut: 'K', run: () => ctx.screens.open('kingdoms') }

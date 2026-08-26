@@ -35,7 +35,6 @@ export class PauseScreen implements Screen {
           el('div', { class: 'pause-grid' }, [
             button('Crônica', () => ctx.screens.open('chronicle'), { icon: '📜' }),
             button('Reinos', () => ctx.screens.open('kingdoms'), { icon: '👑' }),
-            button('Diplomacia', () => ctx.screens.open('diplomacy'), { icon: '🤝' }),
             button('Estatísticas', () => ctx.screens.open('stats'), { icon: '📊' }),
             button('Bestiário', () => ctx.screens.open('bestiary'), { icon: '📖' }),
             button('Salvar & Carregar', () => ctx.screens.open('saveload'), { icon: '💾' }),

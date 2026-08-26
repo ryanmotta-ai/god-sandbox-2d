@@ -6,7 +6,6 @@ import { Kingdom } from '../src/civ/Kingdom';
 import { Entity } from '../src/entities/Entity';
 import { SpeciesType } from '../src/entities/Species';
 import { DiplomacyManager } from '../src/civ/Diplomacy';
-import { RailwayNetwork } from '../src/civ/RailwayNetwork';
 import { WarFrontSystem, SIEGE_GATE_PUSH } from '../src/civ/WarFronts';
 import { MilitaryLogistics } from '../src/civ/MilitaryLogistics';
 import { WarfareSystem } from '../src/civ/Warfare';
@@ -51,7 +50,6 @@ interface Harness {
   kingdoms: Map<string, Kingdom>;
   entities: Entity[];
   diplomacy: DiplomacyManager;
-  railways: RailwayNetwork;
   fronts: WarFrontSystem;
   logistics: MilitaryLogistics;
   year: number;
@@ -65,7 +63,6 @@ function harness(): Harness {
     kingdoms: new Map(),
     entities: [],
     diplomacy: new DiplomacyManager(),
-    railways: new RailwayNetwork(),
     fronts: new WarFrontSystem(),
     logistics: new MilitaryLogistics(),
     year: 100
@@ -333,69 +330,6 @@ function supplyHarness() {
   h.logistics.tickYear(logiWorld(h));
   const starved = h.fronts.sideOf(sector, 'A') === 'a' ? sector.supplyA : sector.supplyB;
   assert.ok(starved < 0.3, `an army with nothing behind it should be starving, supply was ${starved.toFixed(2)}`);
-}
-
-// --- Rail carries a war; road merely serves it -----------------------------
-{
-  const roadOnly = supplyHarness();
-  soldiers(roadOnly, 'A', 45, 40, 12);
-  roadOnly.fronts.tickYear(frontWorld(roadOnly));
-  roadOnly.logistics.tickYear(logiWorld(roadOnly));
-  const roadSector = sectorAt(roadOnly, 45, 40);
-  const roadLine = roadOnly.logistics.lineFor(roadSector.id, 'A')!;
-
-  const railed = supplyHarness();
-  soldiers(railed, 'A', 45, 40, 12);
-  // Lay track from the depot to the settlement behind the front.
-  for (let x = 20; x <= 40; x++) railed.railways.layTrack(railed.map, x, 40, 'A');
-  railed.fronts.tickYear(frontWorld(railed));
-  railed.logistics.tickYear(logiWorld(railed));
-  const railSector = sectorAt(railed, 45, 40);
-  const railLine = railed.logistics.lineFor(railSector.id, 'A')!;
-
-  assert.equal(railLine.mode, 'rail', 'a military railway to the front should be used as one');
-  assert.notEqual(roadLine.mode, 'rail', 'without track there is no rail line');
-  assert.ok(
-    railLine.capacity > roadLine.capacity * 1.5,
-    `rail should move far more than road: rail ${railLine.capacity.toFixed(0)} vs road ${roadLine.capacity.toFixed(0)}`
-  );
-}
-
-// --- Wreck the railway and the front it fed weakens ------------------------
-// The example the phase was asked for, end to end.
-{
-  const h = supplyHarness();
-  // A big army, so demand outruns what a road could carry and rail matters.
-  soldiers(h, 'A', 45, 40, 40);
-  for (let x = 20; x <= 40; x++) h.railways.layTrack(h.map, x, 40, 'A');
-
-  h.fronts.tickYear(frontWorld(h));
-  h.logistics.tickYear(logiWorld(h));
-  const sector = sectorAt(h, 45, 40);
-  const side = h.fronts.sideOf(sector, 'A')!;
-  const intactSupply = side === 'a' ? sector.supplyA : sector.supplyB;
-  const intactLine = h.logistics.lineFor(sector.id, 'A')!;
-  assert.equal(intactLine.mode, 'rail');
-  assert.ok(intactLine.integrity > 0.8, `an untouched line should be sound, was ${intactLine.integrity.toFixed(2)}`);
-
-  // Blow the track: every rail tile ruined.
-  for (let x = 20; x <= 40; x++) {
-    const t = h.map.getTile(x, 40)!;
-    if (t.railLevel > 0) t.railDamage = 1;
-  }
-
-  h.logistics.tickYear(logiWorld(h));
-  const brokenLine = h.logistics.lineFor(sector.id, 'A')!;
-  const brokenSupply = side === 'a' ? sector.supplyA : sector.supplyB;
-
-  assert.ok(
-    brokenLine.integrity < intactLine.integrity || brokenLine.mode !== 'rail',
-    'a destroyed railway must not deliver as if it were whole'
-  );
-  assert.ok(
-    brokenSupply < intactSupply,
-    `supply should fall when the line is cut: ${intactSupply.toFixed(2)} -> ${brokenSupply.toFixed(2)}`
-  );
 }
 
 // --- An unsupplied army loses men without a battle ------------------------

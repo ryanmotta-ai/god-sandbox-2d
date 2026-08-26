@@ -4,7 +4,7 @@ import {
   panel, progressBar, rowList, section, stat, statGrid, statRow, table
 } from '../kit';
 import { GOODS, type GoodId } from '../../civ/Goods';
-import { warfareConditions, warCausalChains } from './WarfareDiagnostics';
+import { warfareConditions } from './WarfareDiagnostics';
 import {
   FORCE_STATUS_LABEL, SETTLEMENT_LABEL, warStateLabel,
   type ArmyForceView, type EngagementView, type RealmRefView,
@@ -15,10 +15,6 @@ export interface WarfareScreenHost {
   openWar(warId: string): void;
   openRealm(kingdomId: string): void;
   openCity(cityId: string): void;
-  openGood(good: GoodId): void;
-  openInfrastructure(params?: { routeId?: string; cityId?: string; tab?: string }): void;
-  openPolitics(kingdomId: string): void;
-  openTechnology(kingdomId: string, techId?: string | null): void;
   openChronicle(): void;
   viewWarOnMap(war: WarView): void;
   viewPointOnMap(x: number, y: number): void;
@@ -109,7 +105,7 @@ function cityLink(city: WarView['cities'][number], host: WarfareScreenHost): HTM
 
 function warSummaryStats(war: WarView, host: WarfareScreenHost): HTMLElement {
   const heldCities = war.territory.attackerHeldCities + war.territory.defenderHeldCities;
-  const highestWeariness = Math.max(...war.politics.map(side => side.warWeariness), 0);
+  const highestWeariness = Math.max(war.attacker.warWeariness, war.defender.warWeariness, 0);
   return statGrid([
     stat({ label: 'Status', value: warStateLabel(war), icon: 'war', status: war.active ? 'critical' : 'neutral' }),
     stat({ label: 'Duração', value: war.duration, unit: 'anos', icon: 'history', meta: `Início em ${war.record.startYear}` }),
@@ -126,7 +122,6 @@ function warSummaryStats(war: WarView, host: WarfareScreenHost): HTMLElement {
       onClick: war.cities[0] ? () => host.openCity(war.cities[0].id) : undefined
     }),
     stat({ label: 'Maior desgaste de guerra', value: pct(highestWeariness), icon: 'politics', status: highestWeariness >= 60 ? 'warning' : 'neutral', tooltip: { title: 'Desgaste de guerra', description: 'Exaustão no nível do reino usada pelos sistemas de força de guerra e paz.' } }),
-    stat({ label: 'Capacidade comercial suspensa', value: formatCompact(war.economy.suspendedVolume), icon: 'trade-route', meta: `${war.economy.closedRoutes.length} rota(s) exata(s) fechada(s) pela guerra` })
   ]);
 }
 
@@ -303,7 +298,6 @@ export function buildArmies(snapshot: WarfareUISnapshot, host: WarfareScreenHost
         force.equipment.length ? rowList(force.equipment.map(item => statRow({
           label: item.name,
           value: `${item.count}${item.tier ? ` · ${item.tier}` : ''}`,
-          onClick: item.techId ? () => host.openTechnology(force.kingdom.id, item.techId) : undefined
         }))) : emptyState({ icon: 'swords', title: 'Nenhum equipamento registrado', compact: true })
       ])
     ]))
@@ -404,7 +398,6 @@ function forceSide(force: ArmyForceView | null, realm: RealmRefView, host: Warfa
 }
 
 export function buildWarDossier(war: WarView, host: WarfareScreenHost): Child[] {
-  const chains = warCausalChains(war);
   const affectedCities = war.cities;
   return [
     el('div', { class: 'ae-war-dossier-head' }, [
@@ -435,8 +428,8 @@ export function buildWarDossier(war: WarView, host: WarfareScreenHost): Child[] 
       ]),
       section('Dados dos participantes', [table({
         rows: [
-          { realm: war.attacker, force: war.attackerForce, losses: war.attackerLosses, heldCities: war.territory.attackerHeldCities, heldTiles: war.territory.attackerHeldTiles, weariness: war.politics.find(side => side.kingdom.id === war.attacker.id)?.warWeariness ?? 0 },
-          { realm: war.defender, force: war.defenderForce, losses: war.defenderLosses, heldCities: war.territory.defenderHeldCities, heldTiles: war.territory.defenderHeldTiles, weariness: war.politics.find(side => side.kingdom.id === war.defender.id)?.warWeariness ?? 0 }
+          { realm: war.attacker, force: war.attackerForce, losses: war.attackerLosses, heldCities: war.territory.attackerHeldCities, heldTiles: war.territory.attackerHeldTiles, weariness: war.attacker.warWeariness },
+          { realm: war.defender, force: war.defenderForce, losses: war.defenderLosses, heldCities: war.territory.defenderHeldCities, heldTiles: war.territory.defenderHeldTiles, weariness: war.defender.warWeariness }
         ],
         rowKey: row => row.realm.id,
         columns: [
@@ -477,7 +470,6 @@ export function buildWarDossier(war: WarView, host: WarfareScreenHost): Child[] 
           { key: 'population', header: 'População', align: 'right', cell: city => formatCompact(city.population), sortValue: city => city.population },
           { key: 'prosperity', header: 'Prosperidade', align: 'right', cell: city => formatPercent(city.prosperity), sortValue: city => city.prosperity },
           { key: 'defence', header: 'Defesa', align: 'right', cell: city => `×${city.defenceMultiplier.toFixed(2)}`, sortValue: city => city.defenceMultiplier },
-          { key: 'relevance', header: 'Relevância econômica', cell: city => city.economicRelevance.join(' · ') || 'Nenhum fato logístico rastreado' }
         ]
       }) : emptyState({ icon: 'city', title: 'Nenhuma cidade atualmente rastreada para esta guerra', hint: 'Cidades aparecem quando capturadas, sitiadas ou ameaçadas por combatentes hostis próximos.', compact: true })
     ]),
@@ -504,53 +496,6 @@ export function buildWarDossier(war: WarView, host: WarfareScreenHost): Child[] 
         ]);
       })) : null
     ]),
-    panel({ title: 'Impacto econômico', subtitle: 'Fluxos de participantes atuais e rotas exatas fechadas pela guerra', icon: 'trade-route' }, [
-      chains.length ? section('Cadeias causais', chains.map(chain => el('div', { class: `ae-war-chain ae-war-chain-${chain.status}` }, [
-        el('strong', { text: chain.cause }), el('span', { text: '→' }), el('span', { text: chain.mechanism }), el('span', { text: '→' }), el('span', { text: chain.consequence })
-      ]))) : emptyState({ icon: 'trade-route', title: 'Nenhuma consequência econômica rastreada', hint: 'O volume histórico de comércio perdido não é reconstruído após as rotas serem excluídas.', compact: true }),
-      war.economy.closedRoutes.length ? section('Rotas fechadas pela guerra', [rowList(war.economy.closedRoutes.map(route => statRow({
-        label: `${route.fromCity?.name ?? route.route.fromCityId} → ${route.toCity?.name ?? route.route.toCityId}`,
-        value: `${route.goodName} · volume ${route.route.volume.toFixed(1)}`,
-        status: 'warning', onClick: () => host.openInfrastructure({ routeId: route.route.id, tab: 'corridors' })
-      })))]) : null,
-      ...[war.attacker, war.defender].map(realm => section(`Bens estratégicos de ${realm.name}`, [
-        rowList((war.economy.strategicGoods.get(realm.id) ?? []).map(good => statRow({
-          label: good.name,
-          value: `estoque ${good.stock.toFixed(1)} · líquido ${good.net >= 0 ? '+' : ''}${good.net.toFixed(1)}${good.importDependency === null ? '' : ` · ${formatPercent(good.importDependency)} dependência de importação`}`,
-          status: good.net < 0 ? 'warning' : undefined,
-          onClick: () => host.openGood(good.good)
-        })))
-      ]))
-    ]),
-    panel({ title: 'Impacto na infraestrutura', subtitle: 'Problemas atuais nas redes dos participantes; apenas rotas explicitamente fechadas provam causalidade da guerra', icon: 'trade-route' }, [
-      war.infrastructure.damagedRailLines.length ? section('Ferrovia danificada', [rowList(war.infrastructure.damagedRailLines.map(line => statRow({
-        label: line.id, value: `${line.damagedTiles} bloco(s) danificado(s)`, status: 'warning',
-        onClick: () => host.viewPointOnMap(line.at.x, line.at.y)
-      })))]) : null,
-      war.infrastructure.disruptedPorts.length ? section('Portos inoperantes', [rowList(war.infrastructure.disruptedPorts.map(port => statRow({
-        label: port.cityName, value: `${formatPercent(port.condition)} condição`, status: 'critical', onClick: () => host.openInfrastructure({ cityId: port.cityId, tab: 'ports' })
-      })))]) : null,
-      war.infrastructure.bottlenecks.length ? section('Gargalos de participantes', [rowList(war.infrastructure.bottlenecks.slice(0, 8).map(item => statRow({
-        label: item.location, value: item.problem, status: item.severity, onClick: item.at ? () => host.viewPointOnMap(item.at!.x, item.at!.y) : undefined
-      })))]) : emptyState({ icon: 'shield', title: 'Nenhum gargalo atual de participante', compact: true })
-    ]),
-    panel({ title: 'Impacto político', icon: 'politics' }, war.politics.map(side => section(side.kingdom.name, [
-      statGrid([
-        stat({ label: 'Desgaste de guerra', value: pct(side.warWeariness), status: side.warWeariness >= 60 ? 'warning' : 'neutral', onClick: () => host.openPolitics(side.kingdom.id) }),
-        stat({ label: 'Legitimidade', value: formatPercent(side.legitimacy), onClick: () => host.openPolitics(side.kingdom.id) }),
-        stat({ label: 'Estabilidade', value: formatPercent(side.stability), onClick: () => host.openPolitics(side.kingdom.id) }),
-        stat({ label: 'Pressão por paz', value: formatPercent(side.peacePressure), status: side.peacePressure > side.warPressure ? 'warning' : 'neutral' })
-      ]),
-      rowList([
-        statRow({ label: 'Pressão por guerra', value: formatPercent(side.warPressure), onClick: () => host.openPolitics(side.kingdom.id) }),
-        statRow({ label: 'Pressão por reforma', value: formatPercent(side.reformPressure), status: side.reformPressure >= 0.5 ? 'warning' : undefined, onClick: () => host.openPolitics(side.kingdom.id) }),
-        statRow({ label: 'Risco de revolta', value: formatPercent(side.revoltRisk), status: side.revoltRisk >= 0.45 ? 'critical' : undefined, onClick: () => host.openPolitics(side.kingdom.id) }),
-        statRow({ label: 'Risco de golpe', value: formatPercent(side.coupRisk), status: side.coupRisk >= 0.45 ? 'critical' : undefined, onClick: () => host.openPolitics(side.kingdom.id) })
-      ]),
-      side.factions.length ? rowList(side.factions.map(faction => statRow({
-        label: faction.name, value: `Influência ${formatPercent(faction.influence)} · apoio à guerra ${formatPercent(faction.warSupport)}`, onClick: () => host.openPolitics(side.kingdom.id)
-      }))) : null
-    ], { actions: [button('Abrir Política', () => host.openPolitics(side.kingdom.id), { icon: 'politics', size: 'sm' })] }))),
     panel({ title: 'Linha do tempo da Crônica', subtitle: 'Apenas eventos com referência estruturada a este Registro de Guerra', icon: 'history', actions: [button('Abrir Crônica', () => host.openChronicle(), { icon: 'history', size: 'sm' })] }, [
       war.timeline.length ? el('div', { class: 'ae-war-timeline' }, war.timeline.map(event => el('div', { class: 'ae-war-timeline-event' }, [
         el('span', { class: 'ae-war-timeline-year', text: `${event.year}` }),

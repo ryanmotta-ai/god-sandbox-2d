@@ -1,14 +1,8 @@
 import { GoodId } from './Goods';
-import { TradeRoute } from './Trade';
 import { City } from './City';
 import { Kingdom } from './Kingdom';
 import { rng } from '../core/Random';
 import { WorldEra } from '../world/WeatherEras';
-
-/** The only thing air freight needs from the wider economy. */
-export interface AirMarket {
-  reportDemand(good: GoodId, amount: number): void;
-}
 
 /** The only thing a bombing campaign needs to know about diplomacy. */
 export interface AirWar {
@@ -16,7 +10,7 @@ export interface AirWar {
 }
 
 /**
- * Air freight and air travel, once a realm has aerodromes at both ends.
+ * Air war, once a realm has aerodromes.
  *
  * An aircraft is the first mover on this map that does not care what is
  * underneath it. Every other kind of traffic is an argument with the ground —
@@ -34,7 +28,7 @@ export interface AirWar {
  */
 
 /** What a given flight is carrying. */
-export type FlightPayload = 'cargo' | 'passengers' | 'bombs';
+export type FlightPayload = 'bombs';
 
 /** Where a flight is in its profile. Drawn differently in each. */
 export type FlightPhase = 'takeoff' | 'cruise' | 'landing';
@@ -258,8 +252,6 @@ export class AirSystem {
   public sorties: Map<string, Flight> = new Map();
   /** Flights completed this year, for the yearly report. */
   public yearlyFlights: number = 0;
-  public yearlyPassengers: number = 0;
-  public yearlyFreight: number = 0;
   public yearlySorties: number = 0;
   /** Health destroyed by bombing this year, across every target. */
   public yearlyBombDamage: number = 0;
@@ -278,8 +270,6 @@ export class AirSystem {
   /** Called once a year, after the totals have been read. */
   public resetYear(): void {
     this.yearlyFlights = 0;
-    this.yearlyPassengers = 0;
-    this.yearlyFreight = 0;
     this.yearlySorties = 0;
     this.yearlyBombDamage = 0;
     this.yearlyLosses = 0;
@@ -456,160 +446,6 @@ export class AirSystem {
     target.prosperity = Math.max(0, target.prosperity - BOMB_PROSPERITY_COST * survival);
   }
 
-  public updateFlights(
-    routes: Map<string, TradeRoute>,
-    cities: Map<string, City>,
-    kingdoms: Map<string, Kingdom>,
-    market?: AirMarket
-  ): void {
-    const served = new Set<string>();
-    // Slots left at each field this tick. Services already running keep theirs,
-    // so a new route cannot evict an established one just by being iterated
-    // first — the ceiling decides who never opens, not who gets thrown out.
-    const free = new Map<string, number>();
-    const slotsAt = (city: City): number => {
-      let left = free.get(city.id);
-      if (left === undefined) {
-        left = airportCapacity(city);
-        free.set(city.id, left);
-      }
-      return left;
-    };
-    const takeSlots = (from: City, to: City): void => {
-      free.set(from.id, slotsAt(from) - 1);
-      free.set(to.id, slotsAt(to) - 1);
-    };
-
-    for (const route of routes.values()) {
-      if (!route.active) continue;
-      const from = cities.get(route.fromCityId);
-      const to = cities.get(route.toCityId);
-      if (!from || !to) continue;
-      const generation = aircraftGenerationFor(route.fromKingdomId ? kingdoms.get(route.fromKingdomId) : null);
-      if (!airServiceAvailable(from, to, generation)) continue;
-
-      const flight = this.flights.get(route.id);
-      if (flight) {
-        served.add(route.id);
-        takeSlots(from, to);
-        this.fly(flight, from, to, route, market);
-        continue;
-      }
-      // A field with no apron left simply does not open the service this tick.
-      if (slotsAt(from) < 1 || slotsAt(to) < 1) continue;
-      served.add(route.id);
-      takeSlots(from, to);
-      const opened = this.open(route, from, to, kingdoms, generation);
-      this.flights.set(route.id, opened);
-      this.fly(opened, from, to, route, market);
-    }
-
-    // A service stops the moment its route closes or an airport is knocked out.
-    for (const id of [...this.flights.keys()]) {
-      if (!served.has(id)) this.flights.delete(id);
-    }
-  }
-
-  /** Opens a service on a route, on the apron and ready to depart. */
-  private open(
-    route: TradeRoute, from: City, to: City, kingdoms: Map<string, Kingdom>, generation: AircraftGeneration
-  ): Flight {
-    const kingdom = route.fromKingdomId ? kingdoms.get(route.fromKingdomId) : null;
-    return {
-      id: `air_${route.id}`,
-      routeId: route.id,
-      fromCityId: from.id,
-      toCityId: to.id,
-      fromCityName: from.name,
-      toCityName: to.name,
-      startX: from.x,
-      startY: from.y,
-      endX: to.x,
-      endY: to.y,
-      x: from.x,
-      y: from.y,
-      progress: 0,
-      direction: 1,
-      ...this.manifest(route, from, generation),
-      generation,
-      kingdomColor: kingdom?.color ?? '#e2e8f0',
-      altitude: 0,
-      phase: 'takeoff',
-      headingX: 0,
-      headingY: -1,
-      routeTiles: Math.max(1, Math.hypot(to.x - from.x, to.y - from.y)),
-      turnaround: TURNAROUND_TICKS
-    };
-  }
-
-  /**
-   * What the next departure is carrying.
-   *
-   * A route that moves goods flies freight most of the time; the rest is
-   * people, because an airport that only ever saw cargo would be a depot. The
-   * busier the city, the more of its flights carry passengers — which is the
-   * shape real air service takes as a place grows.
-   */
-  private manifest(
-    route: TradeRoute, from: City, generation: AircraftGeneration
-  ): Pick<Flight, 'payload' | 'cargo' | 'load'> {
-    const capacity = GENERATION[generation].capacity;
-    const passengerBias = Math.min(0.65, 0.2 + from.population / 4000);
-    if (!route.good || rng.chance(passengerBias)) {
-      return {
-        payload: 'passengers',
-        cargo: null,
-        load: Math.max(8, Math.round(from.population * rng.range(0.004, 0.012) * capacity))
-      };
-    }
-    return {
-      payload: 'cargo',
-      cargo: route.good,
-      load: Math.max(1, Math.round(route.volume * rng.range(AIR_LOAD_FRACTION[0], AIR_LOAD_FRACTION[1]) * capacity))
-    };
-  }
-
-  /**
-   * Advances one service by a tick.
-   *
-   * The profile is the real one and not a slide along a line: the aircraft
-   * sits on the apron, rolls and climbs away over the first stretch, cruises
-   * flat, descends into the far field, then sits again. Altitude is derived
-   * from progress rather than stored, so it can never drift out of step with
-   * where the aircraft actually is.
-   */
-  private fly(flight: Flight, from: City, to: City, route: TradeRoute, market?: AirMarket): void {
-    // Airports move when a city is refounded elsewhere; keep the ends current.
-    flight.startX = from.x;
-    flight.startY = from.y;
-    flight.endX = to.x;
-    flight.endY = to.y;
-    flight.routeTiles = Math.max(1, Math.hypot(to.x - from.x, to.y - from.y));
-
-    if (flight.turnaround > 0) {
-      flight.turnaround--;
-      flight.altitude = 0;
-      flight.phase = 'takeoff';
-      return;
-    }
-
-    flight.progress += (GENERATION[flight.generation].speed / flight.routeTiles) * flight.direction;
-
-    if (flight.progress >= 1) {
-      flight.progress = 1;
-      flight.direction = -1;
-      flight.turnaround = TURNAROUND_TICKS;
-      this.arrive(flight, route, from, to, market);
-    } else if (flight.progress <= 0) {
-      flight.progress = 0;
-      flight.direction = 1;
-      flight.turnaround = TURNAROUND_TICKS;
-      this.arrive(flight, route, to, from, market);
-    }
-
-    this.place(flight);
-  }
-
   /**
    * Where an aircraft is, how high, and which way it points, from its progress
    * alone.
@@ -643,71 +479,4 @@ export class AirSystem {
     }
   }
 
-  /**
-   * Books the arrival, then loads the next departure.
-   *
-   * The manifest is drawn fresh every turnaround rather than once when the
-   * service opened. Otherwise a route that happened to start with freight
-   * flies freight for ever, and the airport never sees a passenger — which is
-   * both wrong and dull to watch.
-   */
-  private arrive(flight: Flight, route: TradeRoute, origin: City, at: City, market?: AirMarket): void {
-    this.yearlyFlights++;
-    if (this.lost(flight)) {
-      // Whatever was aboard went with it. Dropping the service here leaves the
-      // route unserved, and the next tick opens a replacement — a realm buying
-      // another aircraft, which is the right amount of consequence: expensive
-      // in lost cargo and a pause, not the permanent end of the line.
-      this.flights.delete(route.id);
-      return;
-    }
-    if (flight.payload === 'passengers') this.carryPassengers(flight, origin, at);
-    else this.unload(flight, origin, at, market);
-    Object.assign(flight, this.manifest(route, at, flight.generation));
-  }
-
-  /**
-   * Puts the freight where the flight took it.
-   *
-   * This is the whole point of an air service and it was missing: the system
-   * counted tonnage into a yearly total that only the chronicle ever read, so
-   * an airport cost stone, steel, fuel and ten jobs and moved nothing. Freight
-   * now leaves the departure stockpile and lands in the arrival one, through
-   * the same take/add/ledger path the railway uses, so both ends show it in
-   * their trade figures and the market hears the demand.
-   *
-   * A city keeps a floor back for itself, so an air link cannot strip the place
-   * that built the runway. Below that floor the aircraft flies empty, which is
-   * a real outcome and worth being able to see.
-   */
-  private unload(flight: Flight, origin: City, destination: City, market?: AirMarket): void {
-    if (!flight.cargo) return;
-    if (origin.stock.get(flight.cargo) - destination.stock.get(flight.cargo) < AIR_MIN_GRADIENT) return;
-    const surplus = Math.floor(origin.stock.get(flight.cargo) - AIR_SURPLUS_FLOOR);
-    const amount = Math.min(flight.load, surplus);
-    if (amount < 1) return;
-
-    const moved = origin.stock.take(flight.cargo, amount);
-    const delivered = destination.stock.add(flight.cargo, moved);
-    // The arrival can be full; what will not fit goes back on the apron.
-    if (delivered < moved) origin.stock.add(flight.cargo, moved - delivered);
-    origin.ledger.recordExported(flight.cargo, delivered);
-    destination.ledger.recordImported(flight.cargo, delivered);
-    market?.reportDemand(flight.cargo, delivered);
-    this.yearlyFreight += delivered;
-  }
-
-  /**
-   * What a passenger service is worth to the two places it joins.
-   *
-   * There is no passenger cargo to deliver, so the effect has to be on the
-   * cities themselves: being reachable by air makes a place wealthier, at both
-   * ends and by the same amount, because the route works in both directions.
-   */
-  private carryPassengers(flight: Flight, origin: City, destination: City): void {
-    this.yearlyPassengers += flight.load;
-    const worth = PASSENGER_PROSPERITY_PER_1K * (flight.load / 1000);
-    origin.prosperity = Math.min(1, origin.prosperity + worth);
-    destination.prosperity = Math.min(1, destination.prosperity + worth);
-  }
 }

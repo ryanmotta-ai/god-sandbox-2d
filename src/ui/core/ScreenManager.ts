@@ -9,7 +9,6 @@ export type ScreenId =
   | 'loading'
   | 'pause'
   | 'kingdoms'
-  | 'diplomacy'
   | 'stats'
   | 'bestiary'
   | 'chronicle'
@@ -18,15 +17,10 @@ export type ScreenId =
   | 'saveload'
   | 'credits'
   | 'gameover'
-  | 'politics'
-  | 'economy'
   | 'warfare'
   | 'dynasty'
   | 'ecosystem'
-  | 'techtree'
-  | 'infrastructure'
   | 'city'
-  | 'realm'
   | 'timeskip'
   /** Development-only gallery of the design system. Reached from the debug panel. */
   | 'ui-kit';

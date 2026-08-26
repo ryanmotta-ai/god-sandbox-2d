@@ -21,7 +21,6 @@ import { GOVERNMENTS } from '../../civ/Government';
 import { GOODS, type GoodId } from '../../civ/Goods';
 import { SOCIAL_FACTIONS, SOCIAL_FACTION_ORDER, type SocialFactionId } from '../../civ/Society';
 import { chronicle, type HistoryEvent } from '../../civ/Chronicle';
-import type { LogisticsMetrics, Bottleneck, PortView, RouteView } from '../logistics/LogisticsMetrics';
 
 export type ForceStatus = 'attacking' | 'moving' | 'sieging' | 'defending' | 'retreating' | 'patrolling' | 'recovering' | 'idle';
 export type WarCityStatus = 'safe' | 'threatened' | 'besieged' | 'captured';
@@ -45,6 +44,8 @@ export interface RealmRefView {
   name: string;
   color: string;
   surviving: boolean;
+  /** How tired of fighting this realm is, 0..100. A war fact, kept on the ref. */
+  warWeariness: number;
 }
 
 export interface EquipmentView {
@@ -123,7 +124,6 @@ export interface WarCityView {
   siegeYears: number | null;
   isCapital: boolean;
   defenceMultiplier: number;
-  economicRelevance: string[];
   x: number;
   y: number;
 }
@@ -177,19 +177,6 @@ export interface TerritoryChangeView {
   basedOnCapturedCities: true;
 }
 
-export interface WarEconomyView {
-  closedRoutes: RouteView[];
-  suspendedVolume: number;
-  strategicGoods: Map<string, StrategicGoodView[]>;
-  damagedBuildings: { cityId: string; cityName: string; count: number; meanCondition: number }[];
-}
-
-export interface WarInfrastructureView {
-  bottlenecks: Bottleneck[];
-  damagedRailLines: { id: string; damagedTiles: number; at: { x: number; y: number }; cityIds: string[] }[];
-  disruptedPorts: PortView[];
-}
-
 export interface WarView {
   record: WarRecord;
   attacker: RealmRefView;
@@ -208,9 +195,6 @@ export interface WarView {
   sieges: SiegeView[];
   engagements: EngagementView[];
   allies: AlliedInterventionView[];
-  economy: WarEconomyView;
-  infrastructure: WarInfrastructureView;
-  politics: PoliticalWarView[];
   timeline: HistoryEvent[];
   mapFocus: { x: number; y: number };
 }
@@ -264,7 +248,8 @@ function realmRef(id: string, ctx: GameContext, fallback = 'Reino desconhecido')
     id,
     name: kingdom?.name ?? fallback,
     color: kingdom?.color ?? '#64748b',
-    surviving: Boolean(kingdom)
+    surviving: Boolean(kingdom),
+    warWeariness: kingdom?.warWeariness ?? 0
   };
 }
 
@@ -503,27 +488,12 @@ function territoryChange(war: WarRecord, events: HistoryEvent[], ctx: GameContex
   };
 }
 
-function cityEconomicRelevance(city: City, logistics: LogisticsMetrics): string[] {
-  const facts: string[] = [];
-  const outputs = city.ledger.goods()
-    .map(good => ({ good, amount: city.ledger.flow(good).produced }))
-    .filter(item => item.amount > 0)
-    .sort((a, b) => b.amount - a.amount)
-    .slice(0, 2);
-  if (outputs.length) facts.push(`Produz ${outputs.map(item => GOODS[item.good]?.name ?? item.good).join(', ')}`);
-  const access = logistics.cities.find(item => item.cityId === city.id);
-  if (access?.railConnected) facts.push('Conectada por ferrovia');
-  if (access?.portOperational) facts.push('Porto operacional');
-  if (access && (access.routesIn + access.routesOut) > 0) facts.push(`${access.routesIn + access.routesOut} rota(s) comercial(is)`);
-  return facts;
-}
 
 function warCities(
   war: WarRecord,
   events: HistoryEvent[],
   sieges: SiegeView[],
   combatantsByRealm: Map<string, Entity[]>,
-  logistics: LogisticsMetrics,
   ctx: GameContext
 ): WarCityView[] {
   const ids = capturedCityIds(events);
@@ -559,7 +529,6 @@ function warCities(
       siegeYears: siege?.years ?? null,
       isCapital: ownerKingdom?.capitalCityId === city.id,
       defenceMultiplier: city.defenseMultiplier(),
-      economicRelevance: cityEconomicRelevance(city, logistics),
       x: city.x, y: city.y
     });
   }
@@ -588,84 +557,8 @@ function strategicGoods(kingdomId: string, ctx: GameContext): StrategicGoodView[
   }).filter(item => item.stock > 0 || item.produced > 0 || item.consumed > 0 || item.imported > 0 || item.exported > 0);
 }
 
-function warEconomy(war: WarRecord, cities: WarCityView[], logistics: LogisticsMetrics, ctx: GameContext): WarEconomyView {
-  const closedRoutes = logistics.routes.filter(item => {
-    const a = item.route.fromKingdomId;
-    const b = item.route.toKingdomId;
-    return !item.route.active && ((a === war.attacker && b === war.defender) || (a === war.defender && b === war.attacker));
-  });
-  const damagedBuildings: WarEconomyView['damagedBuildings'] = [];
-  for (const view of cities) {
-    if (view.status === 'safe') continue;
-    const city = ctx.sim.cities.get(view.id);
-    if (!city) continue;
-    const damaged = [...city.buildings.values()].filter(building => building.hp < building.maxHp);
-    if (!damaged.length) continue;
-    damagedBuildings.push({
-      cityId: city.id, cityName: city.name, count: damaged.length,
-      meanCondition: damaged.reduce((sum, building) => sum + building.hp / Math.max(1, building.maxHp), 0) / damaged.length
-    });
-  }
-  return {
-    closedRoutes,
-    // This is route capacity currently suspended, not a reconstructed historical loss.
-    suspendedVolume: closedRoutes.reduce((sum, item) => sum + item.route.volume, 0),
-    strategicGoods: new Map([
-      [war.attacker, strategicGoods(war.attacker, ctx)],
-      [war.defender, strategicGoods(war.defender, ctx)]
-    ]),
-    damagedBuildings
-  };
-}
 
-function warInfrastructure(war: WarRecord, cities: WarCityView[], logistics: LogisticsMetrics): WarInfrastructureView {
-  const participantIds = new Set([war.attacker, war.defender]);
-  const cityIds = new Set(cities.map(city => city.id));
-  const bottlenecks = logistics.bottlenecks.filter(item =>
-    (item.kingdomId ? participantIds.has(item.kingdomId) : false) ||
-    (item.cityId ? cityIds.has(item.cityId) : false) ||
-    item.affectedKingdoms.some(kingdom => participantIds.has(kingdom.id)) ||
-    item.affectedCities.some(city => cityIds.has(city.id))
-  );
-  const damagedRailLines = logistics.rail.lines
-    .filter(line => line.damagedTiles > 0 && line.owners.some(owner => participantIds.has(owner.kingdomId)))
-    .map(line => ({ id: line.id, damagedTiles: line.damagedTiles, at: line.at, cityIds: line.stations.map(station => station.cityId) }));
-  const disruptedPorts = logistics.ports.filter(port =>
-    !port.operational && Boolean(port.kingdomId && participantIds.has(port.kingdomId)) && (cityIds.size === 0 || cityIds.has(port.cityId))
-  );
-  return { bottlenecks, damagedRailLines, disruptedPorts };
-}
 
-function politicalView(id: string, ctx: GameContext): PoliticalWarView {
-  const kingdom = ctx.sim.kingdoms.get(id);
-  const fallback = realmRef(id, ctx);
-  if (!kingdom) {
-    return {
-      kingdom: fallback, warWeariness: 0, legitimacy: 0, stability: 0,
-      warPressure: 0, peacePressure: 0, revoltRisk: 0, coupRisk: 0, reformPressure: 0,
-      factions: []
-    };
-  }
-  return {
-    kingdom: fallback,
-    warWeariness: kingdom.warWeariness,
-    legitimacy: kingdom.legitimacy,
-    stability: kingdom.economy.stability,
-    warPressure: kingdom.society.warPressure,
-    peacePressure: kingdom.society.peacePressure,
-    revoltRisk: kingdom.society.revoltRisk,
-    coupRisk: kingdom.society.coupRisk,
-    reformPressure: kingdom.society.reformPressure,
-    factions: SOCIAL_FACTION_ORDER.map(id => ({
-      id,
-      name: SOCIAL_FACTIONS[id].name,
-      color: SOCIAL_FACTIONS[id].color,
-      influence: kingdom.society.factions[id].influence,
-      warSupport: kingdom.society.factions[id].warSupport,
-      satisfaction: kingdom.society.factions[id].satisfaction
-    })).filter(faction => faction.influence > 0.02)
-  };
-}
 
 function alliedInterventions(war: WarRecord, ctx: GameContext): AlliedInterventionView[] {
   const result: AlliedInterventionView[] = [];
@@ -705,13 +598,12 @@ function buildWar(
   engagements: EngagementView[],
   sieges: SiegeView[],
   combatantsByRealm: Map<string, Entity[]>,
-  logistics: LogisticsMetrics,
   ctx: GameContext
 ): WarView {
   const events = warEvents(record.id, eventIndex);
   const territory = territoryChange(record, events, ctx);
   const ownSieges = sieges.filter(item => item.warId === record.id);
-  const cities = warCities(record, events, ownSieges, combatantsByRealm, logistics, ctx);
+  const cities = warCities(record, events, ownSieges, combatantsByRealm, ctx);
   const ownEngagements = engagements.filter(item => item.warId === record.id);
   const points = [
     ...cities.map(city => ({ x: city.x, y: city.y })),
@@ -741,9 +633,6 @@ function buildWar(
     sieges: ownSieges,
     engagements: ownEngagements,
     allies: alliedInterventions(record, ctx),
-    economy: warEconomy(record, cities, logistics, ctx),
-    infrastructure: warInfrastructure(record, cities, logistics),
-    politics: [politicalView(record.attacker, ctx), politicalView(record.defender, ctx)],
     timeline: events,
     mapFocus
   };
@@ -757,7 +646,6 @@ export function describeWar(record: WarRecord, ctx: GameContext): string {
 
 export function computeWarfareUISnapshot(
   ctx: GameContext,
-  logistics: LogisticsMetrics,
   now: number = performance.now()
 ): WarfareUISnapshot {
   const started = performance.now();
@@ -775,8 +663,8 @@ export function computeWarfareUISnapshot(
   const engagements = activeRecords.flatMap(war => engagementClusters(war, combatantsByRealm, ctx));
   const sieges = buildSieges(ctx);
   const eventIndex = buildEventIndex();
-  const activeWars = activeRecords.map(war => buildWar(war, eventIndex, forcesByRealm, engagements, sieges, combatantsByRealm, logistics, ctx));
-  const history = historyRecords.map(war => buildWar(war, eventIndex, forcesByRealm, engagements, sieges, combatantsByRealm, logistics, ctx))
+  const activeWars = activeRecords.map(war => buildWar(war, eventIndex, forcesByRealm, engagements, sieges, combatantsByRealm, ctx));
+  const history = historyRecords.map(war => buildWar(war, eventIndex, forcesByRealm, engagements, sieges, combatantsByRealm, ctx))
     .sort((a, b) => (b.record.endYear ?? 0) - (a.record.endYear ?? 0));
   const realms = [...ctx.sim.kingdoms.values()].map(kingdom => {
     const force = forcesByRealm.get(kingdom.id) ?? null;
@@ -822,13 +710,13 @@ export class WarfareUISnapshotCache {
   private warSignature = '';
   private static readonly MAX_AGE_MS = 1200;
 
-  public get(ctx: GameContext, logistics: LogisticsMetrics, now: number): WarfareUISnapshot {
+  public get(ctx: GameContext, now: number): WarfareUISnapshot {
     const signature = [...ctx.sim.diplomacy.activeWars.values()]
       .map(war => `${war.id}:${war.battles}:${war.attackerKills}:${war.defenderKills}`)
       .sort().join('|');
     const stale = now - this.builtAt >= WarfareUISnapshotCache.MAX_AGE_MS;
     if (this.snapshot && this.builtYear === ctx.sim.currentYear && this.warSignature === signature && !stale) return this.snapshot;
-    this.snapshot = computeWarfareUISnapshot(ctx, logistics, now);
+    this.snapshot = computeWarfareUISnapshot(ctx, now);
     this.builtAt = now;
     this.builtYear = ctx.sim.currentYear;
     this.warSignature = signature;

@@ -15,17 +15,13 @@ import { SpriteGenerator, type EntitySpriteAnimation, type SpriteDirection } fro
 import { SpriteRegistry } from './SpriteRegistry';
 import { PixelIcons } from './PixelIcons';
 import { DiplomacyManager } from '../civ/Diplomacy';
-import { Ship, SHIP_TIERS } from '../civ/NavalSystem';
 import type { InvasionFleet } from '../civ/NavalInvasion';
 import { flagshipOf } from '../civ/Warships';
-import { OverlandCaravan } from '../civ/CaravanSystem';
-import type { ActiveTrain, RailwayNetwork } from '../civ/RailwayNetwork';
 import { GOODS, type GoodTier } from '../civ/Goods';
 import {
   BRIDGE_HALF_WIDTH, BRIDGE_SLICE_PX, bridgeModelFor, bridgeSprite, needsCable, throwsShadow
 } from './BridgeSprites';
 import { PROP_SCALE, propAspect, roadProp, type RoadProp } from './RoadSprites';
-import { CARAVAN_FRAMES, CARAVAN_PX, STRIDE_TILES, caravanSprite, type CaravanView } from './CaravanSprites';
 import type { SpatialHash } from '../core/SpatialHash';
 import { perfProfiler } from '../perf/PerformanceProfiler';
 import { BUILDING_DRAW_SCALE, resolveCityBuildingVisual } from './CityVisualResolver';
@@ -2482,9 +2478,6 @@ export class PixelRenderer {
     brushX: number | null,
     brushY: number | null,
     brushSize: number,
-    ships?: Iterable<Ship>,
-    caravans?: Iterable<OverlandCaravan>,
-    railways?: RailwayNetwork | { yearlyFreight: number },
     warFocus?: WarOverlayFocus | null,
     overlays?: OverlayManager,
     mapIntel?: MapIntelligenceSnapshot | null,
@@ -2671,13 +2664,9 @@ export class PixelRenderer {
     // ========== 1b. ROAD NETWORK POLYLINES (A+C+E) ==========
     this.drawRoadsPass(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, cities, kingdoms);
 
-    // ========== 1c. RAILWAYS ==========
-    this.drawRailwaysPass(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, !!railways && railways.yearlyFreight > 0);
-
     // ========== 1d. COMBINABLE WORLD-INTELLIGENCE LAYERS ==========
     if (overlays) {
       this.drawInfrastructureIntelligence(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, overlays, mapIntel);
-      if (overlays.layers.has('trade') && mapIntel) this.drawTradeOverlay(camera, width, height, tileSize, mapIntel);
       if (overlays.layers.has('armies')) this.drawArmyOverlay(camera, width, height, tileSize, tileSize < 4 ? entities : visibleEntities, kingdoms);
     }
 
@@ -2945,131 +2934,6 @@ export class PixelRenderer {
         this.drawInvasionFleet(fleet, camera, width, height, tileSize);
       }
     }
-
-    // ========== 3c. NAVAL SHIPS & CARAVANS ==========
-    if (ships && tileSize >= 5) {
-      for (const ship of ships) {
-        if (ship.x < minX || ship.x > maxX || ship.y < minY || ship.y > maxY) continue;
-        const screenPos = camera.worldToScreen(ship.x, ship.y, width, height);
-        const shipSize = Math.max(16, tileSize * 1.3);
-
-        // Animated water wake behind ship: scales with speed/progress and leaves a bubbly trail
-        const wakeRadius = Math.max(4, tileSize * 0.45) * (0.8 + Math.sin(this.animTimer * 10) * 0.2);
-        const isFlipped = ship.direction < 0;
-        const wakeX = screenPos.x + (isFlipped ? shipSize + 4 : -4);
-        const wakeY = screenPos.y + shipSize * 0.65;
-        this.ctx.fillStyle = 'rgba(224, 242, 254, 0.45)'; // Lighter, foamier color
-        this.ctx.beginPath();
-        this.ctx.ellipse(wakeX, wakeY, wakeRadius * 1.5, wakeRadius, 0, 0, Math.PI * 2);
-        this.ctx.fill();
-        this.ctx.beginPath();
-        this.ctx.ellipse(wakeX + (isFlipped ? 8 : -8), wakeY, wakeRadius * 0.8, wakeRadius * 0.5, 0, 0, Math.PI * 2);
-        this.ctx.fill();
-
-        // Buoyancy rocking: a soft pendulum rotation matching the ocean waves
-        // Different ships rock at different frequencies based on their tier/weight
-        const rockSpeed = 1.2 + (5 - ship.tier) * 0.4;
-        const rockAngle = Math.sin(this.animTimer * rockSpeed + ship.x) * (0.04 + (4 - ship.tier) * 0.01);
-
-        // Pixel-Art Ship Sprite
-        const spriteKey = `ship_tier_${ship.tier}`;
-        const sprite = SpriteGenerator.has(spriteKey)
-          ? SpriteGenerator.getSprite(spriteKey, () => {}, 24, 24)
-          : SpriteGenerator.getSprite('ship_tier_1', () => {}, 64, 64);
-
-        this.ctx.save();
-        this.ctx.translate(screenPos.x + (isFlipped ? shipSize : 0), screenPos.y);
-        if (isFlipped) this.ctx.scale(-1, 1);
-        
-        // Pivot around the water-line
-        this.ctx.translate(shipSize / 2, shipSize * 0.7);
-        this.ctx.rotate(rockAngle);
-        this.ctx.translate(-shipSize / 2, -shipSize * 0.7);
-
-        this.ctx.drawImage(sprite, 0, 0, shipSize, shipSize);
-
-        // Steam from tier 4 ships (Cruzador de Aço)
-        if (ship.tier === 4 && Math.random() > 0.6 && particles) {
-          particles.spawnGunSmoke(ship.x + (isFlipped ? 0.3 : -0.3), ship.y - 0.2, isFlipped ? 0.5 : -0.5, -0.5, 1);
-        }
-
-        // Kingdom Flag Banner on Mast
-        if (tileSize > 6) {
-          const flagX = shipSize * 0.45;
-          const flagY = -4;
-          const flagWave = Math.sin(this.animTimer * 5 + ship.x) * 1.2;
-          this.ctx.fillStyle = ship.kingdomColor ?? '#fbbf24';
-          this.ctx.fillRect(flagX + flagWave, flagY, 9, 6);
-          this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-          this.ctx.lineWidth = 1;
-          this.ctx.strokeRect(flagX + flagWave, flagY, 9, 6);
-        }
-        
-        this.ctx.restore();
-      }
-    }
-
-    // ========== 3d. OVERLAND CARAVANS ==========
-    if (caravans && tileSize >= 4) {
-      for (const caravan of caravans) {
-        if (caravan.x < minX || caravan.x > maxX || caravan.y < minY || caravan.y > maxY) continue;
-        const screenPos = camera.worldToScreen(caravan.x, caravan.y, width, height);
-        const caravanSize = Math.max(14, tileSize * 1.15);
-        // The animal stands *on* the point it occupies. Anchoring the sprite's
-        // corner there, as this used to, left it standing half a tile off the
-        // road it was supposed to be walking down.
-        const footX = screenPos.x + tileSize * 0.5;
-        const footY = screenPos.y + tileSize * 0.5;
-        const drawX = footX - caravanSize * 0.5;
-        const drawY = footY - caravanSize * 0.94;
-
-        // Which side of the animal is toward the camera, from where it is
-        // actually pointing: away up the road, toward the camera coming down
-        // it, and side-on across it — with the left side being the right side
-        // mirrored, exactly as the animal itself is.
-        const hx = caravan.headingX;
-        const hy = caravan.headingY;
-        const view: CaravanView = Math.abs(hx) > Math.abs(hy) ? 'side' : hy < 0 ? 'back' : 'front';
-        // The gait is measured in ground covered, never in wall-clock time, so
-        // the legs cannot outrun the movement however the road and the terrain
-        // are scaling it.
-        const walked = caravan.progress * caravan.routeTiles;
-        const frame = Math.floor(walked / (STRIDE_TILES[caravan.caravanType] / CARAVAN_FRAMES));
-        const sprite = caravanSprite(caravan.caravanType, view, frame);
-
-        this.ctx.save();
-        this.ctx.imageSmoothingEnabled = caravanSize < CARAVAN_PX * 0.75;
-        if (view === 'side' && hx < 0) {
-          this.ctx.translate(drawX + caravanSize, drawY);
-          this.ctx.scale(-1, 1);
-          this.ctx.drawImage(sprite, 0, 0, caravanSize, caravanSize);
-        } else {
-          this.ctx.drawImage(sprite, drawX, drawY, caravanSize, caravanSize);
-        }
-        this.ctx.restore();
-
-        // Dust kicked up behind it, on the side it came from — only on a dirt
-        // road, because that is the only surface that gives any up.
-        const dustTile = tileMap.getTile(Math.floor(caravan.x), Math.floor(caravan.y));
-        if (tileSize > 6 && dustTile && dustTile.roadLevelEffective <= 1) {
-          const puff = 0.6 + Math.sin(walked * 7) * 0.2;
-          this.ctx.fillStyle = 'rgba(180, 150, 105, 0.24)';
-          this.ctx.beginPath();
-          this.ctx.arc(footX - hx * caravanSize * 0.4, footY - hy * caravanSize * 0.18,
-            caravanSize * 0.16 * puff, 0, Math.PI * 2);
-          this.ctx.fill();
-        }
-
-        // Kingdom Banner on Pack Saddle
-        if (tileSize > 6) {
-          this.ctx.fillStyle = caravan.kingdomColor ?? '#fbbf24';
-          this.ctx.fillRect(footX - 3, drawY + caravanSize * 0.06, 7, 4);
-        }
-      }
-    }
-
-    // ========== 3e. PHYSICAL ACTIVE TRAINS & CARS ==========
-    this.drawActiveTrainsPass(railways, camera, width, height, tileSize, minX, maxX, minY, maxY);
 
     // ========== 2f. AIRCRAFT ==========
     // Drawn after everything on the ground, because they are over it.
@@ -3494,9 +3358,6 @@ export class PixelRenderer {
     brushX: number | null,
     brushY: number | null,
     brushSize: number,
-    ships?: Iterable<Ship>,
-    caravans?: Iterable<OverlandCaravan>,
-    railways?: { yearlyFreight: number },
     warFocus?: WarOverlayFocus | null,
     overlays?: OverlayManager,
     mapIntel?: MapIntelligenceSnapshot | null,
@@ -3526,7 +3387,6 @@ export class PixelRenderer {
     // 1. COMBINABLE WORLD-INTELLIGENCE LAYERS
     if (overlays) {
       this.drawInfrastructureIntelligence(tileMap, minX, maxX, minY, maxY, tileSize, baseSX, baseSY, overlays, mapIntel);
-      if (overlays.layers.has('trade') && mapIntel) this.drawTradeOverlay(camera, width, height, tileSize, mapIntel);
       if (overlays.layers.has('armies')) this.drawArmyOverlay(camera, width, height, tileSize, tileSize < 4 ? entities : visibleEntities, kingdoms);
     }
 
@@ -4081,343 +3941,6 @@ export class PixelRenderer {
     ctx.restore();
   }
 
-  /**
-   * Railways drawn as real track: a ballast bed, perpendicular wooden ties, and
-   * two parallel steel rails riding on top — the classic top-down look, not a
-   * single blurred stripe. City-owned rail tiles get a small station marker so
-   * a line visibly plugs into the settlement instead of stopping in a field.
-   * The locomotive only runs when `hasActiveFreight` is true — tied to real
-   * freight moved this year (see RailwayNetwork.yearlyFreight), so a train is
-   * never decoration for a network that is not actually carrying anything.
-   */
-  private drawRailwaysPass(
-    tileMap: TileMap,
-    minX: number, maxX: number, minY: number, maxY: number,
-    tileSize: number, baseSX: number, baseSY: number,
-    hasActiveFreight: boolean
-  ): void {
-    if (tileSize < 3) return;
-    const ctx = this.ctx;
-
-    const railTiles: { x: number; y: number }[] = [];
-    for (let x = minX; x <= maxX; x++) {
-      for (let y = minY; y <= maxY; y++) {
-        const t = tileMap.grid[x][y];
-        if (t.railLevelEffective > 0) railTiles.push({ x, y });
-      }
-    }
-    if (railTiles.length === 0) return;
-
-    const cxx = (x: number): number => x * tileSize + baseSX + tileSize / 2;
-    const cyy = (y: number): number => y * tileSize + baseSY + tileSize / 2;
-
-    interface RailSeg { x1: number; y1: number; x2: number; y2: number; nx: number; ny: number; len: number }
-    const segs: RailSeg[] = [];
-    for (const r of railTiles) {
-      const e = tileMap.getTile(r.x + 1, r.y);
-      if (e && e.railLevelEffective > 0) {
-        segs.push({ x1: cxx(r.x), y1: cyy(r.y), x2: cxx(r.x + 1), y2: cyy(r.y), nx: 0, ny: -1, len: tileSize });
-      }
-      const s = tileMap.getTile(r.x, r.y + 1);
-      if (s && s.railLevelEffective > 0) {
-        segs.push({ x1: cxx(r.x), y1: cyy(r.y), x2: cxx(r.x), y2: cyy(r.y + 1), nx: 1, ny: 0, len: tileSize });
-      }
-    }
-
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    // Ballast bed: a soft dark strip the rails and ties sit on.
-    ctx.strokeStyle = '#3a3330';
-    ctx.lineWidth = Math.max(3, tileSize * 0.5);
-    for (const g of segs) {
-      ctx.beginPath(); ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke();
-    }
-
-    // Wooden ties: short perpendicular strokes crossing both rails, evenly
-    // spaced along each segment — this is what actually reads as "track"
-    // rather than "road", since roads never have crossing ties.
-    const tieGap = Math.max(1, tileSize * 0.34);
-    const tieHalf = tileSize * 0.24;
-    ctx.strokeStyle = '#4b4038';
-    ctx.lineWidth = Math.max(1, tileSize * 0.1);
-    for (const g of segs) {
-      const steps = Math.max(1, Math.round(g.len / tieGap));
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const tx = g.x1 + (g.x2 - g.x1) * t;
-        const ty = g.y1 + (g.y2 - g.y1) * t;
-        ctx.beginPath();
-        ctx.moveTo(tx - g.nx * tieHalf, ty - g.ny * tieHalf);
-        ctx.lineTo(tx + g.nx * tieHalf, ty + g.ny * tieHalf);
-        ctx.stroke();
-      }
-    }
-
-    // Two parallel steel rails, offset off the centerline — the detail that
-    // actually reads as "railway" rather than a single stripe.
-    const railGap = Math.max(1.5, tileSize * 0.16);
-    const railColor = tileSize >= 8 ? '#cbd5e1' : '#94a3b8';
-    ctx.lineWidth = Math.max(1, tileSize * 0.055);
-    for (const sign of [-1, 1]) {
-      ctx.strokeStyle = railColor;
-      for (const g of segs) {
-        const ox = g.nx * railGap * sign;
-        const oy = g.ny * railGap * sign;
-        ctx.beginPath();
-        ctx.moveTo(g.x1 + ox, g.y1 + oy);
-        ctx.lineTo(g.x2 + ox, g.y2 + oy);
-        ctx.stroke();
-      }
-    }
-
-    // Station marker: a small platform + signal where the line meets a
-    // settlement, so the track visibly plugs into the city rather than
-    // appearing to stop in open country.
-    if (tileSize >= 5) {
-      for (const r of railTiles) {
-        const tile = tileMap.grid[r.x][r.y];
-        if (!tile.cityId) continue;
-        const px = cxx(r.x);
-        const py = cyy(r.y);
-        ctx.fillStyle = 'rgba(87, 83, 78, 0.55)';
-        ctx.fillRect(px - tileSize * 0.55, py - tileSize * 0.42, tileSize * 1.1, tileSize * 0.3);
-        ctx.fillStyle = '#78716c';
-        ctx.fillRect(px - tileSize * 0.04, py - tileSize * 0.6, tileSize * 0.08, tileSize * 0.22);
-        ctx.fillStyle = '#22c55e';
-        ctx.beginPath();
-        ctx.arc(px, py - tileSize * 0.6, Math.max(1.5, tileSize * 0.08), 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-
-  /**
-   * Physical Active Trains: draws locomotives (steam, diesel, electric bullet)
-   * leading modular trailing cars (coal, ore, oil tankers, boxcars, passenger, troop cars, caboose)
-   * precisely rotated and articulated along real track curves.
-   */
-  private drawActiveTrainsPass(
-    railways: RailwayNetwork | { yearlyFreight: number } | undefined,
-    camera: Camera,
-    width: number,
-    height: number,
-    tileSize: number,
-    minX: number,
-    maxX: number,
-    minY: number,
-    maxY: number
-  ): void {
-    if (!railways || !('activeTrains' in railways) || tileSize < 4) return;
-    const activeTrains = (railways as RailwayNetwork).activeTrains;
-    if (activeTrains.size === 0) return;
-
-    const ctx = this.ctx;
-
-    for (const train of activeTrains.values()) {
-      if (train.x < minX - 6 || train.x > maxX + 6 || train.y < minY - 6 || train.y > maxY + 6) continue;
-
-      const L = Math.max(14, tileSize * 0.82);
-      const H = Math.max(7, tileSize * 0.42);
-
-      // 1. Draw Trailing Cars (behind locomotive)
-      for (let c = train.cars.length - 1; c >= 0; c--) {
-        const car = train.cars[c];
-        if (car.x < minX - 3 || car.x > maxX + 3 || car.y < minY - 3 || car.y > maxY + 3) continue;
-
-        const carScreen = camera.worldToScreen(car.x, car.y, width, height);
-        const carAngle = Math.atan2(car.headingY, car.headingX);
-
-        ctx.save();
-        ctx.translate(carScreen.x + tileSize * 0.5, carScreen.y + tileSize * 0.5);
-        ctx.rotate(carAngle);
-
-        const carL = L * 0.85;
-        const carH = H * 0.88;
-
-        // Drop shadow under car
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.32)';
-        ctx.fillRect(-carL * 0.5, -carH * 0.5 + 2, carL, carH);
-
-        switch (car.type) {
-          case 'coal_hopper':
-            ctx.fillStyle = '#292524';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
-            ctx.fillStyle = '#09090b';
-            ctx.fillRect(-carL * 0.4, -carH * 0.35, carL * 0.8, carH * 0.7);
-            ctx.fillStyle = '#18181b';
-            ctx.fillRect(-carL * 0.25, -carH * 0.25, carL * 0.5, carH * 0.5);
-            break;
-
-          case 'ore_hopper':
-            ctx.fillStyle = '#334155';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
-            ctx.fillStyle = car.cargo === 'tools' ? '#64748b' : '#78350f';
-            ctx.fillRect(-carL * 0.4, -carH * 0.35, carL * 0.8, carH * 0.7);
-            break;
-
-          case 'oil_tanker':
-            ctx.fillStyle = '#475569';
-            ctx.beginPath();
-            ctx.roundRect(-carL * 0.5, -carH * 0.5, carL, carH, carH * 0.35);
-            ctx.fill();
-            ctx.fillStyle = '#94a3b8';
-            ctx.fillRect(-carL * 0.25, -carH * 0.5, 2, carH);
-            ctx.fillRect(carL * 0.25 - 2, -carH * 0.5, 2, carH);
-            ctx.fillStyle = '#f59e0b';
-            ctx.fillRect(-2, -2, 4, 4);
-            break;
-
-          case 'passenger_car':
-            ctx.fillStyle = train.kingdomColor ?? '#3b82f6';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
-            ctx.fillStyle = '#f8fafc';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, 2);
-            ctx.fillStyle = '#fef08a';
-            for (let w = 0; w < 4; w++) {
-              const wx = -carL * 0.38 + (w / 3) * carL * 0.65;
-              ctx.fillRect(wx, -1.5, carL * 0.12, carH * 0.45);
-            }
-            break;
-
-          case 'troop_car':
-            ctx.fillStyle = '#3f4f34';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
-            ctx.fillStyle = '#2d3725';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, 2);
-            ctx.fillStyle = '#1e293b';
-            ctx.beginPath();
-            ctx.arc(-carL * 0.2, 0, 2, 0, Math.PI * 2);
-            ctx.arc(carL * 0.2, 0, 2, 0, Math.PI * 2);
-            ctx.fill();
-            break;
-
-          case 'caboose':
-            ctx.fillStyle = '#991b1b';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
-            ctx.fillStyle = '#7f1d1d';
-            ctx.fillRect(-carL * 0.15, -carH * 0.75, carL * 0.3, carH * 0.45);
-            ctx.fillStyle = '#ef4444';
-            ctx.beginPath();
-            ctx.arc(-carL * 0.5, 0, 2.5, 0, Math.PI * 2);
-            ctx.fill();
-            break;
-
-          case 'boxcar':
-          default:
-            ctx.fillStyle = '#78350f';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, carH);
-            ctx.fillStyle = '#57534e';
-            ctx.fillRect(-carL * 0.5, -carH * 0.5, carL, 2);
-            ctx.fillStyle = '#451a03';
-            ctx.fillRect(-carL * 0.15, -carH * 0.4, carL * 0.3, carH * 0.8);
-            break;
-        }
-
-        // Iron Coupler Link
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(carL * 0.48, -1, 3, 2);
-
-        // Wheels
-        ctx.fillStyle = '#0c0a09';
-        ctx.fillRect(-carL * 0.4, carH * 0.42, 4, 2);
-        ctx.fillRect(carL * 0.4 - 4, carH * 0.42, 4, 2);
-
-        ctx.restore();
-      }
-
-      // 2. Draw Locomotive (Lead Engine)
-      const locoScreen = camera.worldToScreen(train.x, train.y, width, height);
-      const locoAngle = Math.atan2(train.headingY, train.headingX);
-
-      ctx.save();
-      ctx.translate(locoScreen.x + tileSize * 0.5, locoScreen.y + tileSize * 0.5);
-      ctx.rotate(locoAngle);
-
-      // Locomotive Drop Shadow
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.fillRect(-L * 0.5, -H * 0.5 + 2, L, H);
-
-      if (train.trainType === 'steam') {
-        // Steam Locomotive Body (Black Iron)
-        ctx.fillStyle = '#18181b';
-        ctx.fillRect(-L * 0.5, -H * 0.5, L, H);
-        // Cab (Back)
-        ctx.fillStyle = '#27272a';
-        ctx.fillRect(-L * 0.5, -H * 0.55, L * 0.35, H * 1.1);
-        // Cab window
-        ctx.fillStyle = '#7dd3fc';
-        ctx.fillRect(-L * 0.4, -H * 0.3, L * 0.15, H * 0.35);
-        // Boiler Brass bands
-        ctx.fillStyle = '#f59e0b';
-        ctx.fillRect(-L * 0.05, -H * 0.5, 2, H);
-        ctx.fillRect(L * 0.2, -H * 0.5, 2, H);
-        // Chimney & Steam Dome
-        ctx.fillStyle = '#09090b';
-        ctx.fillRect(L * 0.28, -H * 0.85, L * 0.14, H * 0.5);
-        // Golden Headlamp
-        ctx.fillStyle = '#fef08a';
-        ctx.fillRect(L * 0.45, -H * 0.2, 3, H * 0.4);
-        // Wheels
-        ctx.fillStyle = '#09090b';
-        ctx.beginPath();
-        ctx.arc(-L * 0.2, H * 0.45, H * 0.22, 0, Math.PI * 2);
-        ctx.arc(L * 0.1, H * 0.45, H * 0.22, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Smoke puff animation
-        ctx.fillStyle = 'rgba(214, 211, 209, 0.55)';
-        const puff = 0.6 + Math.sin(this.animTimer * 8) * 0.2;
-        ctx.beginPath();
-        ctx.arc(L * 0.35 - (this.animTimer % 1.5) * 4, -H * 1.1, H * 0.4 * puff, 0, Math.PI * 2);
-        ctx.fill();
-
-      } else if (train.trainType === 'diesel') {
-        // Heavy Diesel Locomotive
-        ctx.fillStyle = train.kingdomColor ?? '#d97706';
-        ctx.fillRect(-L * 0.5, -H * 0.5, L, H);
-        // Cab nose
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(-L * 0.5, -H * 0.45, L * 0.25, H * 0.9);
-        // Windshield
-        ctx.fillStyle = '#7dd3fc';
-        ctx.fillRect(-L * 0.45, -H * 0.25, L * 0.12, H * 0.5);
-        // Roof air vents
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(-L * 0.1, -H * 0.55, L * 0.4, 2);
-        // Front Headlights
-        ctx.fillStyle = '#fef08a';
-        ctx.fillRect(L * 0.45, -H * 0.25, 3, H * 0.5);
-
-      } else {
-        // High-Speed Electric Bullet Train
-        ctx.fillStyle = '#f8fafc';
-        ctx.beginPath();
-        ctx.roundRect(-L * 0.5, -H * 0.5, L, H, [H * 0.2, H * 0.5, H * 0.5, H * 0.2]);
-        ctx.fill();
-        // Modern Blue/Kingdom racing stripe
-        ctx.fillStyle = train.kingdomColor ?? '#2563eb';
-        ctx.fillRect(-L * 0.5, -1, L, 3);
-        // Aerodynamic cockpit visor
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(L * 0.15, -H * 0.35, L * 0.25, H * 0.7);
-        // Pantograph on roof
-        ctx.strokeStyle = '#64748b';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(-L * 0.2, -H * 0.5);
-        ctx.lineTo(-L * 0.1, -H * 0.85);
-        ctx.lineTo(0, -H * 0.5);
-        ctx.stroke();
-        // LED Headlights
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(L * 0.42, -H * 0.2, 3, H * 0.4);
-      }
-
-      ctx.restore();
-    }
-  }
-
 
 
   /**
@@ -4491,8 +4014,7 @@ export class PixelRenderer {
       if (pos.x < -80 || pos.y < -80 || pos.x > width + 80 || pos.y > height + 80) continue;
       const value = mode === 'population' ? city.populationLevel
         : metric === 'output' ? city.outputLevel
-        : metric === 'employment' ? city.employment
-        : metric === 'food' ? city.foodSecurity === null ? null : Math.min(1, city.foodSecurity / 1.2)
+        : metric === 'food' ? city.foodStocked
         : city.prosperity;
       if (value === null) continue;
       const v = Math.max(0, Math.min(1, value));
@@ -4544,44 +4066,6 @@ export class PixelRenderer {
     this.ctx.restore();
   }
 
-  private drawTradeOverlay(camera: Camera, width: number, height: number, tileSize: number, intel: MapIntelligenceSnapshot): void {
-    const routes = intel.routes.slice(0, tileSize < 3 ? 24 : tileSize < 6 ? 70 : 140);
-    const maxVolume = Math.max(1, ...routes.map(item => item.route.volume));
-    this.ctx.save();
-    this.ctx.lineCap = 'round';
-    this.ctx.lineJoin = 'round';
-    for (const item of routes) {
-      const path = item.route.path?.length ? item.route.path
-        : item.fromCity && item.toCity ? [{ x: item.fromCity.x, y: item.fromCity.y }, { x: item.toCity.x, y: item.toCity.y }]
-        : [];
-      if (path.length < 2) continue;
-      const color = GOODS[item.good]?.color ?? '#22d3ee';
-      this.ctx.strokeStyle = color;
-      this.ctx.globalAlpha = item.route.active ? 0.72 : 0.42;
-      this.ctx.lineWidth = Math.max(1.2, Math.min(4.5, 1 + 3.2 * Math.sqrt(item.route.volume / maxVolume)));
-      this.ctx.setLineDash(item.route.active ? [] : [5, 5]);
-      this.ctx.beginPath();
-      for (let i = 0; i < path.length; i++) {
-        const p = camera.worldToScreen(path[i].x + 0.5, path[i].y + 0.5, width, height);
-        if (i === 0) this.ctx.moveTo(p.x, p.y); else this.ctx.lineTo(p.x, p.y);
-      }
-      this.ctx.stroke();
-      const mid = Math.max(1, Math.floor(path.length / 2));
-      const a = camera.worldToScreen(path[mid - 1].x + 0.5, path[mid - 1].y + 0.5, width, height);
-      const b = camera.worldToScreen(path[mid].x + 0.5, path[mid].y + 0.5, width, height);
-      const angle = Math.atan2(b.y - a.y, b.x - a.x);
-      this.ctx.setLineDash([]);
-      this.ctx.fillStyle = color;
-      this.ctx.translate(b.x, b.y);
-      this.ctx.rotate(angle);
-      this.ctx.beginPath();
-      this.ctx.moveTo(5, 0); this.ctx.lineTo(-4, -3.2); this.ctx.lineTo(-4, 3.2); this.ctx.closePath(); this.ctx.fill();
-      this.ctx.rotate(-angle);
-      this.ctx.translate(-b.x, -b.y);
-    }
-    this.ctx.restore();
-  }
-
   private drawInfrastructureIntelligence(
     tileMap: TileMap, minX: number, maxX: number, minY: number, maxY: number,
     tileSize: number, baseSX: number, baseSY: number,
@@ -4589,10 +4073,7 @@ export class PixelRenderer {
   ): void {
     const roads = overlays.layers.has('roads');
     const traffic = overlays.layers.has('road-traffic');
-    const rail = overlays.layers.has('rail');
-    const ports = overlays.layers.has('ports');
-    const issues = overlays.layers.has('logistics');
-    if (!roads && !traffic && !rail && !ports && !issues) return;
+    if (!roads && !traffic) return;
     this.ctx.save();
     const step = tileSize < 2.5 ? 2 : 1;
     for (let x = minX; x <= maxX; x += step) for (let y = minY; y <= maxY; y += step) {
@@ -4607,29 +4088,6 @@ export class PixelRenderer {
         this.ctx.fillStyle = `rgba(251,113,133,${Math.min(0.82, 0.18 + Math.log1p(tile.roadTraffic) / 8)})`;
         this.ctx.beginPath(); this.ctx.arc(sx + tileSize / 2, sy + tileSize / 2, Math.max(2, tileSize * 0.42), 0, Math.PI * 2); this.ctx.fill();
       }
-      if (rail && tile.railLevel > 0) {
-        this.ctx.strokeStyle = tile.railDamage >= 0.75 ? '#ef4444' : '#67e8f9';
-        this.ctx.globalAlpha = 0.82;
-        this.ctx.lineWidth = Math.max(1.5, tileSize * 0.22);
-        this.ctx.beginPath(); this.ctx.moveTo(sx, sy + tileSize / 2); this.ctx.lineTo(sx + tileSize * step, sy + tileSize / 2); this.ctx.stroke();
-      }
-    }
-    if (ports && intel) for (const port of intel.ports) {
-      const x = port.x * tileSize + baseSX + tileSize / 2;
-      const y = port.y * tileSize + baseSY + tileSize / 2;
-      this.ctx.globalAlpha = 0.9;
-      this.ctx.fillStyle = port.operational ? '#38bdf8' : '#ef4444';
-      this.ctx.beginPath(); this.ctx.arc(x, y, Math.max(4, tileSize * 0.7), 0, Math.PI * 2); this.ctx.fill();
-      this.ctx.fillStyle = '#082f49'; this.ctx.fillRect(x - 1, y - Math.max(3, tileSize * 0.42), 2, Math.max(6, tileSize * 0.84));
-    }
-    if (issues && intel) for (const issue of intel.issues) {
-      if (!issue.at) continue;
-      const x = issue.at.x * tileSize + baseSX + tileSize / 2;
-      const y = issue.at.y * tileSize + baseSY + tileSize / 2;
-      const r = Math.max(5, tileSize * 0.62);
-      this.ctx.globalAlpha = 0.92;
-      this.ctx.fillStyle = issue.severity === 'critical' ? '#ef4444' : '#f59e0b';
-      this.ctx.beginPath(); this.ctx.moveTo(x, y - r); this.ctx.lineTo(x + r, y); this.ctx.lineTo(x, y + r); this.ctx.lineTo(x - r, y); this.ctx.closePath(); this.ctx.fill();
     }
     this.ctx.restore();
   }
@@ -5728,9 +5186,9 @@ export class PixelRenderer {
     // jet freighter and a jetliner are the same swept planform anyway.
     const kind = flight.generation === 'biplane' ? 'biplane'
       : flight.generation === 'jet' ? 'jetliner'
-        // A bomber is the heavy airframe, not the airliner: four engines and a
-        // slab-sided hull is the shape that carries a load meant to be dropped.
-        : flight.payload === 'cargo' || flight.payload === 'bombs' ? 'freighter' : 'airliner';
+        // A bomber is the heavy airframe: four engines and a slab-sided hull is
+        // the shape that carries a load meant to be dropped.
+        : 'freighter';
     const sprite = aircraftSprite(kind, Math.floor(this.animTimer * 14) % AIRCRAFT_FRAMES);
 
     // The shadow, cast down and to one side, further out the higher it flies.

@@ -1,7 +1,7 @@
 /**
- * Headless smoke test: runs the full yearly civilization + warfare tick for
- * ~40 years with two kingdoms, exercising Phase H code paths end to end
- * (route capacity, road/port damage, repairs) without any renderer.
+ * Headless smoke test: runs the full civilization + warfare tick for ~40 years
+ * with two kingdoms, then checks that a siege and a conquest really do wreck the
+ * ground around a city and that the damage survives a save. No renderer.
  */
 import { TileMap } from '../src/world/TileMap';
 import { TERRAINS } from '../src/world/Biomes';
@@ -89,10 +89,8 @@ function paveAroundCity(city: City): void {
   }
 }
 
-// Trade agreement so routes can open between the two realms.
 kingdomA.knownKingdoms.add(kingdomB.id);
 kingdomB.knownKingdoms.add(kingdomA.id);
-sim.trade.signAgreement(kingdomA.id, kingdomB.id, 1, 0.08);
 
 const world: CivWorld = {
   year: 1,
@@ -102,7 +100,6 @@ const world: CivWorld = {
   tileMap,
   diplomacy: sim.diplomacy,
   market: sim.market,
-  trade: sim.trade,
   spawn: (species, x, y) => sim.spawnEntity(species, x, y, tileMap),
   sim
 };
@@ -110,35 +107,12 @@ const world: CivWorld = {
 const civ = new CivilizationEngine();
 const warfare = new WarfareSystem();
 
-let routesOpened = 0;
 for (let year = 1; year <= 40; year++) {
   world.year = year;
   civ.tickYear(world);
   warfare.tickYear(world);
-  routesOpened += sim.trade.routes.size;
 }
-
-if (routesOpened === 0) {
-  throw new Error('no trade routes opened in 40 years — capacity/margin math may be too strict');
-}
-console.log(`[smoke] 40 years OK; trade routes active=${sim.trade.routes.size}`);
-
-const overlandRoute = [...sim.trade.routes.values()].find(r => r.kind === 'overland' && r.path && r.path.length > 0);
-if (!overlandRoute) throw new Error('expected an overland route with a surveyed path');
-console.log(`[smoke] overland route ${overlandRoute.good} vol=${overlandRoute.volume} pathTiles=${overlandRoute.path!.length}`);
-
-// 1) Damage the road under the route → route must ship less next year.
-const roadTile = tileMap.getTile(overlandRoute.path![0].x, overlandRoute.path![0].y)!;
-const preDamageDamage = roadTile.roadDamage;
-const beforeShipped = 0;
-roadTile.roadDamage = 1;
-const shippedBefore = cityA.stock.get('food');
-civ.tickYear(world);
-const shippedAfter = cityA.stock.get('food');
-roadTile.roadDamage = preDamageDamage;
-if (Math.abs(shippedBefore - shippedAfter) > 120) {
-  // sanity: food still flows but the path is fine, just not crashed
-}
+console.log('[smoke] 40 years OK');
 
 // 2) Siege damages the roads and strategic buildings around Ironvale.
 paveAroundCity(cityA);
@@ -184,25 +158,13 @@ for (let dx = -7; dx <= 7; dx++) {
 if (conquestDamage === 0) throw new Error('captureCity did not damage the surrounding roads');
 console.log(`[smoke] conquest: ${conquestDamage} road tiles damaged, city now owned by ${cityA.kingdomId}`);
 
-// 3) Repair must spend materials to heal the harbor back.
-harbor.hp = Math.round(harbor.maxHp * 0.4);
-cityA.stock.add('stone', 500);
-cityA.stock.add('wood', 300);
-const stoneBefore = cityA.stock.get('stone');
-for (let y = 51; y <= 58; y++) {
-  world.year = y;
-  civ.tickYear(world);
-  warfare.tickYear(world);
-}
-console.log(`[smoke] repair: harbor ${Math.round(harbor.maxHp * 0.4)} -> ${harbor.hp}/${harbor.maxHp}, stone ${stoneBefore} -> ${cityA.stock.get('stone').toFixed(0)}`);
-
 // 4) Tiles serialize round-trip with roadDamage.
 const data = tileMap.serialize();
 const reload = new TileMap(1, 1, 'single_continent', 1);
 reload.deserialize(data);
-const back = reload.getTile(roadTile.x, roadTile.y)!;
-if (Math.abs(back.roadDamage - roadTile.roadDamage) > 0.001) {
+const back = reload.getTile(cityATile.x, cityATile.y)!;
+if (Math.abs(back.roadDamage - cityATile.roadDamage) > 0.001) {
   throw new Error('roadDamage did not survive save/load round-trip');
 }
-console.log(`[smoke] save/load round-trip OK (roadDamage ${roadTile.roadDamage.toFixed(2)})`);
+console.log(`[smoke] save/load round-trip OK (roadDamage ${cityATile.roadDamage.toFixed(2)})`);
 console.log('[smoke] ALL OK');

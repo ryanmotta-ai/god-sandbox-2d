@@ -5,7 +5,7 @@ import { SpeciesType } from '../src/entities/Species';
 import { TerrainType } from '../src/world/Biomes';
 import { rng } from '../src/core/Random';
 import { gradePenalty, roadGrade, crossingSpan, RELIEF_SCALE } from '../src/world/RoadTerrain';
-import { surveyRoad, layRoad, tileRoadCost, isSpanTile, GREAT_SPAN } from '../src/civ/RoadEngineering';
+import { surveyRoad, layRoad, tileRoadCost, isSpanTile, GREAT_SPAN } from '../src/civ/RoadBuilding';
 
 rng.setSeed(20260804);
 

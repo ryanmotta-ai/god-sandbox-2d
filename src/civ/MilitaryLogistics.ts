@@ -5,8 +5,7 @@ import { GoodId } from './Goods';
 import { TileMap } from '../world/TileMap';
 import { DiplomacyManager } from './Diplomacy';
 import { SimplePathfinder } from '../ai/Pathfinding';
-import { avgEffectiveRoadLevel, portOperational } from './Infrastructure';
-import { RailwayNetwork } from './RailwayNetwork';
+import { avgEffectiveRoadLevel, portOperational } from './WarDamage';
 import { FrontSector, WarFrontSystem, SECTOR_RADIUS } from './WarFronts';
 import { chronicle } from './Chronicle';
 import { events } from '../core/EventBus';
@@ -42,7 +41,6 @@ const MUNITIONS_PER_SOLDIER = 0.55;
  * roadless wilderness is weak rather than dead.
  */
 const MODE_THROUGHPUT: Record<SupplyMode, number> = {
-  rail: 240,
   sea: 130,
   road: 90,
   foot: 26
@@ -50,7 +48,6 @@ const MODE_THROUGHPUT: Record<SupplyMode, number> = {
 
 /** Tiles beyond which each mode stops being able to deliver anything. */
 const MODE_RANGE: Record<SupplyMode, number> = {
-  rail: 120,
   sea: 110,
   road: 55,
   foot: 26
@@ -61,7 +58,7 @@ const DEPOT_RESERVE = 24;
 /** Supply below this and an army starts losing men to hunger and exposure. */
 const ATTRITION_THRESHOLD = 0.45;
 
-export type SupplyMode = 'rail' | 'sea' | 'road' | 'foot';
+export type SupplyMode = 'sea' | 'road' | 'foot';
 
 export interface SupplyLine {
   sectorId: string;
@@ -92,7 +89,6 @@ export interface LogisticsWorld {
   entities: Entity[];
   tileMap: TileMap;
   diplomacy: DiplomacyManager;
-  railways: RailwayNetwork;
   fronts: WarFrontSystem;
 }
 
@@ -280,15 +276,6 @@ export class MilitaryLogistics {
     distance: number,
     world: LogisticsWorld
   ): { mode: SupplyMode; capacity: number; integrity: number } | null {
-    const railhead = this.railheadNear(sector, depot, world);
-    if (railhead && distance <= MODE_RANGE.rail) {
-      return {
-        mode: 'rail',
-        capacity: MODE_THROUGHPUT.rail * this.reach(distance, MODE_RANGE.rail),
-        integrity: this.railIntegrity(depot, railhead, world)
-      };
-    }
-
     const port = this.militaryPortNear(sector, depot, world);
     if (port && distance <= MODE_RANGE.sea) {
       return {
@@ -327,20 +314,6 @@ export class MilitaryLogistics {
     return Math.max(0.1, 1 - (distance / range) * 0.6);
   }
 
-  /**
-   * A friendly settlement near the front that shares a rail network with the
-   * depot. That pair is what makes the railway militarily useful.
-   */
-  private railheadNear(sector: FrontSector, depot: City, world: LogisticsWorld): City | null {
-    for (const cityId of world.kingdoms.get(depot.kingdomId ?? '')?.cityIds ?? []) {
-      const near = world.cities.get(cityId);
-      if (!near || near.id === depot.id) continue;
-      if (Math.hypot(near.x - sector.x, near.y - sector.y) > SECTOR_RADIUS * 2.2) continue;
-      if (world.railways.connected(world.tileMap, depot, near)) return near;
-    }
-    return null;
-  }
-
   /** Same idea by sea: a port at the depot and a port near the front. */
   private militaryPortNear(sector: FrontSector, depot: City, world: LogisticsWorld): City | null {
     if (!depot.hasBuilding('port') && !depot.hasBuilding('harbor')) return null;
@@ -352,34 +325,6 @@ export class MilitaryLogistics {
       return near;
     }
     return null;
-  }
-
-  /**
-   * How much of the rail between two settlements still carries.
-   *
-   * This is the line in the example that matters: wreck the track and the
-   * integrity of every supply line running over it drops, so the front it fed
-   * loses strength the following year without anyone fighting for it.
-   */
-  private railIntegrity(depot: City, railhead: City, world: LogisticsWorld): number {
-    const path = SimplePathfinder.findPath(depot.x, depot.y, railhead.x, railhead.y, world.tileMap, 'land');
-    if (!path || path.length === 0) return 0.5;
-
-    let railed = 0;
-    let damage = 0;
-    for (const step of path) {
-      const tile = world.tileMap.getTile(step.x, step.y);
-      if (!tile || tile.railLevel <= 0) continue;
-      railed++;
-      damage += Math.min(1, tile.railDamage);
-    }
-    if (railed === 0) return 0.5;
-
-    const coverage = railed / path.length;
-    const health = 1 - damage / railed;
-    // A line that is broken in the middle is worth much less than its average
-    // condition suggests, so coverage and health multiply rather than average.
-    return Math.max(0.1, Math.min(1, coverage * health + 0.12));
   }
 
   private roadIntegrity(path: { x: number; y: number }[], tileMap: TileMap): number {

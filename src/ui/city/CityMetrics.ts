@@ -25,7 +25,6 @@ import type { GoodFlow } from '../../civ/Economy';
 import type { City } from '../../civ/City';
 import type { Kingdom } from '../../civ/Kingdom';
 import type { Building } from '../../civ/Building';
-import type { TradeRoute } from '../../civ/Trade';
 import type { Entity } from '../../entities/Entity';
 import type { GameContext } from '../core/GameContext';
 import type { Profession } from '../../entities/Needs';
@@ -110,9 +109,7 @@ export type BottleneckKind =
   | 'missing-input'
   | 'no-workers'
   | 'understaffed'
-  | 'depleted-deposit'
-  | 'route-suspended'
-  | 'rail-damaged';
+  | 'depleted-deposit';
 
 export interface Bottleneck {
   kind: BottleneckKind;
@@ -127,37 +124,7 @@ export interface Bottleneck {
   severity: 'warning' | 'critical';
 }
 
-export interface RouteView {
-  route: TradeRoute;
-  /** True when this city is the origin. */
-  outbound: boolean;
-  partner: { cityId: string; name: string; kingdomId: string | null } | null;
-  /**
-   * Derived from the route's own fields only.
-   *  - `suspended`  — `active` is false: war or embargo closed it.
-   *  - `reduced`    — carrying less than its ceiling, which is what raiding does.
-   *  - `active`     — running at capacity.
-   */
-  status: 'active' | 'reduced' | 'suspended';
-  /** volume / maxVolume, 0..1. */
-  utilization: number;
-}
 
-export interface Logistics {
-  /** Highest road level anywhere in the city's territory. 0 means no road. */
-  roadLevel: number;
-  /** Tiles of track inside the territory. */
-  railTiles: number;
-  /** Worst rail damage on those tiles, 0..1. */
-  railDamage: number;
-  /** Settlements reachable over an unbroken shared rail component. `null` when
-   *  the city has no track, so the (expensive) sweep was not run. */
-  railConnections: string[] | null;
-  /** Harbour or port standing in the city. */
-  hasPort: boolean;
-  maritimeRoutes: number;
-  overlandRoutes: number;
-}
 
 export interface CityMetrics {
   cityId: string;
@@ -188,8 +155,6 @@ export interface CityMetrics {
 
   sectors: SectorOutput[];
   bottlenecks: Bottleneck[];
-  routes: RouteView[];
-  logistics: Logistics;
 
   /** Buildings grouped by category, for the buildings tab. */
   buildingsByCategory: { category: BuildingCategory; buildings: Building[] }[];
@@ -208,9 +173,6 @@ export const STRATEGIC_GOODS: GoodId[] = (
 export function computeCityMetrics(city: City, ctx: GameContext): CityMetrics {
   const sim = ctx.sim;
   const kingdom = city.kingdomId ? sim.kingdoms.get(city.kingdomId) ?? null : null;
-  // Computed once and threaded through: logistics counts routes by kind, and
-  // bottlenecks read their status.
-  const routes = computeRoutes(city, ctx);
 
   return {
     cityId: city.id,
@@ -231,9 +193,7 @@ export function computeCityMetrics(city: City, ctx: GameContext): CityMetrics {
 
     ...computeGoods(city),
     sectors: computeSectors(city),
-    bottlenecks: [],  // filled by the cache, once routes and logistics are known
-    routes,
-    logistics: computeLogistics(city, ctx, routes),
+    bottlenecks: [],  // filled by the cache
     buildingsByCategory: groupBuildings(city),
 
     siege: city.besiegerId
@@ -423,16 +383,16 @@ function computeSectors(city: City): SectorOutput[] {
   return sectors.sort((a, b) => b.buildings - a.buildings);
 }
 
+/** The recipe input a converting building is short of, with what it makes. */
 /**
- * What is holding the city back.
+ * What is actually holding this city back, read off the buildings themselves.
  *
- * Every finding here is a comparison between two real numbers, and the module
- * emits nothing it cannot point at: a recipe input against the store, a deposit
- * against zero, staffing against posts, a route's own `active` flag, rail damage
- * against its threshold. There is no heuristic and no guess — an unexplained
- * problem is left unreported rather than attributed to a plausible cause.
+ * Every finding is checked against a real number — a deposit against zero,
+ * staffing against posts, a recipe input against the store. There is no
+ * heuristic and no guess: an unexplained problem is left unreported rather
+ * than attributed to a plausible cause.
  */
-function computeBottlenecks(city: City, ctx: GameContext, routes: RouteView[], logistics: Logistics): Bottleneck[] {
+function computeBottlenecks(city: City, ctx: GameContext): Bottleneck[] {
   const found: Bottleneck[] = [];
   const seen = new Set<string>();
   const push = (b: Bottleneck) => {
@@ -495,33 +455,9 @@ function computeBottlenecks(city: City, ctx: GameContext, routes: RouteView[], l
     }
   }
 
-  for (const view of routes) {
-    if (view.status !== 'suspended') continue;
-    push({
-      kind: 'route-suspended',
-      subject: `Rota de ${GOODS[view.route.good]?.name ?? view.route.good}`,
-      cause: view.partner
-        ? `Fechada com ${view.partner.name} — guerra ou embargo`
-        : 'Fechada — guerra ou embargo',
-      good: view.route.good, severity: 'critical'
-    });
-  }
-
-  // Rail damage is reported at the same threshold the network itself treats as
-  // severing a line, so the warning matches the mechanical effect.
-  if (logistics.railTiles > 0 && logistics.railDamage >= 0.5) {
-    push({
-      kind: 'rail-damaged', subject: 'Ferrovia',
-      cause: `Trilhos danificados em ${Math.round(logistics.railDamage * 100)}% no trecho mais atingido`,
-      severity: logistics.railDamage >= 0.8 ? 'critical' : 'warning'
-    });
-  }
-
-  // Critical first, then the order they were found.
-  return found.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'critical' ? -1 : 1));
+  return found;
 }
 
-/** The recipe input a converting building is short of, with what it makes. */
 function missingInput(
   building: Building,
   city: City
@@ -551,93 +487,6 @@ function missingInput(
     if (available < needed) return { good: input as GoodId, needed, available, output: null };
   }
   return null;
-}
-
-/** Trade routes touching this city, with a status derived from the route itself. */
-function computeRoutes(city: City, ctx: GameContext): RouteView[] {
-  const views: RouteView[] = [];
-
-  for (const route of ctx.sim.trade.routes.values()) {
-    const outbound = route.fromCityId === city.id;
-    if (!outbound && route.toCityId !== city.id) continue;
-
-    const partnerId = outbound ? route.toCityId : route.fromCityId;
-    const partnerCity = ctx.sim.cities.get(partnerId);
-    const utilization = route.maxVolume > 0 ? Math.min(1, route.volume / route.maxVolume) : 0;
-
-    views.push({
-      route,
-      outbound,
-      partner: partnerCity
-        ? { cityId: partnerCity.id, name: partnerCity.name, kingdomId: partnerCity.kingdomId }
-        : null,
-      // `active` is the only status the trade network stores; a route below its
-      // ceiling is the visible aftermath of raiding. Nothing beyond these two
-      // facts is claimed.
-      status: !route.active ? 'suspended' : utilization < 0.9 ? 'reduced' : 'active',
-      utilization
-    });
-  }
-
-  return views.sort((a, b) => b.route.volume - a.route.volume);
-}
-
-/**
- * Roads, rail and harbour.
- *
- * The territory sweep is bounded by the city's own tiles. Rail *connectivity* is
- * not — `RailwayNetwork.components` walks the whole map — so it only runs when
- * the city actually has track, and its result is cached with the rest.
- */
-function computeLogistics(city: City, ctx: GameContext, routes: RouteView[]): Logistics {
-  let roadLevel = 0;
-  let railTiles = 0;
-  let railDamage = 0;
-
-  for (const key of city.territory) {
-    const [xs, ys] = key.split(',');
-    const tile = ctx.tileMap.getTile(Number(xs), Number(ys));
-    if (!tile) continue;
-    if (tile.roadLevel > roadLevel) roadLevel = tile.roadLevel;
-    if (tile.railLevel > 0) {
-      railTiles++;
-      if (tile.railDamage > railDamage) railDamage = tile.railDamage;
-    }
-  }
-
-  let railConnections: string[] | null = null;
-  if (railTiles > 0) {
-    railConnections = [];
-    // One components() sweep, then read off the settlements sharing this city's
-    // component. Cheaper and more informative than calling `connected()` once per
-    // candidate city, which would sweep the map every time.
-    for (const component of ctx.sim.railways.components(ctx.tileMap)) {
-      let containsThis = false;
-      const others = new Set<string>();
-      for (const tile of component) {
-        if (!tile.cityId) continue;
-        if (tile.cityId === city.id) containsThis = true;
-        else others.add(tile.cityId);
-      }
-      if (!containsThis) continue;
-      for (const otherId of others) {
-        const name = ctx.sim.cities.get(otherId)?.name;
-        if (name) railConnections.push(name);
-      }
-    }
-  }
-
-  const hasPort = city.hasBuilding('harbor') || city.hasBuilding('port');
-
-  return {
-    roadLevel,
-    railTiles,
-    railDamage,
-    railConnections,
-    hasPort,
-    maritimeRoutes: routes.filter(r => r.route.kind === 'maritime').length,
-    overlandRoutes: routes.filter(r => r.route.kind === 'overland').length
-  };
 }
 
 function groupBuildings(city: City): { category: BuildingCategory; buildings: Building[] }[] {
@@ -682,9 +531,7 @@ export class CityMetricsCache {
     if (this.metrics && !yearChanged && !cityChanged && !stale) return this.metrics;
 
     const metrics = computeCityMetrics(city, ctx);
-    // Bottlenecks read the routes and logistics computed above, so they are
-    // resolved here rather than inside `computeCityMetrics` doing the work twice.
-    metrics.bottlenecks = computeBottlenecks(city, ctx, metrics.routes, metrics.logistics);
+    metrics.bottlenecks = computeBottlenecks(city, ctx);
 
     this.metrics = metrics;
     this.builtAt = now;

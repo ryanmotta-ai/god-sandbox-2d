@@ -326,9 +326,6 @@ export class KingdomsScreen implements Screen {
             this.ctx.screens.closeAll();
           }
         }, { variant: 'primary', icon: '🎥' }),
-        button('Diplomacia', () => this.ctx.screens.open('diplomacy', { focusKingdom: kingdom.id }), { icon: '🤝' }),
-        button('Economia', () => this.ctx.screens.open('economy', { tab: 'realms', focusKingdom: kingdom.id }), { icon: '🪙' }),
-        button('Infraestrutura', () => this.ctx.screens.open('infrastructure', { tab: 'overview' }), { icon: '🛤️' })
       ])
     );
   }

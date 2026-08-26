@@ -323,24 +323,3 @@ export function layRoad(
   }
   return works;
 }
-
-/**
- * Cost of pulling one already-built tile up to the next grade — what traffic
- * alone cannot pay for. Wheels wear a dirt track into existence on their own,
- * but nobody ever wore a stone road into a hillside; that takes a quarry.
- */
-export function upgradeCost(tileMap: TileMap, tile: Tile, toLevel: number): RoadBill {
-  const target = tileRoadCost(tileMap, tile, toLevel, null);
-  const current = tile.roadLevel > 0 ? tileRoadCost(tileMap, tile, tile.roadLevel, null) : NO_COST;
-  return {
-    stone: Math.max(0, target.stone - current.stone),
-    wood: Math.max(0, target.wood - current.wood)
-  };
-}
-
-/** Spends a stockpile on an upgrade, returning whether the work was done. */
-export function fundUpgrade(city: City, cost: RoadBill): boolean {
-  if (!canAfford(city, cost)) return false;
-  pay(city, cost);
-  return true;
-}

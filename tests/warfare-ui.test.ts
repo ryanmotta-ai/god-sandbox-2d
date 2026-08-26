@@ -6,11 +6,10 @@ import { DiplomacyManager, type WarRecord } from '../src/civ/Diplomacy';
 import { chronicle } from '../src/civ/Chronicle';
 import { Entity } from '../src/entities/Entity';
 import { SpeciesType } from '../src/entities/Species';
-import type { LogisticsMetrics } from '../src/ui/logistics/LogisticsMetrics';
 import {
   WarfareUISnapshotCache, combatStrength, computeWarfareUISnapshot, warfareUIPerformance
 } from '../src/ui/warfare/WarfareMetrics';
-import { warfareConditions, warCausalChains } from '../src/ui/warfare/WarfareDiagnostics';
+import { warfareConditions } from '../src/ui/warfare/WarfareDiagnostics';
 
 interface WorldFixture {
   kingdoms: Map<string, Kingdom>;
@@ -59,24 +58,14 @@ function soldier(id: string, kingdomId: string, x: number, y: number, state: Ent
   return entity;
 }
 
-function logistics(): LogisticsMetrics {
-  return {
-    year: 100,
-    roads: { tiles: 0, byLevel: [0, 0, 0, 0], damagedTiles: 0, totalTraffic: 0, busiest: [], meanLevel: null },
-    rail: { tiles: 0, severedTiles: 0, degradedTiles: 0, lines: [], strandedStations: [], worldFreight: 0, builtThisYear: 0 },
-    ports: [], routes: [], corridors: [], movers: [], cities: [], bottlenecks: [],
-    landTradeVolume: 0, seaTradeVolume: 0, activeRoutes: 0, closedRoutes: 0,
-    totalTradeValue: 0, activeCaravans: 0, activeShips: 0
-  };
-}
 
 function declare(f: WorldFixture, attacker = 'a', defender = 'b', year = 80, reason = 'Border dispute'): WarRecord {
   assert.equal(f.diplomacy.declareWar(attacker, defender, year, reason), true);
   return [...f.diplomacy.activeWars.values()].find(war => war.attacker === attacker && war.defender === defender)!;
 }
 
-function snapshot(f: WorldFixture, network = logistics()) {
-  return computeWarfareUISnapshot(f.ctx, network, 1000);
+function snapshot(f: WorldFixture) {
+  return computeWarfareUISnapshot(f.ctx, 1000);
 }
 
 chronicle.clear();
@@ -243,60 +232,6 @@ chronicle.clear();
   assert.ok(s.activeWars.every(war => war.record.attacker && war.record.defender));
 }
 
-// 15. Only inactive bilateral routes are counted as trade shut by this war.
-{
-  const f = world();
-  declare(f);
-  const network = logistics();
-  network.routes.push({
-    route: { id: 'route-war', fromCityId: 'city-a', toCityId: 'city-b', fromKingdomId: 'a', toKingdomId: 'b', kind: 'overland', good: 'food', volume: 12, maxVolume: 12, establishedYear: 50, totalValue: 100, active: false },
-    kind: 'overland', good: 'food', goodName: 'Food', fromCity: f.cities.get('city-a')!, toCity: f.cities.get('city-b')!,
-    fromKingdom: f.kingdoms.get('a')!, toKingdom: f.kingdoms.get('b')!
-  } as any);
-  const view = snapshot(f, network).activeWars[0];
-  assert.equal(view.economy.closedRoutes.length, 1);
-  assert.equal(view.economy.suspendedVolume, 12);
-  assert.ok(warCausalChains(view).some(chain => chain.id === 'closed-trade'));
-}
-
-// 16. Participant rail and affected-city ports surface from the real logistics snapshot.
-{
-  const f = world();
-  declare(f);
-  f.entities.push(soldier('a1', 'a', 28, 10, 'raid'));
-  const network = logistics();
-  network.rail.lines.push({
-    id: 'rail-a', tiles: 10, quality: 0.5,
-    stations: [{ cityId: 'city-a', cityName: 'Aurelian League Capital', kingdomId: 'a', kingdomName: 'Aurelian League', x: 10, y: 10 }],
-    owners: [{ kingdomId: 'a', name: 'Aurelian League', color: '#d95d55' }], goods: ['iron'], damagedTiles: 3,
-    at: { x: 14, y: 10 }, status: 'damaged'
-  });
-  network.ports.push({
-    cityId: 'city-b', cityName: 'Bastion Crown Capital', kingdomId: 'b', kingdomName: 'Bastion Crown', kingdomColor: '#4f7ccf',
-    berths: 1, condition: 0.2, operational: false, maritimeRoutes: [], inboundVolume: 0, outboundVolume: 0,
-    majorImports: [], majorExports: [], realmSeaShare: 0, status: 'blocked', x: 30, y: 10
-  });
-  const infra = snapshot(f, network).activeWars[0].infrastructure;
-  assert.equal(infra.damagedRailLines[0].damagedTiles, 3);
-  assert.equal(infra.disruptedPorts[0].cityId, 'city-b');
-}
-
-// 17. Political pressure and faction war support are read from Kingdom state.
-{
-  const f = world();
-  declare(f);
-  const kingdom = f.kingdoms.get('a')!;
-  kingdom.warWeariness = 72;
-  kingdom.legitimacy = 0.43;
-  kingdom.society.peacePressure = 0.8;
-  const s = snapshot(f);
-  const political = s.activeWars[0].politics.find(item => item.kingdom.id === 'a')!;
-  assert.equal(political.warWeariness, 72);
-  assert.equal(political.legitimacy, 0.43);
-  assert.equal(political.peacePressure, 0.8);
-  assert.ok(warfareConditions(s).some(condition => condition.title === 'High war weariness' || condition.title === 'Alto desgaste de guerra'));
-}
-
 // 18. Peace moves the same WarRecord into history with settlement and victor.
 {
   const f = world();
@@ -350,13 +285,12 @@ chronicle.clear();
 {
   const f = world();
   declare(f);
-  const network = logistics();
   const cache = new WarfareUISnapshotCache();
-  const first = cache.get(f.ctx, network, 100);
-  const cached = cache.get(f.ctx, network, 101);
+  const first = cache.get(f.ctx, 100);
+  const cached = cache.get(f.ctx, 101);
   assert.equal(cached, first);
   f.ctx.sim.currentYear++;
-  assert.notEqual(cache.get(f.ctx, network, 102), first);
+  assert.notEqual(cache.get(f.ctx, 102), first);
 }
 
 // 24. Snapshot generation remains command-screen work, not frame-time work.
@@ -380,12 +314,10 @@ chronicle.clear();
   const tabs = readFileSync(new URL('../src/ui/warfare/WarfareTabs.ts', import.meta.url), 'utf8');
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   const alerts = readFileSync(new URL('../src/ui/core/Alerts.ts', import.meta.url), 'utf8');
-  assert.match(screen, /screens\.open\('realm'/, 'War → Realm');
+  // A realm click goes to look at the realm on the map; the dossier screens it
+  // used to open were tables of figures and are gone.
+  assert.match(screen, /focusOn\(capital\.x, capital\.y/, 'War → the realm itself, on the map');
   assert.match(screen, /screens\.open\('city'/, 'War → City');
-  assert.match(screen, /screens\.open\('economy'/, 'War → Economy/Good');
-  assert.match(screen, /screens\.open\('infrastructure'/, 'War → Infrastructure');
-  assert.match(screen, /screens\.open\('politics'/, 'War → Politics');
-  assert.match(screen, /screens\.open\('techtree'/, 'Equipment → Technology');
   assert.match(screen, /screens\.open\('chronicle'/, 'War → Chronicle');
   assert.match(tabs, /kind: 'war'/, 'War object links');
   assert.match(main, /registerOpener\('war'/, 'ObjectLink → War Dossier');

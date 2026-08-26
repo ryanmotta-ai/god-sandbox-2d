@@ -18,7 +18,7 @@ import {
 import { BUILDINGS, type BuildingCategory } from '../../civ/Building';
 import { GOODS, type GoodId } from '../../civ/Goods';
 import { chronicle } from '../../civ/Chronicle';
-import { STRATEGIC_GOODS, type CityMetrics, type GoodPosition, type RouteView, type Bottleneck } from './CityMetrics';
+import { STRATEGIC_GOODS, type CityMetrics, type GoodPosition, type Bottleneck } from './CityMetrics';
 import { diagnose, problems, importDependencies, type Condition } from './Diagnostics';
 import type { CityScreenHost } from '../screens/CityScreen';
 import type { City } from '../../civ/City';
@@ -201,9 +201,7 @@ function buildConditionRow(condition: Condition, host: CityScreenHost): HTMLElem
       `ae-city-condition-${status}`,
       clickable ? 'ae-city-condition-live' : ''
     ].filter(Boolean).join(' '),
-    attrs: clickable ? { type: 'button' } : {},
     dataset: { conditionId: condition.id },
-    on: clickable ? { click: () => host.openGood(condition.good!) } : undefined
   }, [
     icon(condition.icon, { size: 16, class: 'ae-city-condition-icon' }),
     el('div', { class: 'ae-city-condition-text' }, [
@@ -249,16 +247,6 @@ function buildBottlenecks(bottlenecks: Bottleneck[], host: CityScreenHost): HTML
       el('span', { class: 'ae-city-bottleneck-cause', text: bottleneck.cause })
     ]),
     el('div', { class: 'ae-city-bottleneck-actions' }, [
-      bottleneck.good
-        ? withTooltip(
-            el('button', {
-              class: 'ae-city-mini-btn',
-              attrs: { type: 'button', 'aria-label': `Abrir ${GOODS[bottleneck.good]?.name ?? bottleneck.good}` },
-              on: { click: () => host.openGood(bottleneck.good!) }
-            }, [icon('good', { size: 16 })]),
-            { title: GOODS[bottleneck.good]?.name ?? bottleneck.good, description: 'Abrir este bem na Economia.' }
-          )
-        : null,
       bottleneck.building
         ? withTooltip(
             el('button', {
@@ -278,9 +266,7 @@ function bottleneckIcon(kind: Bottleneck['kind']): string {
     'missing-input': 'good',
     'no-workers': 'population',
     'understaffed': 'population',
-    'depleted-deposit': 'pickaxe',
-    'route-suspended': 'trade-route',
-    'rail-damaged': 'trade-route'
+    'depleted-deposit': 'pickaxe'
   }[kind];
 }
 
@@ -461,10 +447,7 @@ export function buildGoodsTable(positions: GoodPosition[], host: CityScreenHost)
   const columns: Column<GoodPosition>[] = [
     {
       key: 'good', header: 'Bem',
-      cell: p => objectLink(
-        { kind: 'good', id: p.good, name: GOODS[p.good]?.name ?? p.good },
-        { showIcon: false, onOpen: () => host.openGood(p.good) }
-      ),
+      cell: p => objectLink({ kind: 'good', id: p.good, name: GOODS[p.good]?.name ?? p.good }, { showIcon: false }),
       sortValue: p => GOODS[p.good]?.name ?? p.good
     },
     { key: 'stock', header: 'Estoque', align: 'right', width: '84px', cell: p => formatCompact(p.stock), sortValue: p => p.stock },
@@ -549,7 +532,6 @@ export function buildIndustry(city: City, metrics: CityMetrics, host: CityScreen
               value: output.amount.toFixed(1),
               unit: '/ ano',
               icon: 'good',
-              onClick: () => host.openGood(output.good),
               tooltip: {
                 title: GOODS[output.good]?.name ?? output.good,
                 value: `${output.amount.toFixed(1)} / ano`,
@@ -637,138 +619,10 @@ function buildUtilizationTable(city: City, metrics: CityMetrics, host: CityScree
 
 // ============================ TRADE ============================
 
-export function buildTrade(city: City, metrics: CityMetrics, host: CityScreenHost): Child[] {
-  const { routes, logistics } = metrics;
-
-  return [
-    panel({ title: 'Infraestrutura', icon: 'trade-route' }, [
-      rowList([
-        statRow({
-          label: 'Estrada',
-          value: logistics.roadLevel > 0 ? ROAD_LEVEL_LABEL[logistics.roadLevel] ?? `Nível ${logistics.roadLevel}` : 'Nenhuma',
-          icon: 'route',
-          status: logistics.roadLevel > 0 ? 'positive' : 'warning',
-          tooltip: { title: 'Estrada', description: 'Melhor nível de via em qualquer tile do território.' }
-        }),
-        statRow({
-          label: 'Ferrovia',
-          value: logistics.railTiles > 0 ? `${logistics.railTiles} tiles` : 'Nenhuma',
-          icon: 'route',
-          status: logistics.railTiles === 0 ? undefined : logistics.railDamage >= 0.5 ? 'critical' : 'positive',
-          tooltip: logistics.railTiles > 0
-            ? {
-                title: 'Ferrovia',
-                value: `${logistics.railTiles} tiles`,
-                description: logistics.railConnections?.length
-                  ? `Ligada a: ${logistics.railConnections.join(', ')}`
-                  : 'Trilhos no território, sem outra cidade no mesmo trecho contínuo.',
-                rows: [{ label: 'Dano máximo', value: formatPercent(logistics.railDamage), status: logistics.railDamage >= 0.5 ? 'critical' : 'positive' }]
-              }
-            : { title: 'Ferrovia', description: 'Nenhum trilho no território desta cidade.' }
-        }),
-        logistics.railConnections?.length
-          ? statRow({
-              label: 'Conexões ferroviárias',
-              value: `${logistics.railConnections.length}`,
-              unit: 'cidades',
-              icon: 'city',
-              tooltip: { title: 'Conectada por trilhos a', description: logistics.railConnections.join(', ') }
-            })
-          : null,
-        statRow({
-          label: 'Porto',
-          value: logistics.hasPort ? 'Ativo' : 'Nenhum',
-          icon: 'route',
-          status: logistics.hasPort ? 'positive' : undefined,
-          tooltip: { title: 'Porto', description: 'Presença de ancoradouro ou porto construído no assentamento.' }
-        }),
-        statRow({ label: 'Rotas marítimas', value: `${logistics.maritimeRoutes}`, icon: 'route' }),
-        statRow({ label: 'Rotas terrestres', value: `${logistics.overlandRoutes}`, icon: 'route' })
-      ])
-    ]),
-
-    routes.length
-      ? panel({ title: 'Rotas', icon: 'trade-route', subtitle: `${routes.length}`, padded: false }, [
-          buildRoutesTable(routes, host)
-        ])
-      : panel({ title: 'Rotas', icon: 'trade-route' }, [
-          emptyState({
-            icon: 'trade-route',
-            title: 'Sem rotas de comércio',
-            hint: 'Nenhuma rota liga esta cidade a outra. Assentamentos autossuficientes podem nunca abrir uma.',
-            compact: true
-          })
-        ])
-  ];
-}
-
 const ROAD_LEVEL_LABEL: Record<number, string> = {
   1: 'Trilha de terra', 2: 'Via de pedra', 3: 'Estrada imperial'
 };
 
-const ROUTE_STATUS: Record<RouteView['status'], { label: string; status: Status; explain: string }> = {
-  active: { label: 'Ativa', status: 'positive', explain: 'Operando na capacidade contratada.' },
-  reduced: { label: 'Reduzida', status: 'warning', explain: 'Movendo menos que o teto da rota — é o que o saque deixa para trás.' },
-  suspended: { label: 'Suspensa', status: 'critical', explain: 'Fechada: guerra ou embargo entre os reinos.' }
-};
-
-function buildRoutesTable(routes: RouteView[], host: CityScreenHost): HTMLElement {
-  const columns: Column<RouteView>[] = [
-    {
-      key: 'good', header: 'Bem',
-      cell: v => objectLink(
-        { kind: 'good', id: v.route.good, name: GOODS[v.route.good]?.name ?? v.route.good },
-        { showIcon: false, onOpen: () => host.openGood(v.route.good) }
-      ),
-      sortValue: v => GOODS[v.route.good]?.name ?? v.route.good
-    },
-    {
-      key: 'dir', header: 'Sentido', width: '72px',
-      cell: v => (v.outbound ? 'Saída' : 'Entrada'),
-      sortValue: v => (v.outbound ? 1 : 0)
-    },
-    {
-      key: 'partner', header: 'Parceira',
-      cell: v => (v.partner
-        ? objectLink({ kind: 'city', id: v.partner.cityId, name: v.partner.name }, { showIcon: false })
-        : '—'),
-      sortValue: v => v.partner?.name ?? ''
-    },
-    {
-      key: 'volume', header: 'Volume', align: 'right', width: '84px',
-      cell: v => v.route.volume.toFixed(1),
-      sortValue: v => v.route.volume
-    },
-    {
-      key: 'transport', header: 'Transporte', width: '92px',
-      cell: v => (v.route.kind === 'maritime' ? 'Marítimo' : 'Terrestre'),
-      sortValue: v => v.route.kind
-    },
-    {
-      key: 'status', header: 'Situação', width: '96px',
-      cell: v => badge(ROUTE_STATUS[v.status].label, { size: 'sm', status: ROUTE_STATUS[v.status].status, variant: 'outline' }),
-      sortValue: v => v.status
-    }
-  ];
-
-  return table({
-    columns, rows: routes,
-    rowKey: v => v.route.id,
-    sortBy: 'volume',
-    status: v => (v.status === 'suspended' ? 'critical' : v.status === 'reduced' ? 'warning' : undefined),
-    rowTooltip: v => ({
-      title: `${GOODS[v.route.good]?.name ?? v.route.good} · ${v.outbound ? 'saída' : 'entrada'}`,
-      value: v.route.volume.toFixed(1),
-      description: ROUTE_STATUS[v.status].explain,
-      rows: [
-        { label: 'Teto da rota', value: v.route.maxVolume.toFixed(1) },
-        { label: 'Utilização', value: formatPercent(v.utilization) },
-        { label: 'Aberta no ano', value: `${v.route.establishedYear}` },
-        { label: 'Valor acumulado', value: formatCompact(v.route.totalValue) }
-      ]
-    })
-  });
-}
 
 // ============================ BUILDINGS ============================
 
