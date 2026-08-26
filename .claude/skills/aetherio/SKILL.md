@@ -268,15 +268,29 @@ contra um limiar de guerra de ~`6 + proximidade * 30`.
 Contando os gates de `tickGeopolitics` par por par, ano por ano:
 
 ```
-ano reinos pares vassal longe amistoso ELEGÍVEL
- 30      3     3      0     0        3        0
- 40      4     6      0     0        6        0
+ano reinos pares vassal longe amistoso ELEGÍVEL  melhorPar
+ 30      3     3      0     0        3        0   --
+ 40      4     6      0     0        6        0   --
+ 50      5    10      0     0       10        0   --
+ 60      6    15      0     1       13        1   -22 / 31 tiles
+ 70      6    15      0     1       14        0   --
 ```
 
-**Todos os pares falham em "amistoso demais", e nenhum em vassalagem ou
-distância.** Se um mundo parece pacífico demais, é a relação que ainda não
-esfriou — não a estrutura política, não a geografia. Um probe que semeia dois
-povos independentes (`tests/war-contact.probe.ts`) briga no ano 41.
+**O gate que segura tudo é "amistoso demais". Vassalagem nunca rejeita nada;
+distância rejeita de vez em quando (1 de 15).** Se um mundo parece pacífico
+demais, é a relação que ainda não esfriou — não a estrutura política, não a
+geografia.
+
+E note o ano 70: a elegibilidade **é transitória, não monotônica**. O par que
+estava a −22 no ano 60 esquentou de volta acima do limiar sem que guerra
+alguma disparasse. A deriva de parentesco (`+1` a 35% de chance para a mesma
+espécie) é pressão constante para cima, e uma sucessão que ponha um rei
+pacífico no trono inverte o sinal da fricção. Um par entra na janela de guerra
+e sai dela; a rolagem de `baseWarRate` tem que pegá-lo enquanto está dentro.
+É essa janela estreita — não um gate fechado — que faz as guerras serem raras.
+Se o objetivo é mais guerra, o lugar de mexer é a largura da janela
+(deriva de parentesco, fricção de governante) ou a chance dentro dela, não os
+gates. Dois povos independentes (`tests/war-contact.probe.ts`) brigam no ano 41.
 
 E cuidado com dois instrumentos:
 - **`pior_rel` sozinho engana.** O par mais hostil pode ser o par mais
