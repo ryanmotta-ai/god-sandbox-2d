@@ -46,7 +46,7 @@ for (let p = 0; p < PEOPLES; p++) {
 let warYears = 0, peakSoldierShare = 0;
 
 console.log(`${PEOPLES} povo(s), ${YEARS} anos, mapa ${MAP}, seed ${SEED}\n`);
-console.log('ano  pop cid rei | sold  %pop prof mil | travadas famintas comida/hab | exerc  maior | ouro | era      | guerras');
+console.log('ano  pop cid rei | sold  %pop prof mil | comida/hab | pedra/cid semPedra pedreiras esgot aoAlcance   chao | exerc maior | ouro | era      | guerras');
 for (let y = 1; y <= YEARS; y++) {
   for (let t = 0; t < TICKS_PER_YEAR; t++) sim.tickAI(tileMap, particles);
   if (sim.diplomacy.activeWars.size > 0) warYears++;
@@ -67,6 +67,29 @@ for (let y = 1; y <= YEARS; y++) {
     if (food < c.population * 0.5) hungry++;
   }
 
+  // Stone: what the settlements hold, how many quarries have worked their
+  // ground out, and what is left in the map at all. Stone is not renewable, so
+  // the last column only ever falls.
+  let stonePerCity = 0, stoneStarved = 0, quarries = 0, exhausted = 0, withStoneInReach = 0;
+  for (const c of sim.cities.values()) {
+    if (c.population <= 0) continue;
+    stonePerCity += c.stock.get('stone');
+    if (c.stock.get('stone') < 30) stoneStarved++;   // cannot afford a barracks
+    if ((c.resourcesByGood.get('stone')?.length ?? 0) > 0) withStoneInReach++;
+    for (const b of c.buildings.values()) {
+      if (b.type !== 'quarry') continue;
+      quarries++;
+      if (b.depositExhausted) exhausted++;
+    }
+  }
+  let stoneInGround = 0;
+  for (let x = 0; x < tileMap.width; x++) {
+    for (let y = 0; y < tileMap.height; y++) {
+      const t = tileMap.getTile(x, y);
+      if (t?.resourceType === 'stone') stoneInGround += t.resourceAmount;
+    }
+  }
+
   const armies = [...sim.kingdoms.values()].flatMap(k => sim.warfare.getArmiesForKingdom(k.id));
   const biggest = armies.reduce((m, a: any) => Math.max(m, a.soldierIds?.size ?? a.strength ?? 0), 0);
   const gold = [...sim.kingdoms.values()].reduce((t, k) => t + k.gold, 0);
@@ -80,12 +103,16 @@ for (let y = 1; y <= YEARS; y++) {
   console.log(
     `${String(y).padStart(3)} ${String(humans.length).padStart(4)} ${String(cities).padStart(3)} ${String(sim.kingdoms.size).padStart(3)} |` +
     ` ${String(soldiers.length).padStart(4)} ${(share * 100).toFixed(0).padStart(4)}% ${String(professionals).padStart(4)} ${String(soldiers.length - professionals).padStart(3)} |` +
-    ` ${String(`${gated}/${cities}`).padStart(8)} ${String(`${hungry}/${cities}`).padStart(8)} ${(cities ? foodPerHead / cities : 0).toFixed(1).padStart(11)} |` +
-    ` ${String(armies.length).padStart(5)} ${String(biggest).padStart(6)} | ${String(Math.round(gold)).padStart(4)} | ${eraStr.padEnd(8)} | ${sim.diplomacy.activeWars.size}`
+    ` ${(cities ? foodPerHead / cities : 0).toFixed(1).padStart(10)} |` +
+    ` ${(cities ? stonePerCity / cities : 0).toFixed(0).padStart(9)} ${String(`${stoneStarved}/${cities}`).padStart(8)} ${String(quarries).padStart(9)} ${String(exhausted).padStart(5)} ${String(`${withStoneInReach}/${cities}`).padStart(7)} ${String(Math.round(stoneInGround)).padStart(6)} |` +
+    ` ${String(armies.length).padStart(5)} ${String(biggest).padStart(5)} | ${String(Math.round(gold)).padStart(4)} | ${eraStr.padEnd(8)} | ${sim.diplomacy.activeWars.size}`
   );
 }
 
 console.log(`\nanos em guerra: ${warYears}/${YEARS} · guerras no historico: ${sim.diplomacy.warHistory.length}`);
 console.log(`pico de soldados: ${(peakSoldierShare * 100).toFixed(1)}% da populacao`);
-console.log('\ncolunas: travadas = cidades sob o portao de comida do alistamento (food < pop*0.8)');
-console.log('         famintas = cidades com menos de meia racao no celeiro');
+console.log('\ncolunas: semPedra  = cidades com menos de 30 de pedra (nao pagam um quartel)');
+console.log('         esgot     = pedreiras cujo deposito acabou (pedra nao renova)');
+console.log('         aoAlcance = cidades com pelo menos um bloco de pedra no raio de levantamento');
+console.log('         chao      = pedra ainda no mapa inteiro');
+console.log('         (o portao de comida do alistamento nunca mordeu: comida/hab fica muito acima de 1.5x)');
