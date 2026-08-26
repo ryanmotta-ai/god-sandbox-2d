@@ -19,7 +19,6 @@ import {
 } from '../../entities/Equipment';
 import { GOVERNMENTS } from '../../civ/Government';
 import { GOODS, type GoodId } from '../../civ/Goods';
-import { SOCIAL_FACTIONS, SOCIAL_FACTION_ORDER, type SocialFactionId } from '../../civ/Society';
 import { chronicle, type HistoryEvent } from '../../civ/Chronicle';
 
 export type ForceStatus = 'attacking' | 'moving' | 'sieging' | 'defending' | 'retreating' | 'patrolling' | 'recovering' | 'idle';
@@ -150,14 +149,6 @@ export interface PoliticalWarView {
   revoltRisk: number;
   coupRisk: number;
   reformPressure: number;
-  factions: {
-    id: SocialFactionId;
-    name: string;
-    color: string;
-    influence: number;
-    warSupport: number;
-    satisfaction: number;
-  }[];
 }
 
 export interface AlliedInterventionView {

@@ -2,8 +2,9 @@ import { el, clear, button, statRow, meter, badge, emptyState, formatNumber, hex
 import { SPECIES_DEFINITIONS } from '../../entities/Species';
 import { City } from '../../civ/City';
 import { cultureSummary, dominantCultureTraits } from '../../civ/Culture';
-import { SOCIAL_FACTIONS, societySummary, topSocialFactions, restlessSocialFactions } from '../../civ/Society';
-import { LAWS, activeLawDefinitions, lawSummary } from '../../civ/Laws';
+import { societySummary } from '../../civ/Society';
+import { REALM_TRAITS, realmTraitSummary } from '../../civ/RealmTraits';
+import { RULER_TRAITS } from '../../civ/Rulers';
 import type { Screen, NavParams } from '../core/ScreenManager';
 import type { GameContext } from '../core/GameContext';
 import type { KingdomRanking } from '../core/StatsTracker';
@@ -208,42 +209,37 @@ export class KingdomsScreen implements Screen {
       ])
     );
 
-    const topFactions = topSocialFactions(kingdom.society, 4);
-    const restlessFactions = restlessSocialFactions(kingdom.society, 2)
-      .filter(f => f.radicalization > 0.18)
-      .map(f => SOCIAL_FACTIONS[f.id].shortName)
-      .join(', ');
+    const rulerTrait = RULER_TRAITS[kingdom.rulerTrait];
+    const leastLoyal = cities.reduce<City | null>((worst, city) => (!worst || city.loyalty < worst.loyalty ? city : worst), null);
 
     this.detailEl.appendChild(
       el('section', { class: 'detail-block' }, [
-        el('h4', { class: 'block-title', text: 'Facções Sociais' }),
+        el('h4', { class: 'block-title', text: 'Corte e Províncias' }),
         el('div', { class: 'stat-list' }, [
-          statRow('Equilíbrio', societySummary(kingdom.society)),
-          statRow('Facção dominante', SOCIAL_FACTIONS[kingdom.society.dominantFaction].name),
-          statRow('Grupos inquietos', restlessFactions || 'Nenhum organizado')
+          statRow('No trono', `${rulerTrait.icon} ${rulerTrait.name}`),
+          statRow('Estado do reino', societySummary(kingdom.society)),
+          statRow(
+            'Província mais inquieta',
+            leastLoyal ? `${leastLoyal.name} — ${Math.round(leastLoyal.loyalty)}/100` : 'Nenhuma'
+          )
         ]),
-        meter('Coesão social', kingdom.society.cohesion, 1, '#22c55e', `${Math.round(kingdom.society.cohesion * 100)}%`),
-        meter('Pressão reformista', kingdom.society.reformPressure, 1, '#38bdf8', `${Math.round(kingdom.society.reformPressure * 100)}%`),
+        meter('Coesão', kingdom.society.cohesion, 1, '#22c55e', `${Math.round(kingdom.society.cohesion * 100)}%`),
+        meter('Pressão por reforma', kingdom.society.reformPressure, 1, '#38bdf8', `${Math.round(kingdom.society.reformPressure * 100)}%`),
         meter('Risco de revolta', kingdom.society.revoltRisk, 1, '#ef4444', `${Math.round(kingdom.society.revoltRisk * 100)}%`),
-        ...topFactions.map(f =>
-          meter(SOCIAL_FACTIONS[f.id].shortName, f.influence, 1, SOCIAL_FACTIONS[f.id].color, `${Math.round(f.influence * 100)}% influência`)
+        ...cities.map(city =>
+          meter(city.name, city.loyalty, 100, city.loyalty < 30 ? '#ef4444' : city.loyalty < 60 ? '#f59e0b' : '#22c55e', `${Math.round(city.loyalty)}/100 de lealdade`)
         )
       ])
     );
 
-    const activeLaws = activeLawDefinitions(kingdom.laws);
-    const latestLaw = kingdom.laws.history[0];
     this.detailEl.appendChild(
       el('section', { class: 'detail-block' }, [
-        el('h4', { class: 'block-title', text: 'Leis e Reformas' }),
+        el('h4', { class: 'block-title', text: 'Caráter do Reino' }),
         el('div', { class: 'stat-list' }, [
-          statRow('Ordem jurídica', lawSummary(kingdom.laws)),
-          statRow('Impulso reformista', `${Math.round(kingdom.laws.reformMomentum * 100)}%`),
-          statRow('Última reforma', latestLaw ? `Ano ${latestLaw.year}: ${LAWS[latestLaw.from].shortName} -> ${LAWS[latestLaw.to].shortName}` : 'Nenhuma reforma importante')
+          statRow('Como é governado', realmTraitSummary(kingdom.realmTraits))
         ]),
-        meter('Prontidão para reforma', kingdom.laws.reformMomentum, 1, '#22c55e', `${Math.round(kingdom.laws.reformMomentum * 100)}%`),
         el('div', { class: 'chip-row' },
-          activeLaws.map(law => badge(`${law.shortName}`, kingdom.color))
+          kingdom.realmTraits.map(id => badge(`${REALM_TRAITS[id].icon} ${REALM_TRAITS[id].name}`, kingdom.color))
         )
       ])
     );

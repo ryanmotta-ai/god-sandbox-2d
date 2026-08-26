@@ -6,13 +6,14 @@ import {
   productionRecipesFor
 } from './Goods';
 import { TECH_ERAS, strategicGoodsFor, technologyCapacity, operatingEra } from './TechTree';
+import { GOVERNOR_TRAITS, RULER_TRAITS, traitOfGovernor, traitOfRuler } from './Rulers';
 import { GOVERNMENTS, chooseGovernment, isRevolution, GovernmentType } from './Government';
 
 import { DiplomacyManager, type PeaceSettlement } from './Diplomacy';
 import { culturalAffinity, rememberCulture, updateCulture } from './Culture';
 import { updateSociety } from './Society';
 import { ERA_CLIMATE, WorldEra } from '../world/WeatherEras';
-import { activeLawDefinitions, aggregateLawEffects, chooseLawReform, enactLaw, resetLawDefaults, updateLawMomentum } from './Laws';
+import { realmEffects } from './RealmTraits';
 import { GreatPersonManager } from './GreatPersons';
 import { chronicle } from './Chronicle';
 import { Entity } from '../entities/Entity';
@@ -105,6 +106,23 @@ const SPOILAGE_PER_YEAR = 0.35;
  * gold only ever comes out of a hillside. Turn it down to make gold precious.
  */
 const FISCAL_GOLD_YIELD = 0.6;
+
+/**
+ * How fast a settlement's loyalty follows its circumstances, per visit.
+ *
+ * Low on purpose. A province that has been badly governed for a decade should
+ * not be talked round by one good harvest, and one bad season should not tip a
+ * contented town into revolt.
+ */
+const LOYALTY_DRIFT = 0.12;
+
+/**
+ * How warm two realms get on drift alone, before a pact is signed.
+ *
+ * The dial between a friendly world and a tense one. Below this, courts warm to
+ * each other for the reasons the drift lists; above it, only an alliance does.
+ */
+const NEUTRAL_WARMTH_CEILING = 55;
 /** How far from a building the street plan is worth paving. */
 const STREET_SERVICE_REACH = 2;
 /**
@@ -319,8 +337,7 @@ export class CivilizationEngine {
       this.advanceEra(kingdom, world);
       this.tickEconomy(kingdom, scoped);
       this.tickCulture(kingdom, scoped);
-      this.tickSociety(kingdom, scoped);
-      this.tickLaws(kingdom, scoped);
+      this.tickRealmMood(kingdom, scoped);
       this.tickGovernment(kingdom, scoped);
     }
   }
@@ -414,10 +431,11 @@ export class CivilizationEngine {
 
   private tickSettlement(city: City, world: CivWorld): void {
     const kingdom = city.kingdomId ? world.kingdoms.get(city.kingdomId) ?? null : null;
+    this.tickLoyalty(city, kingdom, world);
     this.refreshCityArchitecture(city, kingdom, world);
     const techMods = kingdom?.research.modifiers() ?? { production: 1, research: 1, growth: 1, trade: 1, military: 1, territory: 0 };
     const gov = kingdom ? GOVERNMENTS[kingdom.government] : null;
-    const lawEffects = kingdom ? aggregateLawEffects(kingdom.laws) : null;
+    const lawEffects = kingdom ? realmEffects(kingdom.realmTraits) : null;
 
     const culture = kingdom?.culture;
     const productionCulture = culture
@@ -429,12 +447,9 @@ export class CivilizationEngine {
     const expansionCulture = culture
       ? (culture.expansionism - 0.5) * 12 - Math.max(0, culture.stewardship - 0.62) * 5
       : 0;
+    // People who are content to be governed do more work than people who are not.
     const productionSociety = kingdom
-      ? 0.88 +
-        kingdom.society.factions.workers.satisfaction * 0.08 +
-        kingdom.society.factions.peasants.satisfaction * 0.05 +
-        kingdom.society.cohesion * 0.06 -
-        kingdom.society.factions.workers.radicalization * kingdom.society.factions.workers.influence * 0.18
+      ? 0.88 + kingdom.society.cohesion * 0.19 - kingdom.society.reformPressure * 0.12
       : 1;
 
     /**
@@ -2080,6 +2095,54 @@ export class CivilizationEngine {
   }
 
   /**
+   * How willing this settlement still is to be ruled from where it is ruled from.
+   *
+   * Every reason it falls is a thing on the map: an empty granary, a capital too
+   * far to matter, a governor who wants the throne, a war nobody at home
+   * believes in, a crown with no standing left. Every reason it recovers is too
+   * — a full store and a prosperous town make people content to be governed.
+   *
+   * It moves toward a target rather than being set to it, so a bad season dents
+   * a settlement's loyalty instead of instantly flipping it into revolt, and a
+   * long-suffering province stays angry after one good harvest.
+   */
+  private tickLoyalty(city: City, kingdom: Kingdom | null, world: CivWorld): void {
+    if (!kingdom) {
+      city.loyalty = 100;
+      return;
+    }
+
+    const capital = world.cities.get(kingdom.capitalCityId);
+    const isCapital = capital?.id === city.id;
+
+    // Hunger first: nobody starving cares who rules them.
+    const foodPerHead = city.stock.get('food') / Math.max(1, city.population);
+    const hunger = clamp(1 - foodPerHead / 2, 0, 1) + Math.min(0.6, city.famineYears * 0.2);
+
+    // A capital rules itself, so distance costs it nothing.
+    const distance = isCapital || !capital ? 0 : Math.hypot(city.x - capital.x, city.y - capital.y);
+    const remoteness = clamp(distance / 90, 0, 1) * (1 - kingdom.administrativeReach * 0.6);
+
+    // The governor. An ambitious one is a rival, not an official.
+    const governor = city.mayorId ? world.sim?.getEntity(city.mayorId) ?? null : null;
+    const friction = GOVERNOR_TRAITS[traitOfGovernor(governor)].friction;
+    // And a tyrant on the throne is resented by the province he never visits.
+    const crownTrait = RULER_TRAITS[traitOfRuler(kingdom.rulerId ? world.sim?.getEntity(kingdom.rulerId) ?? null : null)];
+    const resentment = friction * (isCapital ? 0.3 : 1) + (crownTrait.id === 'tyrant' ? 0.25 : 0);
+
+    const warWeariness = Math.min(1, kingdom.warWeariness / 100);
+    const standing = kingdom.legitimacy * 0.5 + kingdom.economy.stability * 0.3 + city.prosperity * 0.2;
+
+    const target = clamp(
+      100 * (standing - hunger * 0.55 - remoteness * 0.35 - resentment * 0.3 - warWeariness * 0.25),
+      0,
+      100
+    );
+    city.loyalty += (target - city.loyalty) * LOYALTY_DRIFT;
+    city.loyalty = clamp(city.loyalty, 0, 100);
+  }
+
+  /**
    * What the realm made, and the gold its settlements sent in.
    *
    * This replaces taxation, and there is no rate anywhere in it. A crown used
@@ -2236,7 +2299,7 @@ export class CivilizationEngine {
   private tickEconomy(kingdom: Kingdom, world: CivWorld): void {
     const economy = kingdom.economy;
     const gov = GOVERNMENTS[kingdom.government];
-    const lawEffects = aggregateLawEffects(kingdom.laws);
+    const lawEffects = realmEffects(kingdom.realmTraits);
 
     // How industrial the realm is, from what its buildings actually are.
     let industrialBuildings = 0;
@@ -2356,10 +2419,9 @@ export class CivilizationEngine {
       (gov.succession === 'election' ? kingdom.culture.openness * 0.05 + kingdom.culture.innovation * 0.04 : 0) +
       (gov.economy === 'planned' ? kingdom.culture.collectivism * 0.06 : 0) +
       kingdom.culture.diplomaticTrust * 0.03;
+    // A crown is legitimate while its provinces obey it.
     const socialLegitimacy =
-      kingdom.society.factions.nobles.loyalty * kingdom.society.factions.nobles.influence * 0.08 +
-      kingdom.society.factions.bureaucrats.loyalty * kingdom.society.factions.bureaucrats.influence * 0.07 +
-      kingdom.society.factions.clergy_scholars.loyalty * kingdom.society.factions.clergy_scholars.influence * 0.07 -
+      kingdom.society.cohesion * 0.22 -
       kingdom.society.reformPressure * 0.13 -
       kingdom.society.revoltRisk * 0.1;
     const legitimacyTarget = clamp(
@@ -2425,68 +2487,6 @@ export class CivilizationEngine {
   // SOCIETY
   // ============================================================
 
-  private tickSociety(kingdom: Kingdom, world: CivWorld): void {
-    const gov = GOVERNMENTS[kingdom.government];
-    const wars = world.diplomacy.getWarsFor(kingdom.id);
-    let prosperity = 0;
-    let famineYears = 0;
-    let cityCount = 0;
-
-    for (const cityId of kingdom.cityIds) {
-      const city = world.cities.get(cityId);
-      if (!city) continue;
-      prosperity += city.prosperity;
-      famineYears += city.famineYears;
-      cityCount++;
-    }
-
-    prosperity = cityCount > 0 ? prosperity / cityCount : 0.5;
-    /**
-     * Society is told the tax rate people actually pay, not the one the form of
-     * government nominally implies.
-     *
-     * `gov.taxRate` ignores every fiscal law on the books. A realm that had just
-     * passed punitive taxation looked, to its own population, exactly like one
-     * that had abolished it: `taxPain` never moved, so no faction ever resented a
-     * tax law, and the whole fiscal branch of the law system was invisible to the
-     * people it taxed. `collectTaxes` has always used the effective rate — this
-     * is the same number, so the levy and the resentment finally agree.
-     */
-    const societyLawEffects = aggregateLawEffects(kingdom.laws);
-    const societyTaxRate = clamp(gov.taxRate * (1 + (societyLawEffects.taxMultiplier ?? 0)), 0.01, 0.62);
-    kingdom.society = updateSociety(kingdom.society, {
-      year: world.year,
-      government: kingdom.government,
-      economy: gov.economy,
-      taxRate: societyTaxRate,
-      atWar: wars.length > 0,
-      wars: wars.length,
-      stability: kingdom.economy.stability,
-      legitimacy: kingdom.legitimacy,
-      prosperity,
-      foodSecurity: kingdom.foodSecurity,
-      tradeDependency: kingdom.tradeDependency,
-      externalThreat: kingdom.externalThreat,
-      administrativeReach: kingdom.administrativeReach,
-      faith: kingdom.faith,
-      inequality: kingdom.economy.inequality,
-      industrialisation: kingdom.economy.industrialisation,
-      outputPerCapita: kingdom.economy.outputPerCapita,
-      cityCount,
-      famineYears,
-      warWeariness: kingdom.warWeariness,
-      culture: kingdom.culture,
-      laws: societyLawEffects,
-      ...this.economicPressures(kingdom, world)
-    });
-
-    if (wars.length > 0 && kingdom.society.peacePressure > 0.58) {
-      kingdom.warWeariness = clamp(kingdom.warWeariness + kingdom.society.peacePressure * 2.5, 0, 100);
-    }
-
-    this.tickSocietyFlashpoints(kingdom, world);
-  }
-
   /**
    * The economy, expressed as things people feel.
    *
@@ -2528,401 +2528,52 @@ export class CivilizationEngine {
     return { foodScarcity, unemployment, labourShortage, embargoes: 0 };
   }
 
-  private tickSocietyFlashpoints(kingdom: Kingdom, world: CivWorld): void {
-    if (world.year - kingdom.society.lastUnrestYear < 5) return;
-
-    const peasants = kingdom.society.factions.peasants;
-    const nobles = kingdom.society.factions.nobles;
-    const merchants = kingdom.society.factions.merchants;
-    const military = kingdom.society.factions.military;
-    const workers = kingdom.society.factions.workers;
-    const reformists = kingdom.society.factions.reformists;
-    const frontier = kingdom.society.factions.frontier;
-    const clergy = kingdom.society.factions.clergy_scholars;
-    const bureaucrats = kingdom.society.factions.bureaucrats;
-    const gov = GOVERNMENTS[kingdom.government];
-
-    if (peasants.satisfaction < 0.25 && peasants.radicalization > 0.48 && kingdom.foodSecurity < 0.42 && rng.chance(0.18)) {
-      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.12, 0, 1);
-      kingdom.legitimacy = clamp(kingdom.legitimacy - 0.06, 0, 1);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `Tumultos por pão abalaram ${kingdom.name} quando camponeses famintos arrombaram celeiros locais.`,
-        {
-          title: `Tumultos por Pão em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'peasants'],
-          causes: ['Fome, baixa satisfação dos camponeses e alta radicalização convergiram.'],
-          consequences: ['A estabilidade e a legitimidade caíram à medida que os camponeses arrombavam celeiros.'],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'peasants', year: world.year });
-      return;
-    }
-
-    if (nobles.satisfaction < 0.3 && nobles.influence > 0.22 && nobles.radicalization > 0.45 && rng.chance(0.1)) {
-      kingdom.legitimacy = clamp(kingdom.legitimacy - 0.12, 0, 1);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `Powerful nobles in ${kingdom.name} gathered in secret to challenge the ruler's legitimacy.`,
-        {
-          title: `Conspiração da Nobreza em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'nobles'],
-          causes: ['Nobres influentes tornaram-se insatisfeitos e radicalizados.'],
-          consequences: ["The ruler's legitimacy was weakened by elite opposition."],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'nobles', year: world.year });
-      return;
-    }
-
-    if (merchants.satisfaction < 0.3 && merchants.influence > 0.18 && (gov.taxRate > 0.24 || kingdom.tradeDependency > 0.25) && rng.chance(0.12)) {
-      kingdom.takeGold(kingdom.gold * 0.08);
-      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.05, 0, 1);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `Casas mercantis em ${kingdom.name} moveram capital para fora do alcance do tesouro.`,
-        {
-          title: `Fuga de Capital em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'merchants'],
-          causes: ['A insatisfação dos mercadores coincidiu com pressão fiscal ou comercial.'],
-          consequences: ['As reservas do tesouro e a estabilidade diminuíram.'],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'merchants', year: world.year });
-      return;
-    }
-
-    /**
-     * The army takes the palace.
-     *
-     * `coupRisk` was computed every year, displayed in three separate panels, fed
-     * into legitimacy and read by the government chooser — and could never
-     * actually depose anybody. The only thing a coup-risk of 90% produced was a
-     * chronicle line about officers issuing "a public warning to the court". The
-     * whole variable was theatre.
-     *
-     * Past the threshold the junta takes over for real: the throne is vacated so
-     * succession has to find someone new, the realm reorganises itself under
-     * whatever military order it can sustain, and the officers who did it are
-     * satisfied while everyone who did not is not.
-     */
-    if (military.satisfaction < 0.3 && military.influence > 0.22 && kingdom.society.coupRisk > 0.65 && rng.chance(0.3)) {
-      const deposed = kingdom.rulerId ? world.entities.find(e => e.id === kingdom.rulerId) ?? null : null;
-      // Whatever hard order the realm actually has the political theory for. An
-      // army that seizes power does not invent a constitution to do it under.
-      const available = kingdom.research.unlockedGovernments();
-      const nextOrder = (['empire', 'monarchy', 'feudal_kingdom', 'chiefdom'] as const)
-        .find(order => available.includes(order)) ?? kingdom.government;
-
-      kingdom.rulerId = null;
-      if (deposed) deposed.profession = 'none';
-      if (nextOrder !== kingdom.government) kingdom.adoptGovernment(nextOrder as any, world.year);
-
-      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.22, 0, 1);
-      kingdom.legitimacy = clamp(kingdom.legitimacy - 0.3, 0, 1);
-      kingdom.society.coupRisk = clamp(kingdom.society.coupRisk - 0.45, 0, 1);
-      military.satisfaction = clamp(military.satisfaction + 0.4, 0, 1);
-      military.influence = clamp(military.influence + 0.18, 0, 1);
-      for (const other of [nobles, merchants, reformists, bureaucrats, clergy, peasants, workers]) {
-        other.satisfaction = clamp(other.satisfaction - 0.09, 0, 1);
-        other.radicalization = clamp(other.radicalization + 0.07, 0, 1);
-      }
-      rememberCulture(kingdom.culture, 'revolution', world.year, 0.85, 'O exército tomou o poder e a corte foi dissolvida.');
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'kingdom',
-        `Uma junta militar tomou o poder em ${kingdom.name}${deposed ? ` e depôs ${deposed.fullName}` : ''}.`,
-        {
-          title: `Golpe Militar em ${kingdom.name}`,
-          importance: 'legendary',
-          scope: 'kingdom',
-          refs: [
-            { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
-            ...(deposed ? [{ kind: 'person' as const, id: deposed.id, name: deposed.fullName }] : [])
-          ],
-          tags: ['society', 'coup', 'military', 'government'],
-          causes: [`O risco de golpe atingiu ${Math.round(kingdom.society.coupRisk * 100 + 45)}% com o exército insatisfeito e influente.`],
-          consequences: [
-            'O trono ficou vago e a sucessão terá de encontrar um novo soberano.',
-            `A ordem política do reino passou a ${nextOrder}.`,
-            'A legitimidade e a estabilidade caíram bruscamente.'
-          ],
-          threadId: `coup:${kingdom.id}:${world.year}`,
-          threadTitle: `Golpe em ${kingdom.name}`
-        }
-      );
-      events.emit('coupStaged', { kingdom, deposed, government: nextOrder, year: world.year });
-      events.emit('societyUnrest', { kingdom, faction: 'military', year: world.year });
-      return;
-    }
-
-    // Short of an outright coup, the officers still make themselves heard.
-    if (military.satisfaction < 0.28 && military.influence > 0.24 && kingdom.society.coupRisk > 0.28 && rng.chance(0.08)) {
-      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.1, 0, 1);
-      kingdom.legitimacy = clamp(kingdom.legitimacy - 0.08, 0, 1);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `Oficiais em ${kingdom.name} emitiram um aviso público à corte sobre o estado do exército.`,
-        {
-          title: `Aviso Militar em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'military'],
-          causes: ['A insatisfação militar e o risco de golpe atingiram um nível perigoso.'],
-          consequences: ['A corte perdeu estabilidade e legitimidade.'],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'military', year: world.year });
-      return;
-    }
-
-    if (workers.satisfaction < 0.28 && workers.influence > 0.16 && kingdom.economy.industrialisation > 0.28 && rng.chance(0.12)) {
-      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.08, 0, 1);
-      kingdom.takeGold(kingdom.gold * 0.04);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `Guildas e oficinas em ${kingdom.name} desaceleraram a produção em protesto.`,
-        {
-          title: `Protesto Industrial em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'workers'],
-          causes: ['A insatisfação dos trabalhadores aumentou dentro de uma economia em industrialização.'],
-          consequences: ['A produção desacelerou e o tesouro perdeu receita.'],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'workers', year: world.year });
-      return;
-    }
-
-    if (reformists.influence > 0.18 && kingdom.society.reformPressure > 0.42 && rng.chance(0.1)) {
-      kingdom.legitimacy = clamp(kingdom.legitimacy - 0.05, 0, 1);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `Círculos reformistas em ${kingdom.name} circularam manifestos clamando por uma nova ordem política.`,
-        {
-          title: `Manifestos Reformistas em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'reformists'],
-          causes: ['A pressão por reformas e a influência reformista tornaram-se politicamente visíveis.'],
-          consequences: ['Apelos por uma nova ordem política enfraqueceram a legitimidade.'],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'reformists', year: world.year });
-      return;
-    }
-
-    /**
-     * The clergy and the scholars.
-     *
-     * Both of these factions had influence, loyalty, satisfaction and
-     * radicalization tracked every year, were read by the legitimacy formula and
-     * the succession scorer, and had not one event of their own. Six factions
-     * could make trouble; these two could only ever be a number on a panel. A
-     * learned order that has lost faith in the crown withdraws its blessing —
-     * which is a legitimacy crisis, and for a realm that keeps its scholars in
-     * the same faction, a research one too.
-     */
-    if (clergy.satisfaction < 0.3 && clergy.influence > 0.16 && rng.chance(0.12)) {
-      kingdom.legitimacy = clamp(kingdom.legitimacy - 0.11, 0, 1);
-      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.05, 0, 1);
-      clergy.radicalization = clamp(clergy.radicalization + 0.08, 0, 1);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `Templos e escolas de ${kingdom.name} retiraram sua bênção à coroa e fecharam suas portas.`,
-        {
-          title: `Cisma Clerical em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'clergy', 'legitimacy'],
-          causes: ['O clero e os eruditos perderam a confiança na corte.'],
-          consequences: [
-            'A legitimidade do soberano foi publicamente contestada.',
-            'A pesquisa em curso perdeu patrocínio e recuou.'
-          ],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'clergy_scholars', year: world.year });
-      return;
-    }
-
-    /**
-     * The bureaucracy.
-     *
-     * The one faction whose discontent has a mechanical meaning nothing else can
-     * express: when the clerks stop working, the state stops reaching its own
-     * provinces. That is administrative reach, and until now no event in the game
-     * could move it.
-     */
-    if (bureaucrats.satisfaction < 0.3 && bureaucrats.influence > 0.15 && kingdom.cityIds.size > 1 && rng.chance(0.12)) {
-      kingdom.administrativeReach = clamp(kingdom.administrativeReach - 0.14, 0, 1);
-      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.06, 0, 1);
-      // A state that cannot collect cannot spend.
-      kingdom.takeGold(kingdom.gold * 0.07);
-      bureaucrats.radicalization = clamp(bureaucrats.radicalization + 0.07, 0, 1);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `A administração de ${kingdom.name} parou: registros sem lançamento, tributos sem cobrança, ordens sem cumprimento.`,
-        {
-          title: `Paralisia Administrativa em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'bureaucrats', 'administration'],
-          causes: ['O corpo burocrático, insatisfeito e influente, cruzou os braços.'],
-          consequences: [
-            'O alcance administrativo do reino sobre suas províncias caiu.',
-            'A arrecadação do ano foi perdida em parte.'
-          ],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'bureaucrats', year: world.year });
-      return;
-    }
-
-    if (frontier.satisfaction < 0.3 && frontier.influence > 0.18 && kingdom.administrativeReach < 0.45 && rng.chance(0.1)) {
-      kingdom.economy.stability = clamp(kingdom.economy.stability - 0.06, 0, 1);
-      kingdom.society.lastUnrestYear = world.year;
-      chronicle.log(
-        world.year,
-        'society',
-        `Cidades de fronteira em ${kingdom.name} exigiram autonomia da capital.`,
-        {
-          title: `Crise de Autonomia na Fronteira em ${kingdom.name}`,
-          importance: 'major',
-          scope: 'kingdom',
-          refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-          tags: ['society', 'unrest', 'frontier'],
-          causes: ['A fraqueza administrativa encontrou insatisfação na fronteira.'],
-          consequences: ['Exigências de autonomia aumentaram a instabilidade no reino.'],
-          threadId: `unrest:${kingdom.id}:${world.year}`,
-          threadTitle: `Inquietação em ${kingdom.name}`
-        }
-      );
-      events.emit('societyUnrest', { kingdom, faction: 'frontier', year: world.year });
-    }
-  }
-
   // ============================================================
   // LAWS & REFORMS
   // ============================================================
 
-  private tickLaws(kingdom: Kingdom, world: CivWorld): void {
-    const gov = GOVERNMENTS[kingdom.government];
-    const wars = world.diplomacy.getWarsFor(kingdom.id);
-    const context = {
-      year: world.year,
-      government: kingdom.government,
-      economy: gov.economy,
-      atWar: wars.length > 0,
-      stability: kingdom.economy.stability,
-      legitimacy: kingdom.legitimacy,
-      foodSecurity: kingdom.foodSecurity,
-      tradeDependency: kingdom.tradeDependency,
-      externalThreat: kingdom.externalThreat,
-      administrativeReach: kingdom.administrativeReach,
-      inequality: kingdom.economy.inequality,
-      industrialisation: kingdom.economy.industrialisation,
-      cityCount: kingdom.cityIds.size,
-      warWeariness: kingdom.warWeariness,
-      society: kingdom.society,
-      culture: kingdom.culture
-    };
-
-    updateLawMomentum(kingdom.laws, context);
-    const decision = chooseLawReform(kingdom.laws, context);
-    if (!decision) return;
-
-    const chance =
-      decision.pressure * 0.38 +
-      kingdom.society.reformPressure * 0.22 +
-      Math.max(0, 0.42 - kingdom.economy.stability) * 0.18;
-    if (!rng.chance(chance)) return;
-
-    enactLaw(kingdom.laws, decision.law.id, world.year, decision.pressure);
-    kingdom.economy.stability = clamp(kingdom.economy.stability - 0.02 + decision.pressure * 0.035, 0, 1);
-    kingdom.legitimacy = clamp(kingdom.legitimacy + (decision.law.effects.legitimacy ?? 0) * 0.35, 0, 1);
-
-    const tense = decision.law.angers
-      .filter(id => kingdom.society.factions[id].influence > 0.12)
-      .map(id => kingdom.society.factions[id])
-      .sort((a, b) => b.influence - a.influence)[0];
-    if (tense) {
-      tense.satisfaction = clamp(tense.satisfaction - 0.04, 0, 1);
-      tense.radicalization = clamp(tense.radicalization + 0.03, 0, 1);
-    }
-
-    chronicle.log(
-      world.year,
-      'law',
-      `${kingdom.name} reformou a lei de ${decision.law.category.replace('_', ' ')}: ${decision.current.name} deu lugar a ${decision.law.name}.`,
-      {
-        title: `Reforma de ${decision.law.name}`,
-        importance: decision.pressure >= 0.7 ? 'major' : 'notable',
-        scope: 'kingdom',
-        refs: [{ kind: 'kingdom', id: kingdom.id, name: kingdom.name }],
-        tags: ['law', decision.law.category, 'reform'],
-        causes: [`A pressão por reforma política atingiu ${Math.round(decision.pressure * 100)}%.`],
-        consequences: [
-          `${decision.current.name} foi substituída por ${decision.law.name}.`,
-          ...(tense ? ['Pelo menos uma facção social influente reagiu com maior insatisfação e radicalização.'] : [])
-        ],
-        data: { pressure: Number(decision.pressure.toFixed(3)), category: decision.law.category }
-      }
-    );
-    events.emit('lawReformed', { kingdom, law: decision.law, previous: decision.current, year: world.year });
-  }
-
   // ============================================================
   // GOVERNMENT
   // ============================================================
+
+  /**
+   * How the realm feels about being a realm, read off its towns and its king.
+   *
+   * This was `tickSociety` plus `tickLaws` plus `tickSocietyFlashpoints`: six
+   * factions' satisfaction recomputed through a support matrix, a law-reform AI
+   * choosing what to enact next, and a set of faction-specific crises. The
+   * crises are still there — they are the loyalty bar falling and the province
+   * revolting, which the player can watch happen on the map.
+   */
+  private tickRealmMood(kingdom: Kingdom, world: CivWorld): void {
+    // Who is on the throne decides the realm's character, so read it first.
+    const ruler = kingdom.rulerId ? world.sim?.getEntity(kingdom.rulerId) ?? null : null;
+    kingdom.rulerTrait = traitOfRuler(ruler);
+
+    let total = 0;
+    let worst = 100;
+    let counted = 0;
+    for (const cityId of kingdom.cityIds) {
+      const city = world.cities.get(cityId);
+      if (!city) continue;
+      total += city.loyalty;
+      worst = Math.min(worst, city.loyalty);
+      counted++;
+    }
+    const meanLoyalty = counted > 0 ? total / counted : 100;
+
+    kingdom.society = updateSociety(kingdom.society, {
+      year: world.year,
+      meanLoyalty,
+      worstLoyalty: counted > 0 ? worst : 100,
+      ruler: kingdom.rulerTrait,
+      government: kingdom.government,
+      atWar: world.diplomacy.getWarsFor(kingdom.id).length > 0,
+      warWeariness: kingdom.warWeariness,
+      legitimacy: kingdom.legitimacy,
+      stability: kingdom.economy.stability
+    });
+  }
 
   private tickGovernment(kingdom: Kingdom, world: CivWorld): void {
     // Realms don't reorganise themselves every year.
@@ -2952,10 +2603,13 @@ export class CivilizationEngine {
       culturalCollectivism: kingdom.culture.collectivism,
       culturalTradition: kingdom.culture.tradition,
       socialReformPressure: kingdom.society.reformPressure,
-      socialMilitaryPressure: kingdom.society.factions.military.influence * kingdom.society.factions.military.warSupport,
-      socialElitePressure: kingdom.society.factions.nobles.influence * kingdom.society.factions.nobles.loyalty,
-      socialMerchantPressure: kingdom.society.factions.merchants.influence * kingdom.society.factions.merchants.loyalty,
-      socialWorkerPressure: kingdom.society.factions.workers.influence * kingdom.society.factions.workers.reformSupport
+      // What used to be four factions' weighted opinions is what the realm's
+      // own condition already says: an army that wants war, elites who back a
+      // crown that holds, and provinces that want it changed.
+      socialMilitaryPressure: kingdom.society.warPressure,
+      socialElitePressure: kingdom.society.cohesion,
+      socialMerchantPressure: kingdom.society.cohesion,
+      socialWorkerPressure: kingdom.society.reformPressure
     });
 
     if (next === kingdom.government) return;
@@ -2964,7 +2618,8 @@ export class CivilizationEngine {
     const previousGovernment = GOVERNMENTS[kingdom.government].name;
     const previousName = kingdom.adoptGovernment(next, world.year);
     const newGov = GOVERNMENTS[next];
-    resetLawDefaults(kingdom.laws, next);
+    // The realm's character follows its new government automatically; there is
+    // no statute book to reset.
 
     if (revolution) {
       // A revolution costs the realm dearly and usually costs the ruler more.
@@ -3163,9 +2818,16 @@ export class CivilizationEngine {
         if (world.diplomacy.isAtWar(a.id, b.id)) continue;
         if (!a.knownKingdoms.has(b.id)) continue;
 
-        // A shared fear is worth more than an old grievance.
+        // A shared fear is worth more than an old grievance — but it buys wary
+        // cooperation, not devotion. Unclamped, this was the single biggest
+        // source of warmth in the world: every realm frightened of the same
+        // neighbour warmed to every other by up to twelve points a pass, which
+        // pinned the whole map at +99 and left no king anywhere with a grievance.
         const warmth = (3 + alarm * 9) * (0.7 + (a.culture.diplomaticTrust + b.culture.diplomaticTrust) * 0.3);
-        world.diplomacy.changeRelation(a.id, b.id, warmth);
+        const current = world.diplomacy.getRelation(a.id, b.id);
+        if (current < NEUTRAL_WARMTH_CEILING) {
+          world.diplomacy.changeRelation(a.id, b.id, Math.min(warmth, NEUTRAL_WARMTH_CEILING - current));
+        }
 
         // Past mutual warmth, the fear becomes a signature.
         if (
@@ -3402,6 +3064,19 @@ export class CivilizationEngine {
         // Allies don't drift further into infatuation; their pact is stable
         // unless the negatives above pull it down (then it can dissolve).
         let finalDrift = alreadyAllied ? Math.min(0, drift) : drift;
+        /**
+         * Courts that have never done anything for each other stay polite, not
+         * devoted.
+         *
+         * Trade used to be the ceiling on this without anybody meaning it to be:
+         * an embargo or a tariff dispute pulled a relation down as fast as
+         * affinity pushed it up. With trade gone, two realms drifted to +99 just
+         * by existing near each other, so no king ever had a grievance and a
+         * world of butchers never fought a war. Warmth beyond this line has to
+         * be bought with an actual pact — which is what an alliance is, and why
+         * allies are exempt.
+         */
+        if (!alreadyAllied && relation >= NEUTRAL_WARMTH_CEILING) finalDrift = Math.min(0, finalDrift);
         if (Math.abs(finalDrift) >= 0.15) world.diplomacy.changeRelation(a.id, b.id, finalDrift);
 
         const newRelation = world.diplomacy.getRelation(a.id, b.id);
@@ -3672,10 +3347,10 @@ export class CivilizationEngine {
           candidate.culture.tradition * 0.02 +
           overlord.culture.militarism * 0.015 -
           candidate.culture.diplomaticTrust * 0.015;
+        // A realm whose own provinces already obey it can be handed over; one
+        // whose provinces are in revolt has nothing to swear with.
         const eliteSubmission =
-          candidate.society.factions.nobles.loyalty * candidate.society.factions.nobles.influence * 0.04 +
-          candidate.society.factions.bureaucrats.loyalty * candidate.society.factions.bureaucrats.influence * 0.035 -
-          candidate.society.factions.frontier.radicalization * candidate.society.factions.frontier.influence * 0.04;
+          candidate.society.cohesion * 0.06 - candidate.society.revoltRisk * 0.05;
 
         // Fealty is bought with either overwhelming strength or genuine friendship.
         const submits = ratio > 3 && relation > -40 && rng.chance(0.035 + culturalSubmission + eliteSubmission);
@@ -3723,8 +3398,7 @@ export class CivilizationEngine {
         vassal.society.revoltRisk > 0.18 &&
         vassal.computePower() > overlord.computePower() * 0.45;
       const independencePressure =
-        vassal.society.factions.frontier.radicalization * 0.08 +
-        vassal.society.factions.reformists.radicalization * 0.05 +
+        vassal.society.reformPressure * 0.1 +
         Math.max(0, vassal.society.revoltRisk - 0.2) * 0.12;
       if (wantsIndependence && rng.chance(0.05 + independencePressure)) {
         vassal.overlordId = null;
@@ -4419,15 +4093,12 @@ export class CivilizationEngine {
     society.lastRevolutionYear = world.year;
     society.lastUnrestYear = world.year;
 
-    // The people who made it are heard; those who held the old order are not.
-    for (const id of ['peasants', 'workers', 'reformists'] as const) {
-      society.factions[id].satisfaction = clamp(society.factions[id].satisfaction + 0.28, 0, 1);
-      society.factions[id].radicalization = clamp(society.factions[id].radicalization - 0.2, 0, 1);
-      society.factions[id].influence = clamp(society.factions[id].influence + 0.06, 0, 1);
-    }
-    for (const id of ['nobles', 'clergy_scholars'] as const) {
-      society.factions[id].satisfaction = clamp(society.factions[id].satisfaction - 0.2, 0, 1);
-      society.factions[id].influence = clamp(society.factions[id].influence - 0.08, 0, 1);
+    // A revolution buys goodwill in the streets that made it: the capital and
+    // every province gets some of its loyalty back, because the thing they were
+    // angry at is gone.
+    for (const cityId of kingdom.cityIds) {
+      const city = world.cities.get(cityId);
+      if (city) city.loyalty = clamp(city.loyalty + 35, 0, 100);
     }
 
     capital.prosperity = clamp(capital.prosperity - 0.1, 0, 1);
@@ -4493,29 +4164,18 @@ export class CivilizationEngine {
         const city = world.cities.get(cityId);
         if (!city) continue;
 
-        // Distance from capital increases rebellion risk
-        const distance = Math.hypot(city.x - capital.x, city.y - capital.y);
-        const distanceFactor = Math.min(2.5, distance / 25);
-
-        // Famine, low legitimacy and poor administration amplify rebellion risk.
-        const famineRisk = city.famineYears * 0.25;
-        const frontierPressure =
-          kingdom.society.factions.frontier.radicalization * kingdom.society.factions.frontier.influence * 0.42 +
-          kingdom.society.factions.reformists.radicalization * kingdom.society.factions.reformists.influence * 0.24;
-        const discontent =
-          (1 - kingdom.economy.stability) * 0.35 +
-          (1 - kingdom.legitimacy) * 0.25 +
-          (1 - kingdom.administrativeReach) * 0.2 +
-          kingdom.society.revoltRisk * 0.25 +
-          frontierPressure +
-          (1 - kingdom.culture.authority) * 0.08 +
-          kingdom.culture.warTrauma * 0.1 +
-          famineRisk +
-          (kingdom.warWeariness / 100) * (0.18 + kingdom.culture.militarism * 0.08);
-
-        const rebellionChance = 0.04 * distanceFactor * discontent;
-
-        if (rng.chance(rebellionChance)) {
+        /**
+         * Loyalty decides this, and nothing else does.
+         *
+         * This used to be a formula over eight terms — stability, legitimacy,
+         * administrative reach, two social factions' radicalisation weighted by
+         * their influence, cultural authority, war trauma, famine years — none
+         * of which a player could see. Every one of those reasons already feeds
+         * `city.loyalty`, which is a bar on the settlement. A town at zero has
+         * stopped being ruled, and it revolts now rather than rolling dice about
+         * it for another decade.
+         */
+        if (city.loyalty <= 0) {
           // Secession! The city breaks away and forms a new independent realm
           const rebelKingdomId = nextId('king');
           const rebelColor = getNextKingdomColor();
@@ -4554,19 +4214,15 @@ export class CivilizationEngine {
           rebelKingdom.culture.diplomaticTrust = clamp(rebelKingdom.culture.diplomaticTrust - 0.1, 0, 1);
           rememberCulture(rebelKingdom.culture, 'secession', world.year, 0.9, `A secessão de ${kingdom.name} fundou o novo estado.`);
           rememberCulture(kingdom.culture, 'secession', world.year, 0.7, `${city.name} se separou do reino.`);
-          rebelKingdom.society = {
-            ...kingdom.society,
-            factions: Object.fromEntries(
-              Object.entries(kingdom.society.factions).map(([id, faction]) => [id, { ...faction }])
-            ) as any
-          };
-          rebelKingdom.society.factions.frontier.influence = clamp(rebelKingdom.society.factions.frontier.influence + 0.12, 0, 1);
-          rebelKingdom.society.factions.frontier.loyalty = 0.78;
-          rebelKingdom.society.factions.frontier.satisfaction = 0.62;
-          rebelKingdom.society.factions.reformists.influence = clamp(rebelKingdom.society.factions.reformists.influence + 0.08, 0, 1);
-          rebelKingdom.society.factions.reformists.loyalty = 0.66;
-          rebelKingdom.society.revoltRisk = Math.max(0.06, rebelKingdom.society.revoltRisk * 0.45);
-          rebelKingdom.society.cohesion = Math.max(0.48, rebelKingdom.society.cohesion);
+          // A town that has just won its freedom is loyal to itself. That is the
+          // whole of the new realm's politics, and it is why a rebellion is
+          // worth watching: the bar the player saw fall to nothing goes back up
+          // the moment the flag changes.
+          rebelKingdom.society = { ...kingdom.society };
+          rebelKingdom.society.revoltRisk = 0.06;
+          rebelKingdom.society.cohesion = 0.9;
+          rebelKingdom.society.reformPressure = 0;
+          city.loyalty = 90;
           rebelKingdom.legitimacy = 0.55;
           rebelKingdom.foodSecurity = Math.max(0.4, city.prosperity);
           rebelKingdom.administrativeReach = 1;

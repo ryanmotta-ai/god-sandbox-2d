@@ -21,6 +21,10 @@ import { GoodId, GOODS, MINEABLE_GOODS, QUARRY_GOODS } from '../civ/Goods';
 import { tileResourceToGood } from '../world/Tile';
 import { events } from '../core/EventBus';
 import { CivilizationEngine, type CivWorld } from '../civ/CivilizationEngine';
+import {
+  RULER_TRAITS, decideRoyalAction, traitOfRuler,
+  type CourtState, type Neighbour, type RoyalDecision
+} from '../civ/Rulers';
 import { canPairWith, formPartnership, conceiveChild, chooseSuccessor, generateDynastyName, DeceasedEntityRecord } from '../civ/Lineage';
 import { Household } from '../civ/Household';
 import {
@@ -154,6 +158,16 @@ const MAX_RELOCATIONS_PER_YEAR = 12;
 const MIGRATION_RANGE = 60;
 /** Urge above which a citizen starts looking for somewhere else to live. */
 const RELOCATION_URGE = 0.5;
+
+/**
+ * How far a king will contemplate marching, in tiles.
+ *
+ * The dial between a world of local quarrels and one of intercontinental wars.
+ */
+const ROYAL_REACH = 110;
+
+/** How hard two courts judge each other by their kings. See `tickGeopolitics`. */
+const RULER_FRICTION = 4;
 
 /**
  * The trade a workplace implies.
@@ -699,6 +713,7 @@ export class SimulationEngine {
         break;
       case 1:
         this.tickGeopolitics();
+        this.tickRoyalCourts(tileMap);
         break;
       case 2:
         this.musterArmies();
@@ -2889,6 +2904,162 @@ household.cityId = city.id;
    * War, peace and rivalry between realms. Runs once a year alongside the
    * civilization engine, which handles everything economic and political.
    */
+  /**
+   * Every king takes one decision, on his own temper and his own position.
+   *
+   * This is the beat the whole political layer exists for. A realm's foreign
+   * policy used to emerge from opinion drift and a parliament of invisible
+   * factions, and arrived as a line in a table minutes later. Now there is a
+   * person on a throne with a temperament, and every ten to fifteen seconds he
+   * looks at his neighbours and does one thing about them: declares a war,
+   * begs for terms, or signs a pact. Kill him with a bolt of lightning and his
+   * heir may want something completely different.
+   */
+  private tickRoyalCourts(tileMap: TileMap): void {
+    if (this.kingdoms.size < 2) return;
+
+    for (const kingdom of [...this.kingdoms.values()]) {
+      // A vassal has no foreign policy of its own.
+      if (kingdom.overlordId) continue;
+
+      const ruler = kingdom.rulerId ? this.getEntity(kingdom.rulerId) : null;
+      const wars = this.diplomacy.getWarsFor(kingdom.id);
+      const capital = this.cities.get(kingdom.capitalCityId);
+      const ownPower = Math.max(1, kingdom.computePower());
+
+      const court: CourtState = {
+        trait: traitOfRuler(ruler),
+        warWeariness: kingdom.warWeariness,
+        capitalBesieged: !!capital?.besiegerId,
+        // What is left of the levy, against what a realm this size should field.
+        armyRemaining: Math.min(1, this.armyStrengthOf(kingdom.id) / Math.max(1, kingdom.totalPopulation * 0.12))
+      };
+
+      const neighbours: Neighbour[] = [];
+      for (const otherId of kingdom.knownKingdoms) {
+        const other = this.kingdoms.get(otherId);
+        if (!other || other.id === kingdom.id || other.overlordId === kingdom.id) continue;
+        neighbours.push({
+          id: other.id,
+          name: other.name,
+          relation: this.diplomacy.getRelation(kingdom.id, other.id),
+          powerRatio: other.computePower() / ownPower,
+          atWar: wars.some(war => war.attacker === other.id || war.defender === other.id),
+          allied: this.diplomacy.allianceOf(kingdom.id)?.members.has(other.id) ?? false,
+          // An opinion about somebody across an ocean is only ever an opinion.
+          reachable: this.realmsAreReachable(kingdom, other)
+        });
+      }
+      if (neighbours.length === 0) continue;
+
+      const decision = decideRoyalAction(court, neighbours);
+      if (!decision) continue;
+      this.actOnRoyalDecision(kingdom, decision, ruler);
+    }
+  }
+
+  /**
+   * Fighting strength this realm still has in the field.
+   *
+   * Counted from the soldiers who exist, because that is what a king can
+   * actually send anywhere — not from a levy figure on a sheet.
+   */
+  private armyStrengthOf(kingdomId: string): number {
+    let strength = 0;
+    for (const e of this.entities) {
+      if (e.hp <= 0 || e.kingdomId !== kingdomId) continue;
+      if (e.profession === 'soldier' || e.profession === 'archer' || e.profession === 'leader') strength++;
+    }
+    return strength;
+  }
+
+  /**
+   * Whether an army could plausibly march from one realm to the other.
+   *
+   * A grievance against somebody on the far side of an ocean is a grievance, not
+   * a war: without this a landlocked chiefdom declares war on a continent it can
+   * never touch and the world fills with wars nobody can fight.
+   */
+  private realmsAreReachable(a: Kingdom, b: Kingdom): boolean {
+    return this.civ.closestRealmDistance(a, b, this.cities) <= ROYAL_REACH;
+  }
+
+  /** Carries out what the court decided, and says so out loud. */
+  private actOnRoyalDecision(kingdom: Kingdom, decision: RoyalDecision, ruler: Entity | null): void {
+    const target = this.kingdoms.get(decision.target);
+    if (!target) return;
+    const trait = RULER_TRAITS[traitOfRuler(ruler)];
+    const who = ruler ? `${ruler.name} ${trait.icon}` : kingdom.name;
+
+    switch (decision.kind) {
+      case 'war': {
+        if (!this.diplomacy.declareWar(kingdom.id, target.id, this.currentYear, decision.reason)) return;
+        chronicle.log(
+          this.currentYear,
+          'diplomacy',
+          `${who}, ${trait.name.toLowerCase()}, declarou guerra a ${target.name}: ${decision.reason}.`,
+          {
+            title: `${kingdom.name} declara guerra a ${target.name}`,
+            importance: 'major',
+            scope: 'international',
+            refs: [
+              { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
+              { kind: 'kingdom', id: target.id, name: target.name }
+            ],
+            tags: ['guerra', 'corte', trait.id],
+            causes: [`O temperamento ${trait.name.toLowerCase()} de quem manda.`]
+          }
+        );
+        events.emit('royalDecision', { kingdom, target, kind: 'war', trait: trait.id });
+        break;
+      }
+      case 'peace': {
+        this.diplomacy.settleWar(kingdom.id, target.id, this.currentYear, 'white_peace', null, -20, 8);
+        chronicle.log(
+          this.currentYear,
+          'diplomacy',
+          `${who} pediu paz a ${target.name}: ${decision.reason}.`,
+          {
+            title: `${kingdom.name} pede paz`,
+            importance: 'major',
+            scope: 'international',
+            refs: [
+              { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
+              { kind: 'kingdom', id: target.id, name: target.name }
+            ],
+            tags: ['paz', 'corte'],
+            causes: [decision.reason]
+          }
+        );
+        events.emit('royalDecision', { kingdom, target, kind: 'peace', trait: trait.id });
+        break;
+      }
+      default: {
+        const alliance = this.diplomacy.createAlliance(
+          kingdom.id, target.id, `Pacto de ${kingdom.name} e ${target.name}`, this.currentYear
+        );
+        if (!alliance) return;
+        chronicle.log(
+          this.currentYear,
+          'diplomacy',
+          `${who} selou uma aliança militar com ${target.name}.`,
+          {
+            title: `Aliança: ${kingdom.name} e ${target.name}`,
+            importance: 'major',
+            scope: 'international',
+            refs: [
+              { kind: 'kingdom', id: kingdom.id, name: kingdom.name },
+              { kind: 'kingdom', id: target.id, name: target.name }
+            ],
+            tags: ['aliança', 'corte', trait.id]
+          }
+        );
+        events.emit('royalDecision', { kingdom, target, kind: 'alliance', trait: trait.id });
+        break;
+      }
+    }
+  }
+
   private tickGeopolitics(): void {
     if (this.kingdoms.size < 2) return;
     const kingdoms = Array.from(this.kingdoms.values());
@@ -2908,6 +3079,32 @@ household.cityId = city.id;
         if (rng.chance(0.35)) {
           const drift = k1.species !== k2.species ? -2 : 1;
           this.diplomacy.changeRelation(k1.id, k2.id, drift);
+        }
+
+        /**
+         * Courts judge each other by the men on the thrones.
+         *
+         * Trade used to supply almost all the friction in the world: an embargo
+         * cost a relation a full point a year and a tariff dispute more. With
+         * trade gone there was nothing pulling relations down at all, so every
+         * realm drifted to loving every other, no king ever had a grievance, and
+         * a world of warlike kings never fought a single war. A neighbour ruled
+         * by a butcher is feared, and one ruled by a diplomat is trusted — which
+         * puts the friction back where a player can see the reason for it, on a
+         * face and a crown.
+         */
+        if (rng.chance(0.5)) {
+          const t1 = RULER_TRAITS[k1.rulerTrait].belligerence;
+          const t2 = RULER_TRAITS[k2.rulerTrait].belligerence;
+          // Each court reacts to the other's temper, so two butchers loathe each
+          // other twice over and two diplomats warm to each other twice over.
+          // The multiplier is the pacing dial for the whole war spectacle. At
+          // 2.5 two neighbouring butchers took about thirty years to reach the
+          // hatred a declaration needs; at 4 they get there in fifteen, which is
+          // what "kings who go to war" is supposed to feel like. Turn it down for
+          // a calmer world.
+          const mutual = -(t1 + t2) * RULER_FRICTION;
+          if (Math.abs(mutual) >= 0.5) this.diplomacy.changeRelation(k1.id, k2.id, mutual);
         }
 
         // Ideology matters once realms have one.

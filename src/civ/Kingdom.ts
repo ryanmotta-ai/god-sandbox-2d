@@ -8,7 +8,8 @@ import { CulturalProfile, createCulturalProfile, deserializeCulturalProfile } fr
 import { SocietyProfile, createSocietyProfile, deserializeSocietyProfile } from './Society';
 import type { City } from './City';
 import { CompactTerritory } from '../world/CompactTerritory';
-import { LawProfile, aggregateLawEffects, createLawProfile, deserializeLawProfile } from './Laws';
+import { RealmTrait, realmEffects, realmTraitsOf } from './RealmTraits';
+import { traitOfRuler, type RulerTrait } from './Rulers';
 
 // Kingdom emblem IDs for pixel-art badge rendering
 export const KINGDOM_EMBLEMS = ['swords', 'shield', 'lion', 'eagle', 'dragon', 'fire', 'lightning', 'moon', 'sun', 'gem', 'castle', 'leaf'] as const;
@@ -183,7 +184,18 @@ export class Kingdom {
   /** Internal social factions and their political pressure. */
   public society: SocietyProfile;
   /** Current legal code: taxes, rights, land, trade, army, labour and reforms. */
-  public laws: LawProfile;
+  /**
+   * What kind of realm this is, derived rather than stored.
+   *
+   * Read off the government and whoever is on the throne, so it can never drift
+   * out of step with either. `rulerTrait` is set by whoever last looked at the
+   * king; a realm with no king on record behaves as a cautious one.
+   */
+  public rulerTrait: RulerTrait = 'peaceful';
+
+  public get realmTraits(): RealmTrait[] {
+    return realmTraitsOf(this.government, this.rulerTrait);
+  }
 
   // ============ WARFARE & MILITARY STRATEGY (WAR-V1 & WAR-V6) ============
   public armyIds: Set<string> = new Set();
@@ -286,8 +298,7 @@ export class Kingdom {
     this.secondaryColor = this.lightenColor(color, 40);
     this.governmentSince = foundingYear;
     this.culture = createCulturalProfile(species);
-    this.society = createSocietyProfile(this.government);
-    this.laws = createLawProfile(this.government);
+    this.society = createSocietyProfile();
     this.doctrine = createDefaultDoctrine(name);
 
     const num = parseInt(color.replace('#', ''), 16);
@@ -427,9 +438,10 @@ export class Kingdom {
     const cohesion = 0.72 + this.legitimacy * 0.18 + this.administrativeReach * 0.18;
     const exhaustion = Math.max(0.65, 1 - this.warWeariness * 0.0025);
     const warCulture = 0.9 + this.culture.militarism * 0.15 + this.culture.authority * 0.08 - this.culture.warTrauma * 0.09;
-    const militaryFaction = this.society.factions.military;
-    const socialMobilisation = 0.88 + militaryFaction.influence * 0.16 + militaryFaction.loyalty * 0.08 - this.society.coupRisk * 0.08;
-    const lawMilitary = 1 + (aggregateLawEffects(this.laws).military ?? 0);
+    // A realm whose provinces are loyal musters more of them, and one whose
+    // court is plotting musters less.
+    const socialMobilisation = 0.88 + this.society.cohesion * 0.16 - this.society.coupRisk * 0.12;
+    const lawMilitary = 1 + (realmEffects(this.realmTraits).military ?? 0);
     return Math.round(base * techMods.military * gov.military * cohesion * exhaustion * warCulture * socialMobilisation * lawMilitary);
   }
 
@@ -517,7 +529,7 @@ export class Kingdom {
       tradeDependency: this.tradeDependency,
       culture: this.culture,
       society: this.society,
-      laws: this.laws,
+      rulerTrait: this.rulerTrait,
       treasury: this.treasury.serialize(),
       research: this.research.serialize(),
       economy: this.economy.serialize(),
@@ -571,8 +583,8 @@ export class Kingdom {
     kingdom.economy.deserialize(data.economy);
     kingdom.government = data.government ?? 'tribe';
     kingdom.culture = deserializeCulturalProfile(data.culture, kingdom.species);
-    kingdom.society = deserializeSocietyProfile(data.society, kingdom.government);
-    kingdom.laws = deserializeLawProfile(data.laws, kingdom.government);
+    kingdom.society = deserializeSocietyProfile(data.society);
+    kingdom.rulerTrait = data.rulerTrait ?? 'peaceful';
     kingdom.governmentSince = data.governmentSince ?? data.foundingYear ?? 1;
     kingdom.dynasty = data.dynasty ?? '';
     kingdom.knownKingdoms = new Set(data.knownKingdoms ?? []);

@@ -112,6 +112,17 @@ export class City {
   public population: number = 0;
   public mayorId: string | null = null;
 
+  /**
+   * How willing this settlement is to be ruled from where it is ruled from, 0-100.
+   *
+   * The whole political layer below the crown. It replaces six invisible social
+   * factions and their satisfaction matrices with one number the player can be
+   * shown as a bar on the city, falling for reasons they can see: an empty
+   * granary, a capital too far away to matter, a governor who wants the throne,
+   * a war nobody at home believes in. At zero the settlement stops being ruled.
+   */
+  public loyalty: number = 100;
+
   /** Everything this settlement physically holds. */
   public stock: Stockpile;
   public territory: CompactTerritory = new CompactTerritory();
@@ -576,6 +587,7 @@ export class City {
       foundingYear: this.foundingYear,
       population: this.population,
       mayorId: this.mayorId,
+      loyalty: this.loyalty,
       tier: this.tier,
       peakBuildingSlots: this.peakBuildingSlots,
       parentCityId: this.parentCityId,
@@ -641,6 +653,7 @@ export class City {
     city.kingdomId = data.kingdomId ?? null;
     city.population = data.population ?? 0;
     city.mayorId = data.mayorId ?? null;
+    city.loyalty = data.loyalty ?? 100;
     city.tier = data.tier ?? 'camp';
     city.blueprintId = data.blueprintId ?? 'imperial_grid';
     city.blueprintRotation = data.blueprintRotation ?? 0;
