@@ -203,6 +203,22 @@ export function getBattleTerrain(tileMap: TileMap, x: number, y: number): Terrai
   return tile ? tile.type : TerrainType.GRASS;
 }
 
+/**
+ * How many soldiers stand in one regiment before a new one is raised.
+ *
+ * This decides what a war looks like more than the levy does. Raising the
+ * levy adds regiments, not men to a regiment: measured over 70 years, going
+ * from a 14% watch to 20% took the realm from 71 soldiers to 105 and left the
+ * largest single formation at 20 in both, because the surplus went into new
+ * regiments that march on their own targets. So if a host on screen should
+ * look like a host, this is the number, and the other lever is `WarFronts`
+ * pointing several regiments at the same sector.
+ *
+ * It is not free: `resolveBattle` runs three phases over the men actually
+ * present, so a larger regiment is a longer battle and a bloodier one.
+ */
+const REGIMENT_SIZE = 20;
+
 export class WarfareSystem {
   public armies: Map<string, Army> = new Map();
   public commanders: Map<string, Commander> = new Map();
@@ -473,7 +489,7 @@ export class WarfareSystem {
 
       const unassigned = liveSoldiers.filter(s => !this.getArmyForSoldier(s.id));
       for (const s of unassigned) {
-        let army = [...this.armies.values()].find(a => a.kingdomId === kingdom.id && !a.isMercenary && a.soldierIds.size < 20);
+        let army = [...this.armies.values()].find(a => a.kingdomId === kingdom.id && !a.isMercenary && a.soldierIds.size < REGIMENT_SIZE);
         if (!army) {
           const city = world.cities.get(s.cityId ?? '') ?? world.cities.get(kingdom.capitalCityId);
           const armyCount = [...this.armies.values()].filter(a => a.kingdomId === kingdom.id).length + 1;

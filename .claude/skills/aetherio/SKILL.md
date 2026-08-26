@@ -254,6 +254,56 @@ Engasgos de perf conhecidos, com a correção já identificada:
 ~60ms (fatiar dentro do sistema de ecologia) · `tickFamilies` ~17ms.
 Mediana de frame ~3,1ms.
 
+### As alavancas de balanceamento, e o que elas de fato movem
+
+Medido com `tests/balance-live.probe.ts` (uma seed, 80 anos, dois povos). Rode
+antes e depois de mexer em qualquer constante — as três abaixo mentem se você
+olhar só um ano.
+
+**Soldados.** `musterArmies` em `EntityAI.ts`: `watch` (paz, 20% da população)
+e `levy` (guerra, 32%, 45% com conscrição), com `perYear` limitando a
+convocação. Da guarda a 14% para 20%: 71 → 105 soldados no ano 70, fração de
+12% → 18%.
+
+Três coisas contraintuitivas:
+- **A fração cai antes de subir.** Anos 20-30 ficam em 11% porque as vilas são
+  pequenas e o piso `max(2, ...)` domina. Ler só o ano 30 faz a mudança parecer
+  um imposto sobre desenvolvimento; não é — o ferro chegou no ano 50 em vez de
+  70.
+- **A guarda produz milícia, não profissional.** Profissional precisa de vaga
+  livre em quartel. No ano 70 são 91 milicianos contra 14 profissionais, onde os
+  números antigos davam 32 contra 39. Mais lanças, menos treino.
+- **Mais soldados NÃO significa exércitos maiores.** O maior exército ficou em
+  20 antes e depois, porque `REGIMENT_SIZE` em `Warfare.ts` é 20 e o excedente
+  vira regimento novo, com alvo próprio. Para um exército que *pareça* um
+  exército, a alavanca é `REGIMENT_SIZE` ou fazer `WarFronts` apontar vários
+  regimentos ao mesmo setor — não a leva.
+
+**Comida não restringe nada.** Em 80 anos nenhum assentamento ficou sob o portão
+de comida do alistamento e nenhum passou fome: 16 a 57 unidades por cabeça
+contra `FOOD_PER_CITIZEN = 1.1`, ou seja produção ~18× a necessidade. A camada
+de sobrevivência está inerte e fome é impossível. `SPOILAGE_PER_YEAR` não está
+fraco; a produção é que é grande. Apertar isso derruba população e move tudo
+que estiver medido junto — mude sozinho e meça de novo.
+
+**Eras.** Bronze ~ano 20, ferro ~70, clássico ~80, por `ERA_GATES` (população e
+prédios, **por reino**). Funciona, mas a escada completa é um jogo de centenas
+de anos porque os reinos se dividem em ~50 habitantes e os portões pedem
+centenas. Comprimir é uma linha; escolha o alvo antes.
+
+**Ouro.** Havia três cobranças duplas em `Warfare.ts` (`takeGold` seguido do
+`treasury.take` cru): contratação e anuidade de mercenário e manutenção de
+exército, todas pelo dobro. Corrigido — ouro no ano 40 foi de 1918 para 2912.
+Mesmo assim o total cresce até ~ano 50 e cai depois enquanto a população cresce,
+então ainda há um dreno líquido dominando o fim. Não investigado.
+
+**Cuidado com espelho:** `Kingdom.wealth` é um número armazenado espelhando
+`treasury.get('gold')`, mantido por `addGold`/`takeGold`. Escrever direto em
+`treasury.add/take('gold', ...)` deixa o espelho velho — era o que fazia um
+reino dotado de 250 de ouro ler como pobre. Use sempre os acessores. Virar
+`wealth` um getter mataria a classe de bug, mas ele é serializado e semeia o
+score de poder inicial em 100 com o cofre vazio.
+
 ### Por que um mundo novo demora tanto para guerrear
 
 Medido, não inferido — e ao medir duas hipóteses minhas caíram.
