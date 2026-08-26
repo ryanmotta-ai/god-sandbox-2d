@@ -297,6 +297,12 @@ export function emptyDemographics(): Demographics {
 /** Running totals, folded once per citizen inside an existing loop. */
 export class DemographicsAccumulator {
   private readonly totals = emptyDemographics();
+
+  /** How many have been counted so far. A lap that counted nobody is not a census. */
+  public get counted(): number {
+    return this.totals.population;
+  }
+
   private ageSum = 0;
   private generationSum = 0;
   private wealthSum = 0;

@@ -1,3 +1,4 @@
+import { TICKS_PER_YEAR } from '../src/core/Clock';
 import assert from 'node:assert/strict';
 import { SimulationEngine } from '../src/ai/EntityAI';
 import { SimplePathfinder } from '../src/ai/Pathfinding';
@@ -79,8 +80,12 @@ const world: CivWorld = {
   spawn: (species, x, y) => sim.spawnEntity(species, x, y, tileMap), sim
 };
 const civ = new CivilizationEngine();
+// Civilisation runs continuously now, so a headless driver has to hand it a
+// clock and step it a year of ticks at a time instead of calling one pulse.
+let civTick = 0;
+const runYear = () => { civTick = civ.advanceTicks(world, civTick, TICKS_PER_YEAR); civ.tickYearBoundary(world); };
 
-civ.tickYear(world); // Farms produce actual cotton; COL-V2 opens and runs the route.
+runYear(); // Farms produce actual cotton; COL-V2 opens and runs the route.
 const cottonRoute = [...sim.trade.routes.values()].find(route => route.colonialRoute && route.good === 'cotton');
 assert.ok(cottonRoute, 'colonial cotton surplus should create a preferential route');
 assert.ok(metroCity.stock.get('cotton') > 0, 'real cotton stock should reach the metropole');
@@ -88,7 +93,7 @@ assert.ok(colonyCity.ledger.flow('cotton').exported > 0, 'the colony must export
 assert.ok(metroCity.ledger.flow('cotton').imported > 0, 'the metropole must import that colonial cotton');
 
 world.year = 2;
-civ.tickYear(world); // The workshop consumes imported cotton and produces cloth.
+runYear(); // The workshop consumes imported cotton and produces cloth.
 const clothWithRoute = metroCity.ledger.flow('cloth').produced;
 assert.ok(clothWithRoute > 0, 'metropole textile production must use colonial cotton');
 
@@ -98,9 +103,9 @@ sim.trade.declareEmbargo(metropole.id, colony.id, world.year, 'COL-V2 smoke bloc
 assert.ok(sim.trade.isEmbargoed(metropole.id, colony.id), 'the blockade embargo must be active');
 assert.equal(sim.trade.routes.size, 0, 'the blockade must close its existing colonial routes');
 world.year = 3;
-civ.tickYear(world);
+runYear();
 world.year = 4;
-civ.tickYear(world);
+runYear();
 const clothWithoutRoute = metroCity.ledger.flow('cloth').produced;
 assert.ok(clothWithoutRoute < clothWithRoute, 'blocked colonial cotton must reduce textile output');
 assert.equal(sim.trade.routes.size, 0, 'the embargo should remove the colonial route');

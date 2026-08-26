@@ -529,7 +529,50 @@ interface CityContext {
   enclosurePressure: number;
 }
 
+/**
+ * One planning pass asks for the same context once per candidate building type.
+ *
+ * `runConstruction` walks every building the settlement could put up and calls
+ * `findBuildingSites` for each, and each of those rebuilt this context from
+ * scratch — the structure signature, the walk over every building, the
+ * fortification enclosure filter — roughly forty times for one decision. That
+ * was the single most expensive thing in the simulation: over a hundred
+ * milliseconds for one town, which is a visible freeze on its own.
+ *
+ * Nothing inside a pass changes what the context describes, and the two things
+ * that would (a building going up, the architecture being restyled) both carry a
+ * version stamp, so a single-entry memo is enough. One entry, not a map, because
+ * a pass only ever concerns one settlement.
+ *
+ * ponytail: keyed on buildingVersion, not on the road chunk versions the
+ * structure cache also reads. Every road change in this flow is made by
+ * `constructBuilding`, which bumps buildingVersion in the same breath, so the
+ * memo cannot go stale here. If roads ever start moving independently mid-pass,
+ * fold the chunk signature into the key.
+ */
+let contextMemo: {
+  city: City; tileMap: TileMap; radius: number;
+  buildingVersion: number; architecturalVersion: number; ctx: CityContext;
+} | null = null;
+
 function buildContext(city: City, tileMap: TileMap, radius: number): CityContext {
+  const memo = contextMemo;
+  if (memo && memo.city === city && memo.tileMap === tileMap && memo.radius === radius
+    && memo.buildingVersion === city.buildingVersion
+    && memo.architecturalVersion === city.architecturalVersion) {
+    return memo.ctx;
+  }
+  const ctx = computeContext(city, tileMap, radius);
+  contextMemo = {
+    city, tileMap, radius,
+    buildingVersion: city.buildingVersion,
+    architecturalVersion: city.architecturalVersion,
+    ctx
+  };
+  return ctx;
+}
+
+function computeContext(city: City, tileMap: TileMap, radius: number): CityContext {
   const structure = ensureUrbanStructure(city, tileMap, radius);
   const buildings = structure.buildings;
   let sumDist = 0;

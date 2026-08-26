@@ -1,3 +1,4 @@
+import { TICKS_PER_YEAR } from '../src/core/Clock';
 import assert from 'node:assert/strict';
 import { SimulationEngine } from '../src/ai/EntityAI';
 import { CivilizationEngine, type CivWorld } from '../src/civ/CivilizationEngine';
@@ -49,6 +50,10 @@ const world: CivWorld = {
   spawn: (species, x, y) => sim.spawnEntity(species, x, y, tileMap), sim
 };
 const civ = new CivilizationEngine();
+// Civilisation runs continuously now, so a headless driver has to hand it a
+// clock and step it a year of ticks at a time instead of calling one pulse.
+let civTick = 0;
+const runYear = () => { civTick = civ.advanceTicks(world, civTick, TICKS_PER_YEAR); civ.tickYearBoundary(world); };
 (civ as any).foundColonialRealm(capital, { ...destination, access: 'overland', distance: Math.hypot(destination.x - origin.x, destination.y - origin.y) }, metropole, world);
 
 const colony = [...sim.kingdoms.values()].find(realm => realm.metropoleId === metropole.id);
@@ -60,7 +65,7 @@ const colonialCapital = sim.cities.get(colony.capitalCityId)!;
 const territoryAtFoundation = colonialCapital.territory.size;
 
 world.year = 2;
-civ.tickYear(world);
+runYear();
 assert.ok(colonialCapital.territory.size > territoryAtFoundation, 'the colony should expand its own territory');
 assert.equal(colony.metropoleId, metropole.id, 'growth must preserve subordination to the metropole');
 assert.equal(colony.colonialStatus, 'COLONY');

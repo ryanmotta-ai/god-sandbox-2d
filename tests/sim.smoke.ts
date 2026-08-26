@@ -3,6 +3,7 @@
  * with two kingdoms, then checks that a siege and a conquest really do wreck the
  * ground around a city and that the damage survives a save. No renderer.
  */
+import { TICKS_PER_YEAR } from '../src/core/Clock';
 import { TileMap } from '../src/world/TileMap';
 import { TERRAINS } from '../src/world/Biomes';
 import { SimulationEngine } from '../src/ai/EntityAI';
@@ -105,11 +106,15 @@ const world: CivWorld = {
 };
 
 const civ = new CivilizationEngine();
+// Civilisation runs continuously now, so a headless driver has to hand it a
+// clock and step it a year of ticks at a time instead of calling one pulse.
+let civTick = 0;
+const runYear = () => { civTick = civ.advanceTicks(world, civTick, TICKS_PER_YEAR); civ.tickYearBoundary(world); };
 const warfare = new WarfareSystem();
 
 for (let year = 1; year <= 40; year++) {
   world.year = year;
-  civ.tickYear(world);
+  runYear();
   warfare.tickYear(world);
 }
 console.log('[smoke] 40 years OK');
@@ -132,7 +137,7 @@ const harbor = cityA.addBuilding('harbor', cityA.x, cityA.y);
 const harborHpBefore = harbor.hp;
 for (let y = 43; y <= 50; y++) {
   world.year = y;
-  civ.tickYear(world);
+  runYear();
   // Keep the war alive so the siege actually persists through the whole run.
   if (!sim.diplomacy.isAtWar(kingdomA.id, kingdomB.id)) {
     sim.diplomacy.declareWar(kingdomA.id, kingdomB.id, y, 'coal');

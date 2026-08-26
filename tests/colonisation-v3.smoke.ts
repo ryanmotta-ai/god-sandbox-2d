@@ -1,3 +1,4 @@
+import { TICKS_PER_YEAR } from '../src/core/Clock';
 import assert from 'node:assert/strict';
 import { SimulationEngine } from '../src/ai/EntityAI';
 import { City } from '../src/civ/City';
@@ -48,13 +49,17 @@ const world: CivWorld = {
   spawn: (species, x, y) => sim.spawnEntity(species, x, y, tileMap), sim
 };
 const civ = new CivilizationEngine();
+// Civilisation runs continuously now, so a headless driver has to hand it a
+// clock and step it a year of ticks at a time instead of calling one pulse.
+let civTick = 0;
+const runYear = () => { civTick = civ.advanceTicks(world, civTick, TICKS_PER_YEAR); civ.tickYearBoundary(world); };
 (civ as any).foundColonialRealm(city, { ...destination, access: 'overland', distance: Math.hypot(destination.x - origin.x, destination.y - origin.y) }, metropole, world);
 const colony = [...sim.kingdoms.values()].find(realm => realm.metropoleId === metropole.id)!;
 const colonialCapital = sim.cities.get(colony.capitalCityId)!;
 const territoryAtFoundation = colonialCapital.territory.size;
 
 world.year = 2;
-civ.tickYear(world);
+runYear();
 assert.ok(colonialCapital.territory.size > territoryAtFoundation, 'the colonial realm should grow before the crisis');
 
 // Deliberately severe, observable conditions drive a deterministic separatist sequence.
@@ -86,7 +91,7 @@ assert.ok(!metropole.colonyIds.has(colony.id));
 assert.equal(colonialCapital.kingdomId, colony.id, 'cities and territory remain under the new independent realm');
 
 world.year = 17;
-civ.tickYear(world);
+runYear();
 assert.ok(sim.kingdoms.has(colony.id), 'the new realm continues through the normal simulation');
 
 console.log(`COL-V3 smoke passed: ${colony.name} became independent and remained active`);

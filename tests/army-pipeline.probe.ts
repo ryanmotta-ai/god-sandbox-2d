@@ -20,6 +20,7 @@
  *
  * Run: npx tsx tests/army-pipeline.probe.ts
  */
+import { TICKS_PER_YEAR } from '../src/core/Clock';
 import { TileMap } from '../src/world/TileMap';
 import { TERRAINS } from '../src/world/Biomes';
 import { SimulationEngine } from '../src/ai/EntityAI';
@@ -104,6 +105,10 @@ const world: CivWorld = {
 };
 
 const civ = new CivilizationEngine();
+// Civilisation runs continuously now, so a headless driver has to hand it a
+// clock and step it a year of ticks at a time instead of calling one pulse.
+let civTick = 0;
+const runYear = () => { civTick = civ.advanceTicks(world, civTick, TICKS_PER_YEAR); civ.tickYearBoundary(world); };
 const warfare = new WarfareSystem();
 
 /** What the barracks itself believes it has hired — the number `musterArmies` reads. */
@@ -143,7 +148,7 @@ for (let year = 1; year <= YEARS; year++) {
     sim.diplomacy.declareWar(kA.id, kB.id, year, 'Provocação da sonda');
   }
 
-  civ.tickYear(world);
+  runYear();
   // musterArmies is private; the yearly EntityAI pass is what calls it in game,
   // so drive the real thing rather than a reimplementation of the levy.
   (sim as unknown as { musterArmies(): void }).musterArmies();

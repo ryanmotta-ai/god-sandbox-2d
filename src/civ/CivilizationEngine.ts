@@ -26,6 +26,7 @@ import { events } from '../core/EventBus';
 import { rng, nextId } from '../core/Random';
 import { SimplePathfinder } from '../ai/Pathfinding';
 import { surveyRoad, layRoad, type RoadSurvey, type RoadWorks } from './RoadBuilding';
+import { TICKS_PER_SEASON, TICKS_PER_YEAR } from '../core/Clock';
 import { UrbanPlanner, type UrbanStreetClass } from './UrbanPlanner';
 import { perfProfiler } from '../perf/PerformanceProfiler';
 import { buildingArchitecturalStamp, refreshArchitecturalProfile } from './ArchitecturalProfile';
@@ -67,6 +68,16 @@ export interface CivWorld {
   /** Simulation engine. */
   sim?: import('../ai/EntityAI').SimulationEngine;
 }
+
+/**
+ * Ticks between two visits to the same settlement or realm.
+ *
+ * This is the one number that decides how coarse civilisation feels. It is a
+ * season's worth of ticks, which is what the old pulse used, so nothing about
+ * the pace of the world changed when the pulse was broken up — only that the
+ * visits now arrive a few ticks apart instead of all in one frame.
+ */
+export const CIV_VISIT_PERIOD = TICKS_PER_SEASON;
 
 /** Food a single citizen eats per year. */
 /** Share of a tax levy the crown keeps as goods; the rest is sold for coin. */
@@ -183,63 +194,196 @@ export class CivilizationEngine {
   // MAIN YEARLY TICK
   // ============================================================
 
-  public tickYear(world: CivWorld): void {
-    // Population is derived from the entities that actually exist, so births,
-    // deaths and migration can never drift out of sync with the map.
-    this.recountPopulations(world);
-    // Fire/disaster ticks name the exact affected buildings. Fold that compact
-    // event buffer once here instead of scanning every urban lot in the world.
-    UrbanLifecycleManager.applyDamageEvents(
-      world.cities,
-      world.tileMap,
-      world.tileMap.drainBuildingDamageEvents(),
-      world.year
-    );
+  /**
+   * One tick of civilisation, spread thin.
+   *
+   * Everything below used to happen in a single pulse: every settlement, then
+   * every realm, then diplomacy and colonies and rebellions, all inside one
+   * frame four times a year. On a world of fifty towns that pulse cost most of
+   * a second, and the whole map froze while it ran.
+   *
+   * Nothing about *how much* work each settlement gets has changed — only when
+   * it arrives. A settlement is still visited once per `CIV_VISIT_PERIOD`, and
+   * it is charged for exactly the time since it was last looked at, so a year's
+   * production, taxes and growth come out the same as they did. The visits are
+   * simply dealt out a few ticks apart instead of all at once, which is the
+   * whole difference between a world that stutters and a world that runs.
+   *
+   * `now` is a monotonic tick count, not the calendar: the charge has to survive
+   * the new year rolling the calendar back to zero.
+   */
+  /** Rotation over settlements: the list for this lap, and where we are in it. */
+  private cityRing: string[] = [];
+  private cityCursor: number = 0;
+  /** Fractional settlements owed this tick, carried between ticks. */
+  private cityCredit: number = 0;
+  private realmRing: string[] = [];
+  private realmCursor: number = 0;
+  private realmCredit: number = 0;
+  /** Which of the world-level groups comes up next. */
+  private worldSlot: number = 0;
+  /** Monotonic tick each settlement or realm was last charged for. */
+  private lastVisit: Map<string, number> = new Map();
 
-    // Settlements first: they generate everything the higher layers spend.
-    for (const city of world.cities.values()) {
-      this.tickSettlement(city, world);
-    }
+  public tickRealtime(world: CivWorld, now: number): void {
+    this.sliceCities(world, now);
+    this.sliceRealms(world, now);
+    this.sliceWorld(world, now);
+  }
 
-    this.refreshKingdomTotals(world);
+  /**
+   * Runs the continuous passes forward over a stretch of ticks.
+   *
+   * For headless drivers — tests and probes — that step the world a year at a
+   * time and have no frame loop of their own. The game itself calls
+   * `tickRealtime` once per tick and never needs this. Returns the tick the
+   * caller should carry into its next call, because the charge each settlement
+   * receives is measured against a clock that has to keep going up.
+   */
+  public advanceTicks(world: CivWorld, fromTick: number, ticks: number): number {
+    for (let i = 0; i < ticks; i++) this.tickRealtime(world, fromTick + i);
+    return fromTick + ticks;
+  }
 
-    for (const kingdom of world.kingdoms.values()) {
-      this.distributeStaples(kingdom, world);
-      this.tickFaith(kingdom, world);
-      this.collectTaxes(kingdom, world);
-      this.tickResearch(kingdom, world);
-      this.tickEconomy(kingdom, world);
-      this.tickCulture(kingdom, world);
-      this.tickSociety(kingdom, world);
-      this.tickLaws(kingdom, world);
-      this.tickGovernment(kingdom, world);
-    }
-
-    this.tickDiplomaticContact(world);
-    this.tickAntiHegemonicCoalitions(world);
-    this.tickSoftPowerDefection(world);
-    this.tickStrategicDiplomacy(world);
-    this.tickVassalage(world);
-    this.tickColonisation(world);
-    this.tickColonialFoundations(world);
-    this.tickColonialMigration(world);
-    this.tickColonialPolitics(world);
-    this.tickRebellions(world);
-    GreatPersonManager.checkAscension(world.entities, world.kingdoms, world.cities, world.tileMap, world.year, world.diplomacy);
-
+  /**
+   * Annual bookkeeping, and only what is genuinely annual.
+   *
+   * The ledger closes once a year because a year is what a ledger covers, and
+   * the market settles once a year for the same reason. Everything else moved
+   * onto the continuous slices above.
+   */
+  public tickYearBoundary(world: CivWorld): void {
     world.market.settle(world.year);
     for (const city of world.cities.values()) city.ledger.rollOver();
-    // Clearing settles before regrowth, so a stand felled this year becomes open
-    // ground now and has to be re-seeded from a surviving neighbour later.
-    world.tileMap.settleDeforestation();
-    world.tileMap.regrowResources();
+  }
 
-    // Rebuild per-city resource caches (used by worker AI)
-    for (const city of world.cities.values()) {
+  private sliceCities(world: CivWorld, now: number): void {
+    // Against the lap's own list, not the live count — a world that founds
+    // towns mid-lap must not make the lap close early and charge every existing
+    // settlement for less time than actually passed. See `rotate` in EntityAI.
+    this.cityCredit += (this.cityRing.length || world.cities.size) / CIV_VISIT_PERIOD;
+    while (this.cityCredit >= 1) {
+      this.cityCredit -= 1;
+      if (this.cityCursor >= this.cityRing.length) {
+        // A fresh lap picks up settlements founded or lost since the last one.
+        // One lap is therefore the longest a new town waits to be simulated.
+        this.cityRing = [...world.cities.keys()];
+        this.cityCursor = 0;
+        if (this.cityRing.length === 0) return;
+      }
+      const city = world.cities.get(this.cityRing[this.cityCursor++]);
+      if (!city) continue; // razed part-way through the lap
+      this.tickSettlement(city, { ...world, seasonFraction: this.chargeFor(city.id, now) });
+      // The worker AI reads this cache, and it is this settlement's own work.
       city.rebuildResourceCache(world.tileMap, world.year, this.citySurveyRadius(city));
     }
+  }
 
-    this.cleanupDeadRealms(world);
+  private sliceRealms(world: CivWorld, now: number): void {
+    this.realmCredit += (this.realmRing.length || world.kingdoms.size) / CIV_VISIT_PERIOD;
+    while (this.realmCredit >= 1) {
+      this.realmCredit -= 1;
+      if (this.realmCursor >= this.realmRing.length) {
+        this.realmRing = [...world.kingdoms.keys()];
+        this.realmCursor = 0;
+        if (this.realmRing.length === 0) return;
+      }
+      const kingdom = world.kingdoms.get(this.realmRing[this.realmCursor++]);
+      if (!kingdom) continue;
+      const scoped = { ...world, seasonFraction: this.chargeFor(kingdom.id, now) };
+      this.distributeStaples(kingdom, scoped);
+      this.tickFaith(kingdom, scoped);
+      this.collectTaxes(kingdom, scoped);
+      this.tickResearch(kingdom, scoped);
+      this.tickEconomy(kingdom, scoped);
+      this.tickCulture(kingdom, scoped);
+      this.tickSociety(kingdom, scoped);
+      this.tickLaws(kingdom, scoped);
+      this.tickGovernment(kingdom, scoped);
+    }
+  }
+
+  /**
+   * The passes that are about the world rather than one settlement or realm.
+   *
+   * These are cheap individually and there is no reason to run them together,
+   * so they take turns: one group comes up every `CIV_VISIT_PERIOD` divided by
+   * however many groups there are, and each group therefore still runs once per
+   * period exactly as it did inside the old pulse.
+   */
+  private sliceWorld(world: CivWorld, now: number): void {
+    const groups = 8;
+    const every = Math.max(1, Math.floor(CIV_VISIT_PERIOD / groups));
+    if (now % every !== 0) return;
+    const slot = this.worldSlot++ % groups;
+
+    switch (slot) {
+      case 0:
+        // Population is derived from the entities that actually exist, so
+        // births, deaths and migration can never drift out of sync with the map.
+        this.recountPopulations(world);
+        this.refreshKingdomTotals(world);
+        break;
+      case 1:
+        // Fire/disaster ticks name the exact affected buildings. Fold that
+        // compact event buffer instead of scanning every urban lot in the world.
+        UrbanLifecycleManager.applyDamageEvents(
+          world.cities,
+          world.tileMap,
+          world.tileMap.drainBuildingDamageEvents(),
+          world.year
+        );
+        break;
+      case 2:
+        this.tickDiplomaticContact(world);
+        this.tickAntiHegemonicCoalitions(world);
+        this.tickSoftPowerDefection(world);
+        break;
+      case 3:
+        this.tickStrategicDiplomacy(world);
+        break;
+      case 4:
+        this.tickVassalage(world);
+        break;
+      case 5:
+        this.tickColonisation(world);
+        this.tickColonialFoundations(world);
+        this.tickColonialMigration(world);
+        this.tickColonialPolitics(world);
+        break;
+      case 6:
+        this.tickRebellions(world);
+        this.cleanupDeadRealms(world);
+        break;
+      default:
+        GreatPersonManager.checkAscension(world.entities, world.kingdoms, world.cities, world.tileMap, world.year, world.diplomacy);
+        // Clearing settles before regrowth, so a stand felled since the last
+        // pass becomes open ground now and is re-seeded from a survivor later.
+        world.tileMap.settleDeforestation();
+        world.tileMap.regrowResources();
+        break;
+    }
+  }
+
+  /**
+   * How much of a year to charge this settlement or realm for.
+   *
+   * The time since *it* was last looked at, not since the last pulse — that is
+   * what makes staggered visits add up to the same year of production, tax and
+   * growth as the old all-at-once pass.
+   *
+   * Unseen before, or restored from a save that carries no visit history, is
+   * charged one plain period. The upper clamp is defensive: nothing in normal
+   * play should skip a settlement's turn, and if something ever does, a town
+   * must not collect half a year of harvest in one visit to make up for it.
+   */
+  private chargeFor(id: string, now: number): number {
+    const last = this.lastVisit.get(id);
+    this.lastVisit.set(id, now);
+    const elapsed = last === undefined
+      ? CIV_VISIT_PERIOD
+      : Math.min(Math.max(0, now - last), CIV_VISIT_PERIOD * 2);
+    return elapsed / TICKS_PER_YEAR;
   }
 
   // ============================================================

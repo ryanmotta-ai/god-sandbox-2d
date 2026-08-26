@@ -16,11 +16,12 @@ import { ParticleManager } from '../renderer/Particles';
 import { chronicle } from '../civ/Chronicle';
 import { sound } from '../core/SoundSynth';
 import { rng, nextId, hashString, hashToUnit, stableSlot, MARCH_SLOTS } from '../core/Random';
+import { TICKS_PER_DAY, DAYS_PER_YEAR, DAYS_PER_SEASON, SEASONS_PER_YEAR, TICKS_PER_SEASON, TICKS_PER_YEAR, type Season } from '../core/Clock';
 import { WorldMarket } from '../civ/Economy';
 import { GoodId, MINEABLE_GOODS, QUARRY_GOODS } from '../civ/Goods';
 import { tileResourceToGood } from '../world/Tile';
 import { events } from '../core/EventBus';
-import { CivilizationEngine } from '../civ/CivilizationEngine';
+import { CivilizationEngine, type CivWorld } from '../civ/CivilizationEngine';
 import { canPairWith, formPartnership, conceiveChild, chooseSuccessor, generateDynastyName, DeceasedEntityRecord } from '../civ/Lineage';
 import { Household } from '../civ/Household';
 import {
@@ -51,34 +52,20 @@ import { RegionState } from '../world/WorldChunks';
 import { EcologySystem } from '../ecology/EcologySystem';
 import { buildingArchitecturalStamp, refreshArchitecturalProfile } from '../civ/ArchitecturalProfile';
 
-/**
- * World clock.
- *
- * These two constants set the entire real-time pace of history. Everything in the
- * civilisation layer is expressed per *year*, so changing them rescales how long a
- * year takes to watch without altering a single economic balance value.
- *
- * Two separate things are being balanced here, and they pull in opposite
- * directions. The YEAR has to be short, because civilisation only advances once
- * per year. The DAY has to be long enough that a citizen can actually walk to
- * their workplace, do a shift and get home before dusk — a day too short leaves
- * everyone permanently commuting or asleep, which is exactly what happens if you
- * shorten the year by shortening the day.
- *
- * So the year is made short by having FEW days, not by having fast days.
- *
- * At 60fps, one tick is one frame at speed 1x:
- *   TICKS_PER_DAY  600  -> an in-world day lasts 10s at 1x
- *   TICKS_PER_YEAR 7200 -> a year lasts 2min at 1x, and 12s at 10x
- */
-export const TICKS_PER_DAY = 600;
-/** In-world days per year — each one reads as a month on the calendar. */
-export const DAYS_PER_YEAR = 12;
-export const DAYS_PER_SEASON = 3;
-export const SEASONS_PER_YEAR = 4;
-export const TICKS_PER_SEASON = TICKS_PER_DAY * DAYS_PER_SEASON; // 1800 ticks (3 months / 1 season)
-export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_YEAR; // 7200 ticks (1 full year)
-export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
+// The world clock lives in core/Clock so both this layer and the civilisation
+// layer can read it without importing each other. Re-exported because a great
+// deal of the codebase already reaches for these through this module.
+export { TICKS_PER_DAY, DAYS_PER_YEAR, DAYS_PER_SEASON, SEASONS_PER_YEAR, TICKS_PER_SEASON, TICKS_PER_YEAR } from '../core/Clock';
+export type { Season } from '../core/Clock';
+
+/** Where a rotation over the living has got to. See `SimulationEngine.rotate`. */
+interface EntityRotation {
+  /** The snapshot being walked this lap. */
+  ring: Entity[];
+  cursor: number;
+  /** Fractional citizens owed this tick, carried between ticks. */
+  credit: number;
+}
 
 /**
  * Tiles moved per tick, per point of species baseSpeed.
@@ -240,6 +227,14 @@ export class SimulationEngine {
   public currentSeasonIndex: number = 0;
   public currentSeason: Season = 'spring';
   private yearTickCounter: number = 0;
+  /**
+   * Ticks since the world began, never reset.
+   *
+   * The civilisation layer needs a monotonic clock, not a calendar one: it
+   * charges each settlement for the time since *that settlement* was last
+   * looked at, and `yearTickCounter` rolls back to zero every new year.
+   */
+  public totalTicks: number = 0;
   public timeOfDay: 'dawn' | 'day' | 'dusk' | 'night' = 'day';
 
   /** Lifetime counters surfaced by the Statistics screen. */
@@ -603,29 +598,48 @@ export class SimulationEngine {
     else if (currentHour >= 18 && currentHour < 21) this.timeOfDay = 'dusk';
     else this.timeOfDay = 'night';
 
-    // A day turns over. Needs and the household economy run on this cadence — a
-    // year is far too coarse for hunger to steer anybody's behaviour.
-    if (this.yearTickCounter % TICKS_PER_DAY === 0) this.tickDay();
+    // Needs run on a daily cadence — a year is far too coarse for hunger to
+    // steer anybody's behaviour. Called every tick because the pass now deals
+    // its citizens out a few at a time rather than all on the stroke of midnight.
+    this.tickDay();
 
-    if (this.yearTickCounter % TICKS_PER_SEASON === 0) {
-      const isNewYear = this.yearTickCounter >= TICKS_PER_YEAR;
-      if (isNewYear) {
-        this.yearTickCounter = 0;
-        this.currentYear++;
-        this.tickAge();
-      }
+    this.totalTicks++;
 
-      this.currentSeasonIndex = Math.floor(((this.yearTickCounter % TICKS_PER_YEAR) || 0) / TICKS_PER_SEASON);
-      this.currentSeason = (['spring', 'summer', 'autumn', 'winter'] as const)[this.currentSeasonIndex] ?? 'spring';
+    // The calendar still turns — the year is what ages a citizen and dates the
+    // chronicle — but nothing waits for it any more.
+    if (this.yearTickCounter >= TICKS_PER_YEAR) {
+      this.yearTickCounter = 0;
+      this.currentYear++;
+      this.tickAge();
+      this.civ.tickYearBoundary(this.civWorld(tileMap));
+      this.air.resetYear();
+      this.reportAirService();
+    }
+    this.currentSeasonIndex = Math.floor(this.yearTickCounter / TICKS_PER_SEASON) % SEASONS_PER_YEAR;
+    this.currentSeason = (['spring', 'summer', 'autumn', 'winter'] as const)[this.currentSeasonIndex] ?? 'spring';
 
-      this.tickPregnancies();
-      this.tickFamilies(tileMap);
-      perfProfiler.measure('lives', () => this.tickLives());
-      this.tickWildlife(tileMap);
-      perfProfiler.measure('economy', () => this.civ.tickYear({
+    // Civilisation, dealt out a few settlements at a time. See `tickRealtime`.
+    perfProfiler.measure('economy', () => this.civ.tickRealtime(this.civWorld(tileMap), this.totalTicks));
+
+    perfProfiler.measure('lives', () => this.tickLives());
+    this.tickLifeSlices(tileMap);
+    this.tickStatecraftSlices(tileMap);
+  }
+
+  /**
+   * The view of the world the civilisation layer works against.
+   *
+   * Built once and updated in place. This is read every single tick now rather
+   * than four times a year, and handing it a fresh object and a fresh closure
+   * sixty times a second is exactly the garbage the continuous pass exists to
+   * avoid. `entities` is reassigned because the array itself can be replaced.
+   */
+  private civWorldCache: CivWorld | null = null;
+  private civWorld(tileMap: TileMap): CivWorld {
+    if (!this.civWorldCache) {
+      this.civWorldCache = {
         year: this.currentYear,
         season: this.currentSeason,
-        seasonFraction: 0.25,
         cities: this.cities,
         kingdoms: this.kingdoms,
         entities: this.entities,
@@ -635,55 +649,82 @@ export class SimulationEngine {
         era: this.currentEra,
         spawn: (species, x, y) => this.spawnEntity(species, x, y),
         sim: this
-      }));
-      /**
-       * War runs in three passes, in this order for a reason.
-       *
-       * The front first works out where the lines are and who is standing on
-       * them. Logistics then decides what those armies are actually being fed,
-       * because supply has to be known before the fighting is scored. Only then
-       * does the front resolve its battles and move, and only then are sieges
-       * pressed — a siege now needs the ground around the city, which the front
-       * has just finished deciding.
-       */
-      /**
-       * Diplomacy and statecraft run quarterly (every 3 months), keeping realms
-       * reactive to wars, treaties and border friction throughout the year.
-       */
-      this.tickSuccession();
-      this.diplomacy.tickDiplomacy([...this.kingdoms.keys()], this.currentYear);
-      this.tickGeopolitics();
-      this.musterArmies();
-      // After the levy, so a realm decides who sails with this quarter's army
-      // rather than last year's.
-      this.invasions.tickYear(this.kingdoms, this.cities, this.entities, this.diplomacy, tileMap, this.currentYear);
-
-      const warWorld = {
-        year: this.currentYear,
-        cities: this.cities,
-        kingdoms: this.kingdoms,
-        entities: this.entities,
-        tileMap,
-        diplomacy: this.diplomacy
       };
-      /**
-       * War is fought after it is declared, not before.
-       */
-      perfProfiler.measure('fronts', () => this.fronts.tickYear(warWorld));
-      perfProfiler.measure('logistics', () => this.logistics.tickYear({
-        ...warWorld,
-        fronts: this.fronts
-      }));
-      perfProfiler.measure('fronts', () => this.fronts.resolveYear(warWorld));
-      perfProfiler.measure('warfare', () => this.warfare.tickYear({
-        ...warWorld,
-        fronts: this.fronts
-      }));
-      // Air service and sorties update quarterly.
-      this.reportAirService();
-      this.air.planSorties(this.cities, this.kingdoms, this.diplomacy);
-      if (isNewYear) {
-        this.air.resetYear();
+      return this.civWorldCache;
+    }
+    const w = this.civWorldCache;
+    w.year = this.currentYear;
+    w.season = this.currentSeason;
+    w.entities = this.entities;
+    w.tileMap = tileMap;
+    w.era = this.currentEra;
+    return w;
+  }
+
+  /**
+   * The passes that are about living things rather than institutions.
+   *
+   * Each one still comes up once per season's worth of ticks, so pregnancies
+   * still take as long and a herd still breeds as often. They just no longer
+   * all land on the same frame as each other or as the civilisation pass.
+   */
+  private tickLifeSlices(tileMap: TileMap): void {
+    const slots = 3;
+    const stride = Math.max(1, Math.floor(TICKS_PER_SEASON / slots));
+    if (this.totalTicks % stride !== 0) return;
+
+    switch (Math.floor(this.totalTicks / stride) % slots) {
+      case 0: this.tickPregnancies(); break;
+      case 1: this.tickFamilies(tileMap); break;
+      default: this.tickWildlife(tileMap); break;
+    }
+  }
+
+  /**
+   * Statecraft and war, on their own rotation.
+   *
+   * War is NOT thinned out here — every pass it always ran still runs, in the
+   * same order and with the same logic. The three war passes stay welded
+   * together in one slot because that order is load-bearing: the front decides
+   * where the lines are and who is standing on them, logistics decides what
+   * those armies are being fed, and only then is the fighting resolved and the
+   * sieges pressed. Splitting them across ticks would resolve a battle against
+   * last tick's supply.
+   */
+  private tickStatecraftSlices(tileMap: TileMap): void {
+    const slots = 4;
+    const stride = Math.max(1, Math.floor(TICKS_PER_SEASON / slots));
+    if (this.totalTicks % stride !== 0) return;
+
+    switch (Math.floor(this.totalTicks / stride) % slots) {
+      case 0:
+        this.tickSuccession();
+        this.diplomacy.tickDiplomacy([...this.kingdoms.keys()], this.currentYear);
+        break;
+      case 1:
+        this.tickGeopolitics();
+        break;
+      case 2:
+        this.musterArmies();
+        // After the levy, so a realm decides who sails with the army it has now
+        // rather than the one it had last season.
+        this.invasions.tickYear(this.kingdoms, this.cities, this.entities, this.diplomacy, tileMap, this.currentYear);
+        this.air.planSorties(this.cities, this.kingdoms, this.diplomacy);
+        break;
+      default: {
+        const warWorld = {
+          year: this.currentYear,
+          cities: this.cities,
+          kingdoms: this.kingdoms,
+          entities: this.entities,
+          tileMap,
+          diplomacy: this.diplomacy
+        };
+        perfProfiler.measure('fronts', () => this.fronts.tickYear(warWorld));
+        perfProfiler.measure('logistics', () => this.logistics.tickYear({ ...warWorld, fronts: this.fronts }));
+        perfProfiler.measure('fronts', () => this.fronts.resolveYear(warWorld));
+        perfProfiler.measure('warfare', () => this.warfare.tickYear({ ...warWorld, fronts: this.fronts }));
+        break;
       }
     }
   }
@@ -765,9 +806,53 @@ export class SimulationEngine {
    * a bad harvest turn into a hungry family, an empty purse and, eventually, a
    * political problem — without any of that being scripted.
    */
+  /**
+   * A rotation over the living.
+   *
+   * The passes that used to walk every citizen at once — the daily needs round,
+   * the yearly life round, the wildlife round — each cost a hundred-odd
+   * milliseconds on a modest world, which is a visible freeze however rarely it
+   * lands. So they take turns instead: each citizen is still visited once per
+   * `period` ticks, so a day's hunger and a year's ageing arrive exactly as
+   * often as before, but the visits are dealt out a handful per tick.
+   *
+   * The ring is a snapshot taken at the top of each lap. Someone born mid-lap
+   * therefore waits until the next one, and someone who dies mid-lap is skipped
+   * by the `hp` check — both of which are already true of anything that walks a
+   * list while the world changes underneath it.
+   */
+  private rotate(state: EntityRotation, period: number, work: (e: Entity) => void, closeLap?: () => void): void {
+    // Credit accrues against the ring being walked, NOT against the live entity
+    // count. They are the same at the top of a lap and drift apart as the world
+    // breeds: charging the growing count made every lap close early, so a
+    // citizen collected two days of hunger per day in a growing world. The lap
+    // is a lap of the list it started with; the newcomers join the next one.
+    state.credit += (state.ring.length || this.entities.length) / period;
+    while (state.credit >= 1) {
+      state.credit -= 1;
+      if (state.cursor >= state.ring.length) {
+        closeLap?.();
+        state.ring = this.entities.slice();
+        state.cursor = 0;
+        if (state.ring.length === 0) return;
+      }
+      const e = state.ring[state.cursor++];
+      if (e.hp > 0) work(e);
+    }
+  }
+
+  private dayRotation: EntityRotation = { ring: [], cursor: 0, credit: 0 };
+  private livesRotation: EntityRotation = { ring: [], cursor: 0, credit: 0 };
+  private wildlifeRotation: EntityRotation = { ring: [], cursor: 0, credit: 0 };
+
   private tickDay(): void {
-    for (const e of this.entities) {
-      if (!SPECIES_DEFINITIONS[e.species].isHumanoid || e.hp <= 0) continue;
+    this.rotate(this.dayRotation, TICKS_PER_DAY, e => this.liveADay(e));
+  }
+
+  /** One citizen's day: hunger, comfort, safety, and a meal if they need one. */
+  private liveADay(e: Entity): void {
+    if (!SPECIES_DEFINITIONS[e.species].isHumanoid) return;
+    {
 
       // Everyone settled belongs to a family. Without this, anyone who never
       // claimed a house had no pantry to eat from and quietly starved.
@@ -3151,103 +3236,128 @@ household.cityId = city.id;
    * a prosperous one fills — while the disposition each person brings to the same
    * reading is what keeps the tendency from being a hundred identical answers.
    */
+  /**
+   * The slower half of a life, dealt out over a lap rather than all at once.
+   *
+   * Memory, culture, work, housing and the decision to leave — this used to walk
+   * every citizen in the world in one frame, which cost the better part of two
+   * hundred milliseconds on a middling world. Each citizen is still visited once
+   * per season's worth of ticks, so nothing about the pace of a life changed;
+   * they are simply visited a few at a time.
+   *
+   * The census is the reason a lap matters. It has to describe a whole
+   * population, not part of one, so it accumulates across the lap and is
+   * published when the lap closes — which is exactly what a census always was.
+   */
   private tickLives(): void {
-    const mood = new Map<string, CityMood>();
-    for (const city of this.cities.values()) mood.set(city.id, this.readCityMood(city));
+    if (this.livesRotation.ring.length === 0 && this.livesRotation.cursor === 0) this.openLivesLap();
+    this.rotate(this.livesRotation, TICKS_PER_SEASON, e => this.liveAYear(e), () => this.closeLivesLap());
+  }
 
-    // SOC-V3 demography rides along on a walk that was already happening. There
-    // is no separate census pass and no scan of its own.
-    const census = new DemographicsAccumulator();
-    // CULT-V1 rides on the same walk. Assimilation reads *last* year's mix, which
-    // is already on the settlement, while this year's is accumulated alongside —
-    // one pass, no second scan, and no half-updated table being read mid-count.
-    const cultures = new CultureCensus();
-    let relocations = 0;
+  private livesMood: Map<string, CityMood> = new Map();
+  private livesCensus: DemographicsAccumulator = new DemographicsAccumulator();
+  private livesCultures: CultureCensus = new CultureCensus();
+  private livesRelocations: number = 0;
+  private livesMovesLeft: number = MAX_RELOCATIONS_PER_YEAR;
 
-    // Hard ceiling on relocations per year. Migration is the one decision here
+  /** Fresh tallies, and this lap's read of how each settlement is doing. */
+  private openLivesLap(): void {
+    this.livesMood.clear();
+    for (const city of this.cities.values()) this.livesMood.set(city.id, this.readCityMood(city));
+    this.livesCensus = new DemographicsAccumulator();
+    this.livesCultures = new CultureCensus();
+    this.livesRelocations = 0;
+    // Hard ceiling on relocations per lap. Migration is the one decision here
     // that costs real work (destination search, two building tables rewritten),
     // and an uncapped exodus in a bad year is exactly the frame spike PERF-V1
     // exists to prevent. MIG-V1 can lift this when it owns the movement.
-    let movesLeft = MAX_RELOCATIONS_PER_YEAR;
+    this.livesMovesLeft = MAX_RELOCATIONS_PER_YEAR;
+  }
 
-    for (const e of this.entities) {
-      if (e.hp <= 0 || !SPECIES_DEFINITIONS[e.species].isHumanoid) continue;
-
-      // Everyone forgets, including children and wanderers.
-      decayMemories(e.memories);
-      decayBonds(e.bonds);
-      census.count(e);
-
-      if (!e.cityId) continue;
-      const city = this.cities.get(e.cityId);
-      const here = city ? mood.get(city.id) : undefined;
-      if (!city || !here) continue;
-
-      // CULT-V1. Children count toward the composition and absorb the place they
-      // are growing up in — they are the generation assimilation actually runs
-      // through, so excluding them would remove the mechanism entirely.
-      if (!e.cultureId) e.cultureId = city.dominantCultureId ?? this.foundCultureFor(city);
-      e.cultureId = assimilate(e, city.cultureMix, city.dominantCultureId, this.cultures, here.prosperity);
-      cultures.count(city.id, e.cultureId, e.localGenerations >= 3);
-
-      if (e.isChild) continue;
-
-      // What this year did to this person. The cause is shared by the whole
-      // settlement; what each of them takes from it is not.
-      if (here.danger > 0.5) remember(e.memories, 'war_survived', this.currentYear, here.danger * 0.6);
-      if (here.foodPerHead < 1) remember(e.memories, 'famine', this.currentYear, 0.4);
-      if (e.profession === 'none') remember(e.memories, 'jobless', this.currentYear, 0.35);
-      if (here.prosperity > 0.65 && e.wealth > 40) remember(e.memories, 'prospered', this.currentYear, 0.3);
-
-      this.settleFortune(e);
-      this.seekWork(e, city, here);
-      this.reconsiderHousing(e, city);
-
-      // How badly they want out of here, before they know whether anywhere else
-      // is better. Kept on the entity so colonisation, the inspector and any
-      // future migration system all read one agreed number.
-      const situation = {
-        wellbeing: e.wellbeing,
-        jobless: e.profession === 'none' ? 1 : 0,
-        hunger: e.needs.hunger,
-        danger: here.danger,
-        familyTies: this.familyTiesIn(e, city.id),
-        rootedness: rootedness(e),
-        opportunityElsewhere: 0,
-        trauma: e.trauma,
-        age: e.age
-      };
-      e.migrationUrge = migrationUrge(e.psyche, situation);
-
-      // Wanting to leave is not leaving. Looking for somewhere better is the
-      // expensive step, so it is gated twice: at half the relocation bar, because
-      // a merely dissatisfied person will still glance at a boom town next door
-      // and a settled one will not, and then again on the year's move budget.
-      if (movesLeft <= 0 || e.migrationUrge < RELOCATION_URGE * 0.5) continue;
-      if (!rng.chance(0.25 + e.migrationUrge * 0.5)) continue;
-
-      const destination = this.findBetterSettlement(e, city, mood);
-      if (!destination) continue;
-
-      // Asked again, now that somewhere real is on offer. This is where a
-      // prosperous neighbour actually pulls people in — and where ambition and
-      // curiosity finally weigh against loyalty over the same open door.
-      situation.opportunityElsewhere = Math.max(0, mood.get(destination.id)!.opportunity - here.opportunity);
-      e.migrationUrge = migrationUrge(e.psyche, situation);
-      if (e.migrationUrge > RELOCATION_URGE) {
-        this.relocateCitizen(e, city, destination);
-        movesLeft--;
-        relocations++;
-      }
-    }
-
-    this.demographics = census.finish(
-      this.currentYear, this.households.size, this.birthsThisYear, this.deathsThisYear, relocations
+  /** The lap is over, so the tallies now describe a whole population. */
+  private closeLivesLap(): void {
+    if (this.livesCensus.counted === 0) { this.openLivesLap(); return; }
+    this.demographics = this.livesCensus.finish(
+      this.currentYear, this.households.size, this.birthsThisYear, this.deathsThisYear, this.livesRelocations
     );
     this.birthsThisYear = 0;
     this.deathsThisYear = 0;
-    this.publishCultures(cultures);
+    this.publishCultures(this.livesCultures);
+    this.openLivesLap();
   }
+
+  /** One citizen's slower year. */
+  private liveAYear(e: Entity): void {
+    if (!SPECIES_DEFINITIONS[e.species].isHumanoid) return;
+
+    // Everyone forgets, including children and wanderers.
+    decayMemories(e.memories);
+    decayBonds(e.bonds);
+    this.livesCensus.count(e);
+
+    if (!e.cityId) return;
+    const city = this.cities.get(e.cityId);
+    const here = city ? this.livesMood.get(city.id) : undefined;
+    if (!city || !here) return;
+
+    // CULT-V1. Children count toward the composition and absorb the place they
+    // are growing up in — they are the generation assimilation actually runs
+    // through, so excluding them would remove the mechanism entirely.
+    if (!e.cultureId) e.cultureId = city.dominantCultureId ?? this.foundCultureFor(city);
+    e.cultureId = assimilate(e, city.cultureMix, city.dominantCultureId, this.cultures, here.prosperity);
+    this.livesCultures.count(city.id, e.cultureId, e.localGenerations >= 3);
+
+    if (e.isChild) return;
+
+    // What this year did to this person. The cause is shared by the whole
+    // settlement; what each of them takes from it is not.
+    if (here.danger > 0.5) remember(e.memories, 'war_survived', this.currentYear, here.danger * 0.6);
+    if (here.foodPerHead < 1) remember(e.memories, 'famine', this.currentYear, 0.4);
+    if (e.profession === 'none') remember(e.memories, 'jobless', this.currentYear, 0.35);
+    if (here.prosperity > 0.65 && e.wealth > 40) remember(e.memories, 'prospered', this.currentYear, 0.3);
+
+    this.settleFortune(e);
+    this.seekWork(e, city, here);
+    this.reconsiderHousing(e, city);
+
+    // How badly they want out of here, before they know whether anywhere else
+    // is better. Kept on the entity so colonisation, the inspector and any
+    // future migration system all read one agreed number.
+    const situation = {
+      wellbeing: e.wellbeing,
+      jobless: e.profession === 'none' ? 1 : 0,
+      hunger: e.needs.hunger,
+      danger: here.danger,
+      familyTies: this.familyTiesIn(e, city.id),
+      rootedness: rootedness(e),
+      opportunityElsewhere: 0,
+      trauma: e.trauma,
+      age: e.age
+    };
+    e.migrationUrge = migrationUrge(e.psyche, situation);
+
+    // Wanting to leave is not leaving. Looking for somewhere better is the
+    // expensive step, so it is gated twice: at half the relocation bar, because
+    // a merely dissatisfied person will still glance at a boom town next door
+    // and a settled one will not, and then again on the year's move budget.
+    if (this.livesMovesLeft <= 0 || e.migrationUrge < RELOCATION_URGE * 0.5) return;
+    if (!rng.chance(0.25 + e.migrationUrge * 0.5)) return;
+
+    const destination = this.findBetterSettlement(e, city, this.livesMood);
+    if (!destination) return;
+
+    // Asked again, now that somewhere real is on offer. This is where a
+    // prosperous neighbour actually pulls people in — and where ambition and
+    // curiosity finally weigh against loyalty over the same open door.
+    situation.opportunityElsewhere = Math.max(0, this.livesMood.get(destination.id)!.opportunity - here.opportunity);
+    e.migrationUrge = migrationUrge(e.psyche, situation);
+    if (e.migrationUrge > RELOCATION_URGE) {
+      this.relocateCitizen(e, city, destination);
+      this.livesMovesLeft--;
+      this.livesRelocations++;
+    }
+  }
+
 
   /**
    * Writes the year's cultural composition onto the settlements and asks each of
