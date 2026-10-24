@@ -9,8 +9,8 @@ export type Terrain = number;
 
 export interface TerrainDef {
   name: string;
-  /** 0 water · 1 ground · 2 hill · 3 mountain. Drives cliffs and shoreline art. */
-  level: 0 | 1 | 2 | 3;
+  /** 0 water · 1 ground · 2 hill. Drives cliffs and shoreline art. Mountains are sprites on rocky ground, so they stay level 1. */
+  level: 0 | 1 | 2;
   walk: boolean;
   /** Movement multiplier. */
   speed: number;
@@ -32,9 +32,9 @@ export const TERRAIN: TerrainDef[] = [
   { name: 'Pântano', level: 1, walk: true, speed: 0.6, flammable: 0.2, water: false, ramp: ['#2d4a35', '#37593f', '#456b4a', '#58805a'] },
   { name: 'Tundra', level: 1, walk: true, speed: 0.9, flammable: 0.1, water: false, ramp: ['#7d8a78', '#8d9a88', '#9eaa98', '#b3bdae'] },
   { name: 'Neve', level: 1, walk: true, speed: 0.75, flammable: 0, water: false, ramp: ['#c3d3e6', '#d6e3f1', '#e8f0f9', '#f8fcff'] },
-  { name: 'Colina', level: 2, walk: true, speed: 0.8, flammable: 0.3, water: false, ramp: ['#5a7a3c', '#6c8f46', '#80a455', '#97b96b'] },
-  { name: 'Montanha', level: 3, walk: false, speed: 0, flammable: 0, water: false, ramp: ['#4d4a52', '#66636b', '#827f86', '#a19ea3'] },
-  { name: 'Pico nevado', level: 3, walk: false, speed: 0, flammable: 0, water: false, ramp: ['#8f98a8', '#b4bccb', '#dce3ee', '#fafcff'] },
+  { name: 'Colina', level: 2, walk: true, speed: 0.8, flammable: 0.3, water: false, ramp: ['#4a8030', '#5a9438', '#6aa844', '#82bd58'] },
+  { name: 'Montanha', level: 1, walk: false, speed: 0, flammable: 0, water: false, ramp: ['#4d4a52', '#66636b', '#827f86', '#a19ea3'] },
+  { name: 'Pico nevado', level: 1, walk: false, speed: 0, flammable: 0, water: false, ramp: ['#8f98a8', '#b4bccb', '#dce3ee', '#fafcff'] },
   { name: 'Lava', level: 1, walk: false, speed: 0, flammable: 0, water: false, ramp: ['#7a1408', '#b82a0a', '#f06418', '#ffb23a'] },
   { name: 'Rocha', level: 1, walk: true, speed: 0.95, flammable: 0, water: false, ramp: ['#3b3a40', '#4c4b53', '#5f5e68', '#76757e'] },
   { name: 'Cinzas', level: 1, walk: true, speed: 1, flammable: 0, water: false, ramp: ['#2a2826', '#363330', '#46423e', '#58534d'] },

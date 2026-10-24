@@ -200,19 +200,19 @@ function scatterObjects(world: World, nVeg: Noise, cfg: GenConfig): void {
     const i = y * w + x, t = world.terrain[i], r = hash2(x, y, seed + 3), r2 = hash2(x, y, seed + 4);
     const u = x / w, v = y / h;
     const cluster = nVeg.fbm(u * 9, v * 9, 3) * 0.5 + 0.5; // 0..1 patches
-    const dense = Math.max(0, cluster - 0.42) * forest;
+    const dense = Math.max(0, cluster - 0.34) * forest * 1.7;
     let o = 0;
     switch (t) {
       case T.GRASS:
         if (r < dense * 1.5) o = r2 < 0.65 ? O.OAK : r2 < 0.85 ? O.BIRCH : O.PINE;
         else if (r < 0.03 * forest + dense * 0.2) o = O.BUSH;
         else if (r < 0.05 + dense * 0.1) o = r2 < 0.4 ? O.FLOWER_RED : r2 < 0.7 ? O.FLOWER_YELLOW : O.FLOWER_BLUE;
-        else if (r < 0.1) o = O.GRASS_TUFT;
-        else if (r < 0.104) o = O.ROCK;
-        else if (r < 0.108) o = O.BERRIES;
+        else if (r < 0.14) o = O.GRASS_TUFT;
+        else if (r < 0.145) o = O.ROCK;
+        else if (r < 0.15) o = O.BERRIES;
         break;
       case T.JUNGLE: if (r < 0.2 + dense * 1.3) o = O.JUNGLE_TREE; else if (r < 0.3) o = O.BUSH; else if (r < 0.34) o = r2 < 0.5 ? O.FLOWER_RED : O.MUSHROOM; break;
-      case T.SAVANNA: if (r < 0.012 + dense * 0.15) o = O.ACACIA; else if (r < 0.1) o = O.GRASS_TUFT; else if (r < 0.105) o = O.BUSH; break;
+      case T.SAVANNA: if (r < 0.03 + dense * 0.25) o = O.ACACIA; else if (r < 0.1) o = O.GRASS_TUFT; else if (r < 0.105) o = O.BUSH; break;
       case T.DESERT: if (r < 0.012) o = O.CACTUS; else if (r < 0.014) o = O.DEAD_TREE; else if (r < 0.018) o = O.BONES; else if (r < 0.025) o = O.ROCK; break;
       case T.SWAMP: if (r < 0.1 + dense * 0.4) o = O.DEAD_TREE; else if (r < 0.2) o = O.REED; else if (r < 0.24) o = O.MUSHROOM; break;
       case T.TUNDRA: if (r < dense * 0.9) o = O.PINE; else if (r < 0.04) o = O.ROCK; else if (r < 0.06) o = O.GRASS_TUFT; break;

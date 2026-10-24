@@ -3,6 +3,10 @@ import { TILE } from '../core/config';
 import { Camera } from './camera';
 import { bakeChunk, CHUNK_PX, type BakedChunk } from '../gfx/terrain';
 import { makeWaterFrames, WATER_FRAMES } from '../gfx/water';
+import { plantSprite, PCX, PBASE, type Season } from '../gfx/flora';
+import { mountainSprite, MCX, MBASE } from '../gfx/mountain';
+import { hash2 } from '../core/rng';
+import { T, O } from '../world/defs';
 
 interface Slot { baked: BakedChunk | null; ver: number }
 
@@ -15,6 +19,7 @@ export class Renderer {
   /** Ms of bake work allowed per frame; first frames after a load are the only ones that hit it. */
   bakeBudget = 10;
   time = 0;
+  season: Season = 1;
 
   constructor(public canvas: HTMLCanvasElement, public world: World, public cam: Camera) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
@@ -70,6 +75,26 @@ export class Renderer {
       const x = k % world.cw, y = Math.floor(k / world.cw);
       if (x < cx0 - 3 || x > cx1 + 3 || y < cy0 - 3 || y > cy1 + 3) this.chunks.delete(k);
     }
-    void TILE;
+    this.drawObjects(left, top, vw, vh);
+  }
+
+  /** Mountains and plants, row by row so lower rows overlap higher ones (painter's order). */
+  private drawObjects(left: number, top: number, vw: number, vh: number): void {
+    const { ctx, world } = this;
+    const tx0 = Math.max(0, Math.floor(left / TILE) - 2), tx1 = Math.min(world.w - 1, Math.floor((left + vw) / TILE) + 2);
+    const ty0 = Math.max(0, Math.floor(top / TILE) - 1), ty1 = Math.min(world.h - 1, Math.floor((top + vh) / TILE) + 3);
+    const t = this.time;
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+      const i = ty * world.w + tx, terr = world.terrain[i], o = world.obj[i];
+      const jx = (hash2(tx, ty, 61) - 0.5) * 12, jy = (hash2(tx, ty, 62) - 0.5) * 8;
+      if (terr === T.MOUNTAIN || terr === T.PEAK) {
+        const spr = mountainSprite(Math.floor(hash2(tx, ty, 63) * 6), world.height[i], terr === T.PEAK || world.temp[i] < 90);
+        ctx.drawImage(spr, Math.round(tx * TILE + TILE / 2 + jx * 0.5 - MCX), Math.round(ty * TILE + TILE - 2 - MBASE));
+      }
+      if (o !== O.NONE) {
+        const spr = plantSprite(o, Math.floor(hash2(tx, ty, 64) * 4), world.objAge[i], this.season, t, hash2(tx, ty, 65));
+        ctx.drawImage(spr, Math.round(tx * TILE + TILE / 2 + jx - PCX), Math.round(ty * TILE + TILE - 6 + jy - PBASE));
+      }
+    }
   }
 }

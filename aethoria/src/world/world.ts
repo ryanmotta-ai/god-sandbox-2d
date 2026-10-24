@@ -66,7 +66,7 @@ export class World {
     this.terrain[i] = t;
     // Nothing grows underwater, in lava or on a mountain face.
     const d = TERRAIN[t];
-    if (d.water || t === T.LAVA || d.level === 3) this.obj[i] = O.NONE;
+    if (d.water || t === T.LAVA || t === T.MOUNTAIN || t === T.PEAK) this.obj[i] = O.NONE;
     if (d.water) this.fire[i] = 0;
     this.touch(x, y);
   }
