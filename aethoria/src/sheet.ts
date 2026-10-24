@@ -3,6 +3,8 @@ import { makeLook, type Role } from './gfx/looks';
 import { plantSprite, type Season } from './gfx/flora';
 import { O } from './world/defs';
 import { animalFrame, A_FRAMES, type AnimalKind, type AAnim } from './gfx/animals';
+import { buildingSprite } from './gfx/buildings';
+import { BDEFS, type BType } from './sim/buildings';
 import { ANIM_FRAMES, type Anim } from './gfx/rig';
 
 /** Dev page: ?mode=roster | ?mode=anim&race=human&role=soldier&anim=walk */
@@ -13,7 +15,10 @@ function add(c: HTMLCanvasElement, parent: HTMLElement): void { c.style.width = 
 function row(title: string): HTMLElement { const h = document.createElement('h4'); h.textContent = title; root.appendChild(h); const d = document.createElement('div'); d.className = 'row'; root.appendChild(d); return d; }
 
 const mode = q.get('mode') ?? 'roster';
-if (mode === 'animals') {
+if (mode === 'buildings') {
+  const stage = +(q.get('stage') ?? 3), dmg = +(q.get('dmg') ?? 0);
+  for (const race of ['human', 'elf', 'dwarf', 'orc'] as Race[]) { const d = row(race); for (const t of Object.keys(BDEFS) as BType[]) add(buildingSprite(t, race, stage, dmg), d); }
+} else if (mode === 'animals') {
   const kinds: AnimalKind[] = ['sheep', 'cow', 'chicken', 'rabbit', 'deer', 'boar', 'wolf', 'bear', 'snake', 'crab', 'bird'];
   const anims = (q.get('anims') ?? 'walk,run,attack').split(',') as AAnim[];
   for (const k of kinds) for (const a of anims) { const d = row(`${k} ${a}`); for (let f = 0; f < A_FRAMES[a]; f++) add(animalFrame(k, a, false, f), d); }

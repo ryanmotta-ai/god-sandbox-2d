@@ -2,12 +2,14 @@ import type { Sim } from './sim';
 import { TERRAIN, T, O, OBJECTS, isTree } from '../world/defs';
 import { hash2 } from '../core/rng';
 import { damage } from './combat';
+import { igniteTile } from './ai';
 
 const NB = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 /** Fire, regrowth, lava, tree growth — the slow living background, sampled instead of swept. */
 export function updateDynamics(sim: Sim, dt: number): void {
   const w = sim.world;
+  weather(sim, dt);
   if (sim.tickN % 4 === 0) fire(sim);
   // random sampling: every tile is visited roughly every minute
   const samples = Math.max(8, Math.floor((w.w * w.h) / 600));
@@ -27,6 +29,23 @@ export function updateDynamics(sim: Sim, dt: number): void {
     }
   }
   void dt;
+}
+
+function weather(sim: Sim, dt: number): void {
+  sim.weatherT -= dt;
+  const wet = sim.weather === 'rain' || sim.weather === 'storm';
+  if (sim.weatherT <= 0) {
+    const s = sim.season, r = sim.rng.next();
+    sim.weather = s === 3 ? (r < 0.55 ? 'snow' : r < 0.7 ? 'fog' : 'clear') : s === 1 ? (r < 0.14 ? 'storm' : r < 0.26 ? 'rain' : 'clear') : (r < 0.3 ? 'rain' : r < 0.38 ? 'fog' : r < 0.45 ? 'storm' : 'clear');
+    sim.weatherT = sim.rng.range(35, 90);
+  }
+  if (sim.weather === 'storm' && sim.rng.chance(dt * 0.06)) { // a bolt somewhere in the world
+    const x = sim.rng.int(2, sim.world.w - 3), y = sim.rng.int(2, sim.world.h - 3);
+    sim.fx.push({ t: 'lightning', x: x + 0.5, y: y + 0.5 });
+    sim.near(x + 0.5, y + 0.5, 1.8, u => { damage(sim, u, 60, null); });
+    igniteTile(sim, x, y);
+  }
+  if (wet && sim.tickN % 8 === 0) for (const i of [...sim.world.activeFires]) if (sim.rng.chance(0.35)) { sim.world.fire[i] = 0; sim.world.activeFires.delete(i); }
 }
 
 function nearTerrain(w: Sim['world'], x: number, y: number, t: number): boolean {

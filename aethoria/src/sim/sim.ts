@@ -48,6 +48,8 @@ export class Sim {
   /** Population per species, refreshed once a second. */
   counts: Partial<Record<Species, number>> = {};
   landTiles = 0;
+  weather: 'clear' | 'rain' | 'storm' | 'snow' | 'fog' = 'clear';
+  weatherT = 40;
 
   constructor(world: World, seed: number) {
     this.world = world;

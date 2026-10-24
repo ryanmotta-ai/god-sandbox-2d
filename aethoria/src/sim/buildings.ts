@@ -1,6 +1,6 @@
 import type { Race } from '../gfx/humanoid';
 
-export type BType = 'campfire' | 'hut' | 'house' | 'farm' | 'storehouse' | 'lumber' | 'mine' | 'barracks' | 'tower' | 'temple' | 'hall' | 'well' | 'smith' | 'windmill';
+export type BType = 'campfire' | 'hut' | 'house' | 'farm' | 'storehouse' | 'lumber' | 'barracks' | 'tower' | 'temple' | 'hall' | 'well' | 'smith' | 'windmill';
 
 export interface BDef {
   type: BType; name: string;
@@ -24,7 +24,6 @@ export const BDEFS: Record<BType, BDef> = {
   farm: { type: 'farm', name: 'Fazenda', w: 3, h: 3, cost: { wood: 4, stone: 0 }, hp: 60, beds: 0, build: 10, slots: 2, field: true },
   storehouse: { type: 'storehouse', name: 'Celeiro', w: 3, h: 2, cost: { wood: 12, stone: 2 }, hp: 220, beds: 0, build: 22, slots: 0 },
   lumber: { type: 'lumber', name: 'Serraria', w: 2, h: 2, cost: { wood: 8, stone: 0 }, hp: 140, beds: 0, build: 16, slots: 2 },
-  mine: { type: 'mine', name: 'Mina', w: 2, h: 2, cost: { wood: 8, stone: 4 }, hp: 300, beds: 0, build: 22, slots: 3 },
   barracks: { type: 'barracks', name: 'Quartel', w: 3, h: 3, cost: { wood: 16, stone: 14 }, hp: 420, beds: 0, build: 36, slots: 4 },
   tower: { type: 'tower', name: 'Torre', w: 2, h: 2, cost: { wood: 8, stone: 18 }, hp: 520, beds: 0, build: 34, slots: 1 },
   temple: { type: 'temple', name: 'Templo', w: 3, h: 3, cost: { wood: 14, stone: 24 }, hp: 380, beds: 0, build: 44, slots: 0 },
