@@ -1,6 +1,6 @@
 import type { Race } from '../gfx/humanoid';
 
-export type BType = 'campfire' | 'hut' | 'house' | 'farm' | 'storehouse' | 'lumber' | 'barracks' | 'tower' | 'temple' | 'hall' | 'well' | 'smith' | 'windmill' | 'wall' | 'gate';
+export type BType = 'campfire' | 'hut' | 'house' | 'farm' | 'storehouse' | 'lumber' | 'barracks' | 'tower' | 'temple' | 'hall' | 'well' | 'smith' | 'windmill' | 'wall' | 'gate' | 'dock' | 'shipyard' | 'fishhut' | 'lighthouse';
 
 export interface BDef {
   type: BType; name: string;
@@ -15,6 +15,8 @@ export interface BDef {
   slots: number;
   /** Footprint is flattened into farmland. */
   field?: boolean;
+  /** Built on the shallows, walkable like a pier; ships berth beside it. */
+  water?: boolean;
 }
 
 export const BDEFS: Record<BType, BDef> = {
@@ -32,6 +34,10 @@ export const BDEFS: Record<BType, BDef> = {
   smith: { type: 'smith', name: 'Ferraria', w: 2, h: 2, cost: { wood: 8, stone: 10 }, hp: 260, beds: 0, build: 28, slots: 1 },
   wall: { type: 'wall', name: 'Muralha', w: 1, h: 1, cost: { wood: 1, stone: 3 }, hp: 420, beds: 0, build: 5, slots: 0 },
   gate: { type: 'gate', name: 'Portão', w: 1, h: 1, cost: { wood: 4, stone: 4 }, hp: 300, beds: 0, build: 8, slots: 0 },
+  dock: { type: 'dock', name: 'Cais', w: 3, h: 2, cost: { wood: 14, stone: 0 }, hp: 220, beds: 0, build: 18, slots: 0, water: true },
+  shipyard: { type: 'shipyard', name: 'Estaleiro', w: 4, h: 3, cost: { wood: 28, stone: 6 }, hp: 340, beds: 0, build: 38, slots: 2, water: true },
+  fishhut: { type: 'fishhut', name: 'Rancho de pesca', w: 3, h: 2, cost: { wood: 8, stone: 0 }, hp: 130, beds: 2, build: 14, slots: 2 },
+  lighthouse: { type: 'lighthouse', name: 'Farol', w: 2, h: 2, cost: { wood: 6, stone: 22 }, hp: 480, beds: 0, build: 40, slots: 1 },
   windmill: { type: 'windmill', name: 'Moinho', w: 2, h: 2, cost: { wood: 14, stone: 6 }, hp: 240, beds: 0, build: 30, slots: 1 },
 };
 
@@ -49,8 +55,10 @@ export class Building {
   haveWood = 0; haveStone = 0;
   /** Flash on damage. */
   hurtT = 0;
-  /** Tower reload. */
+  /** Tower reload; shipyards: seconds until the next hull. */
   cd = 0;
+  /** Water buildings: land tile people use (a), and the water tile ships berth at (b). -1 = none. */
+  ax = -1; ay = -1; bx = -1; by = -1;
   constructor(public id: number, public type: BType, public cityId: number, public x: number, public y: number, public race: Race) {
     const d = BDEFS[type];
     this.maxHp = this.hp = d.hp;
@@ -58,8 +66,8 @@ export class Building {
   get def(): BDef { return BDEFS[this.type]; }
   get done(): boolean { return this.progress >= 1; }
   /** The tile in front of the door (south-centre, one tile below the footprint). */
-  get doorX(): number { return this.x + Math.floor(this.def.w / 2); }
-  get doorY(): number { return this.y + this.def.h; }
+  get doorX(): number { return this.ax >= 0 ? this.ax : this.x + Math.floor(this.def.w / 2); }
+  get doorY(): number { return this.ax >= 0 ? this.ay : this.y + this.def.h; }
   get cx(): number { return this.x + this.def.w / 2; }
   get cy(): number { return this.y + this.def.h / 2; }
 }

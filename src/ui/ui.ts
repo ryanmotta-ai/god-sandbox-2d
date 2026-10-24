@@ -213,7 +213,7 @@ export class UI {
   private pickAt(sx: number, sy: number): Sel | null {
     const g = this.game, sim = g.sim, w = g.cam.toWorld(sx, sy), tx = w.x / TILE, ty = w.y / TILE;
     let best: Unit | null = null, bd = 1.5;
-    sim.near(tx, ty + 0.5, 2, u => { const flyOff = u.species === 'bird' ? 0.9 : u.species === 'dragon' ? 1.5 : 0; const d = Math.hypot(u.x - tx, u.y - flyOff - (ty + 0.3)); if (d < bd) { bd = d; best = u; } });
+    sim.near(tx, ty + 0.5, 2, u => { const flyOff = u.species === 'bird' ? 0.9 : u.species === 'dragon' ? 1.5 : u.def.ship ? 1.3 : 0; const d = Math.hypot(u.x - tx, u.y - flyOff - (ty + 0.3)) * (u.def.ship ? 0.6 : 1); if (d < bd) { bd = d; best = u; } });
     if (best) return { kind: 'unit', id: (best as Unit).id };
     // buildings are tall: also test the sprite's roof area above the footprint
     let bb: Building | null = null;

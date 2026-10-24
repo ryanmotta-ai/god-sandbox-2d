@@ -7,6 +7,7 @@ import { hostile, damage, kill, shoot, attackPower, MELEE } from './combat';
 export { updateArrows } from './combat';
 import { thinkAnimal, actDragon } from './fauna';
 import { thinkEngine, actEngine } from './siege';
+import { thinkShip, actShip, actBoard } from './navy';
 import { isEngine } from './species';
 import { hash2 } from '../core/rng';
 import type { Building } from './buildings';
@@ -82,16 +83,21 @@ export function updateUnits(sim: Sim, dt: number): void {
     const d = u.def;
     u.age += dt / YEAR_SECONDS;
     if (u.age > d.maxAge * (0.85 + hash2(u.id, 1, 9) * 0.3)) { kill(sim, u, null, 'velhice'); continue; }
+    if (u.inShip) { // riding a ship: hidden, fed from the ship's stores, carried wherever it goes
+      const s = sim.byId.get(u.inShip);
+      if (s && s.alive) { u.x = s.x; u.y = s.y; u.hunger = Math.min(60, u.hunger + dt * 0.1); continue; }
+      u.inShip = 0; u.mode = 'wander';
+    }
     // hunger: civs and carnivores feel it; herbivores graze it off
     if (d.diet !== 'none' && u.species !== 'zombie') {
       u.hunger += dt * (d.civ ? 0.55 : d.diet === 'herb' ? 0.14 : 0.2);
       if (u.hunger >= 100) { u.hp -= dt * 1.2; if (u.hp <= 0) { kill(sim, u, null, 'fome'); continue; } }
     }
-    if (!d.fly && d.id !== 'crab' && tt0(sim, u) && !sim.walkable(u.x, u.y) && sim.tickN % 10 === u.id % 10) { const sp = sim.freeSpot(u.x, u.y, 4); if (sp) { u.x = sp.x; u.y = sp.y; u.path = null; } }
+    if (!d.fly && !d.ship && d.id !== 'crab' && tt0(sim, u) && !sim.walkable(u.x, u.y) && sim.tickN % 10 === u.id % 10) { const sp = sim.freeSpot(u.x, u.y, 4); if (sp) { u.x = sp.x; u.y = sp.y; u.path = null; } }
     // drowning / lava
     const ti = Math.floor(u.y) * w.w + Math.floor(u.x);
     const tt = w.terrain[ti];
-    if (!d.fly) {
+    if (!d.fly && !d.ship) {
       if (tt === T.DEEP) { u.hp -= 25 * dt; if (u.hp <= 0) { sim.fx.push({ t: 'splash', x: u.x, y: u.y }); kill(sim, u, null, 'afogamento'); continue; } }
       else if (tt === T.LAVA) { kill(sim, u, null, 'lava'); continue; }
     }
@@ -111,7 +117,7 @@ export function updateUnits(sim: Sim, dt: number): void {
     u.thinkT -= dt;
     if (u.hitT > 0) { u.hitT -= dt; if (u.hitT <= 0) resolveHit(sim, u); }
     if (u.thinkT <= 0) {
-      if (d.civ) thinkCiv(sim, u); else if (isEngine(u.species)) thinkEngine(sim, u); else thinkAnimal(sim, u);
+      if (d.civ) thinkCiv(sim, u); else if (isEngine(u.species)) thinkEngine(sim, u); else if (d.ship) thinkShip(sim, u); else thinkAnimal(sim, u);
     }
     act(sim, u, dt);
   }
@@ -141,10 +147,11 @@ function resolveHit(sim: Sim, u: Unit): void {
 function isFighter(u: Unit): boolean { return u.role === 'soldier' || u.role === 'archer' || u.role === 'knight' || u.role === 'king'; }
 
 function findHostile(sim: Sim, u: Unit, r: number): Unit | null {
-  return sim.nearest(u.x, u.y, r, o => hostile(sim, u, o));
+  const ranged = u.look?.weapon === 'bow'; // only bowmen can answer a ship
+  return sim.nearest(u.x, u.y, r, o => hostile(sim, u, o) && (!o.def.ship || ranged));
 }
 
-const BUSY = new Set(['hunt', 'chop', 'mine', 'quarry', 'farm', 'build', 'haul', 'eat', 'forage', 'settle', 'goto', 'patrol']);
+const BUSY = new Set(['board', 'hunt', 'chop', 'mine', 'quarry', 'farm', 'build', 'haul', 'eat', 'forage', 'settle', 'goto', 'patrol']);
 
 function thinkCiv(sim: Sim, u: Unit): void {
   const city = sim.cities.get(u.cityId);
@@ -420,6 +427,9 @@ function act(sim: Sim, u: Unit, dt: number): void {
     case 'graze': { setAct(u, 'eat'); if (u.actT > 2.4) { u.hunger = Math.max(0, u.hunger - 28); u.mode = 'wander'; u.thinkT = 0.2; } return; }
     case 'dragon': return actDragon(sim, u, dt);
     case 'engine': case 'engine-move': return actEngine(sim, u, dt);
+    case 'ship': return actShip(sim, u, dt);
+    case 'board': return actBoard(sim, u, dt);
+    case 'aboard': return;
     case 'dead': return;
     default: u.mode = 'wander';
   }

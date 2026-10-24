@@ -1,7 +1,7 @@
 import { Rng } from '../core/rng';
 import type { Look, Race } from './humanoid';
 
-export type Role = 'peasant' | 'farmer' | 'woodcutter' | 'miner' | 'builder' | 'soldier' | 'archer' | 'knight' | 'king' | 'mage' | 'child';
+export type Role = 'peasant' | 'farmer' | 'woodcutter' | 'miner' | 'builder' | 'soldier' | 'archer' | 'knight' | 'king' | 'mage' | 'child' | 'fisher' | 'sailor';
 
 const SKIN: Record<Race, string[]> = {
   human: ['#f1c9a5', '#e0a97c', '#c68a5c', '#9a6440', '#6e4328'],
@@ -43,6 +43,8 @@ export function makeLook(race: Race, role: Role, seed: number, kingdom = '#c0392
     case 'archer': return { ...base, armor: 1, helm: 4, weapon: 'bow', cloth: '#4a6a3a', cloth2: '#4a3a2a', cape: null, longSleeves: true, shield: null };
     case 'knight': return { ...base, armor: 3, helm: 2, shield: kingdom, weapon: 'sword', cape: kingdom, cloth: kingdom, cloth2: '#2a2a34', longSleeves: true };
     case 'king': return { ...base, armor: 1, helm: 3, cape: '#a01c2c', cloth: kingdom, cloth2: '#3a2a4a', weapon: 'sword', longSleeves: true, beard: (race === 'dwarf' || !female && r.chance(0.7) ? 2 : 0) as Look['beard'] };
+    case 'fisher': return { ...base, helm: 5, weapon: 'none', cloth: '#4a7a9a', cloth2: '#5a4a34', longSleeves: false };
+    case 'sailor': return { ...base, helm: 1, weapon: 'none', cloth: '#e4e8f0', cloth2: '#2a4a7a', longSleeves: true };
     case 'mage': return { ...base, helm: 4, weapon: 'staff', cloth: '#5a3a8a', cloth2: '#3a2a5a', cape: '#3a2a6a', longSleeves: true };
     case 'child': return { ...base, weapon: 'none', hairStyle: female ? 3 : 0, beard: 0, longSleeves: false };
     default: return base;

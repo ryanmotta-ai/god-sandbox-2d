@@ -21,7 +21,7 @@ export class Unit {
   /** Seconds in the current state (drives animation phase for one-shot animations). */
   stateT = 0;
   /** Which animation the renderer should play: chosen by AI so the visuals match what is happening. */
-  act: 'idle' | 'walk' | 'run' | 'chop' | 'mine' | 'farm' | 'hammer' | 'attack' | 'shoot' | 'cast' | 'carry' | 'eat' | 'die' | 'sleep' | 'fly' | 'breath' = 'idle';
+  act: 'idle' | 'walk' | 'run' | 'chop' | 'mine' | 'farm' | 'hammer' | 'attack' | 'shoot' | 'cast' | 'carry' | 'eat' | 'die' | 'sleep' | 'fly' | 'breath' | 'sail' = 'idle';
   actT = 0;
   thinkT = 0;
   path: Int32Array | null = null;
@@ -64,7 +64,10 @@ export class Unit {
   burning = 0;
   /** Seconds the sprite flashes after a hit. */
   hurtT = 0;
+  /** Id of the ship this unit is aboard (0 = ashore). Aboard, it rides hidden and does not think. */
   inShip = 0;
+  /** Ships: what they are doing (fish, trade, settle, invade, patrol, moor), the step of it, home dock, destination, hold [food,wood,stone,ore], a timer. */
+  mission = 'moor'; phase = 0; dock = 0; dest = 0; hold: number[] | null = null; legT = 0;
   home = 0; // building id
   born = 0;
 

@@ -163,8 +163,8 @@ export class Renderer {
     }
     const L = this.cam.zoom >= 1 ? 1 : 0;
     for (const u of sim.units) {
-      if (lod === 2) { if (u.alive && u.x >= tx0 && u.x <= tx1 && u.y >= ty0 && u.y <= ty1 && (u.def.civ || u.species === 'dragon')) { ctx.fillStyle = sim.kingdoms.get(u.kingdomId)?.color ?? (u.species === 'dragon' ? '#e03030' : '#ddd'); ctx.fillRect(Math.round(u.x * TILE) - 2, Math.round(u.y * TILE) - 6, u.species === 'dragon' ? 12 : 5, u.species === 'dragon' ? 8 : 6); } continue; }
-      if (u.x < tx0 - 2 || u.x > tx1 + 2 || u.y < ty0 - 3 || u.y > ty1 + 3) continue;
+      if (lod === 2) { if (u.alive && !u.inShip && u.x >= tx0 && u.x <= tx1 && u.y >= ty0 && u.y <= ty1 && (u.def.civ || u.species === 'dragon' || u.def.ship)) { ctx.fillStyle = sim.kingdoms.get(u.kingdomId)?.color ?? (u.species === 'dragon' ? '#e03030' : '#ddd'); ctx.fillRect(Math.round(u.x * TILE) - 2, Math.round(u.y * TILE) - 6, u.species === 'dragon' ? 12 : u.def.ship ? 9 : 5, u.species === 'dragon' ? 8 : u.def.ship ? 4 : 6); } continue; }
+      if (u.inShip || u.x < tx0 - 2 || u.x > tx1 + 2 || u.y < ty0 - 3 || u.y > ty1 + 3) continue;
       const ix = u.px + (u.x - u.px) * alpha, iy = u.py + (u.y - u.py) * alpha;
       items.push({ y: iy * TILE + (u.def.fly && u.species !== 'dragon' ? 40 : 0) + u.id * 1e-6, k: 3, a: ix, b: iy, o: u });
     }
@@ -172,7 +172,7 @@ export class Renderer {
     // ground-level things first: crops and shadows (so nothing is shadowed by a neighbour's sprite)
     for (const it of items) {
       if (it.k === 2) { const b = it.o as Building; if (b.type === 'farm' && b.done) { ctx.drawImage(cropSprite(b.crop < 0.12 ? 0 : b.crop < 0.45 ? 1 : b.crop < 0.78 ? 2 : 3), b.x * TILE - 8, b.y * TILE - 30); } }
-      else if (it.k === 3 && lod === 0) { const u = it.o as Unit; const s = shadowSprite(Math.round(frameSize(u))); if (u.state !== 'dead' || u.stateT < 1) ctx.drawImage(s, Math.round(it.a * TILE - s.width / 2), Math.round(it.b * TILE - s.height / 2 + 1)); }
+      else if (it.k === 3 && lod === 0 && !(it.o as Unit).def.ship) { const u = it.o as Unit; const s = shadowSprite(Math.round(frameSize(u))); if (u.state !== 'dead' || u.stateT < 1) ctx.drawImage(s, Math.round(it.a * TILE - s.width / 2), Math.round(it.b * TILE - s.height / 2 + 1)); }
       else if (it.k === 0 && lod === 0) { const i = it.b * world.w + it.a, o = world.obj[i]; if (o !== O.NONE && OBJ_SHADOW.has(o)) { const r = o === O.JUNGLE_TREE ? 12 : o === O.PINE || o === O.SNOW_PINE ? 8 : 9; const s = shadowSprite(r); ctx.drawImage(s, Math.round(it.a * TILE + TILE / 2 + (hash2(it.a, it.b, 61) - 0.5) * 12 - s.width / 2 + 3), Math.round(it.b * TILE + TILE - 6 + (hash2(it.a, it.b, 62) - 0.5) * 8 - 2)); } }
     }
     for (const it of items) {
@@ -198,6 +198,7 @@ export class Renderer {
   private drawUnit(u: Unit, ix: number, iy: number, detail: number): void {
     const { ctx, sim } = this, world = sim.world;
     const terr = world.terrain[Math.floor(iy) * world.w + Math.floor(ix)];
+    if (u.def.ship) return this.drawShip(u, ix, iy);
     const f = frameFor(u, this.time, terr === T.SHALLOW);
     const px = Math.round(ix * TILE), py = Math.round(iy * TILE);
     const bob = u.def.fly && u.species === 'bird' ? Math.sin(this.time * 6 + u.id) * 1.5 : u.species === 'dragon' && f.lift ? Math.sin(this.time * 3) * 2 : 0;
@@ -229,6 +230,35 @@ export class Renderer {
     }
   }
 
+  /** A ship rides the swell: bob and rock, a wake behind it while it moves, a bow wave, and a slow sink when it dies. */
+  private drawShip(u: Unit, ix: number, iy: number): void {
+    const { ctx, sim } = this, t = this.time, k = sim.kingdoms.get(u.kingdomId);
+    const f = frameFor(u, t, false, k?.color ?? '#c0392b');
+    const px = Math.round(ix * TILE), py = Math.round(iy * TILE);
+    const moving = u.act === 'sail' && u.alive, ph = t * 1.7 + u.id * 1.3;
+    const bob = Math.round(Math.sin(ph) * 1.2), rock = Math.round(Math.sin(ph * 0.8 + 1) * 0.6);
+    const sink = u.alive ? 0 : Math.min(1, u.stateT / 2.3), drop = sink * 52;
+    const dx = px + f.dx + rock, dy = py + f.dy + bob + drop;
+    // water ring and wake, under the hull
+    ctx.fillStyle = 'rgba(210,235,255,0.13)'; ctx.beginPath(); ctx.ellipse(px, py + 2, f.w * 0.36, 5, 0, 0, 6.283); ctx.fill();
+    if (moving) {
+      const vx = u.dir === 'E' ? 1 : u.dir === 'W' ? -1 : 0, vy = u.dir === 'S' ? 1 : u.dir === 'N' ? -1 : 0;
+      for (let i = 1; i <= 7; i++) {
+        const a = 0.42 * (1 - i / 8), spread = i * 1.3, bx = px - vx * (f.w * 0.3 + i * 5), by = py + 1 - vy * (10 + i * 4);
+        ctx.fillStyle = `rgba(240,250,255,${a})`;
+        if (vx) { ctx.fillRect(Math.round(bx), Math.round(by - spread), 4, 1); ctx.fillRect(Math.round(bx), Math.round(by + spread), 4, 1); }
+        else { ctx.fillRect(Math.round(bx - spread), Math.round(by), 1, 4); ctx.fillRect(Math.round(bx + spread), Math.round(by), 1, 4); }
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(px + vx * f.w * 0.36 - 2, py + 1 + vy * 8, 5, 2);
+    }
+    if (sink > 0) { const src = Math.max(1, f.h - 4 - Math.round(drop)); ctx.drawImage(f.img, 0, 0, f.w, Math.min(f.h, Math.max(1, Math.round(-f.dy + 3 - drop))), dx, dy, f.w, Math.min(f.h, Math.max(1, Math.round(-f.dy + 3 - drop)))); void src; if (Math.random() < 0.3) this.fx.emit({ t: 'splash', x: ix + (Math.random() - 0.5) * 2, y: iy }); }
+    else ctx.drawImage(f.img, dx, dy);
+    if (u.hurtT > 0 && sink === 0) { ctx.globalAlpha = Math.min(0.6, u.hurtT * 4); ctx.drawImage(flashOf(f.img), dx, dy); ctx.globalAlpha = 1; }
+    if (u.alive && u.hp < u.maxHp * 0.98 && this.cam.zoom >= 1) { const w = 26; ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(px - w / 2 - 1, py + 7, w + 2, 4); ctx.fillStyle = u.hp > u.maxHp * 0.5 ? '#5ad25a' : u.hp > u.maxHp * 0.25 ? '#e0c030' : '#d83a3a'; ctx.fillRect(px - w / 2, py + 8, Math.max(1, (w * u.hp) / u.maxHp), 2); }
+    if (this.selected && this.selected.kind === 'unit' && this.selected.id === u.id) { ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 0.55 + 0.35 * Math.sin(t * 6); ctx.beginPath(); ctx.ellipse(px, py + 2, f.w * 0.4, 7, 0, 0, 6.283); ctx.stroke(); ctx.globalAlpha = 1; }
+    // a fishing crew's splashes and a rower's foam are particles: nothing more to draw here
+  }
+
   private drawBuilding(b: Building): void {
     const { ctx, sim } = this;
     const d = b.def, size = bSize(b.type);
@@ -250,6 +280,7 @@ export class Renderer {
       const ch = CHIMNEY[b.type];
       if (ch && city && city.stock.food > 0 && this.cam.zoom >= 1 && Math.random() < 0.025) this.fx.emit({ t: 'smoke', x: (b.x * TILE + d.w * TILE * ch[0]) / TILE, y: (base - ch[1]) / TILE + 0.3 });
       if (b.type === 'smith') { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,${120 + Math.floor(Math.sin(this.time * 9) * 30)},40,0.5)`; ctx.fillRect(b.x * TILE + 18, base - 24, 14, 12); ctx.globalCompositeOperation = 'source-over'; if (Math.random() < 0.05) this.fx.emit({ t: 'spark', x: (b.x * TILE + 26) / TILE, y: (base - 14) / TILE }); }
+      if (b.type === 'shipyard' && b.cd > 0 && Math.random() < 0.06) this.fx.emit({ t: 'spark', x: (b.x * TILE + 36 + Math.random() * 60) / TILE, y: (base - 46) / TILE });
       if (b.type === 'windmill') this.windmill(b.x * TILE + d.w * 16, base - 6 - 42);
       if (b.type === 'campfire') this.flame(b.x * TILE + 16, base - 8);
     }
@@ -360,6 +391,16 @@ export class Renderer {
         else if (b.type === 'smith') glow(cx - 6, base - 18, 48, 0.9);
         else if (b.type === 'hall' || b.type === 'temple') { glow(cx, base - 22, 70, 0.55); glow(cx, base + 4, 40, 0.5); }
         else if (b.type === 'tower') glow(cx, base - 40, 38, 0.6);
+        else if (b.type === 'lighthouse') {
+          glow(cx, base - 118, 58, 0.95);
+          const ang = this.time * 0.7;
+          for (let s = 0; s < 2; s++) {
+            ctx.save(); ctx.translate(cx, base - 118); ctx.rotate(ang + s * Math.PI);
+            const g = ctx.createLinearGradient(0, 0, 300, 0); g.addColorStop(0, 'rgba(255,240,170,0.55)'); g.addColorStop(1, 'rgba(255,240,170,0)');
+            ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(300, -20); ctx.lineTo(300, 20); ctx.lineTo(0, 3); ctx.closePath(); ctx.fill(); ctx.restore();
+          }
+        }
+        else if (b.type === 'dock') { glow(cx + d.w * 14, base - 26, 36, 0.8); }
         else if (b.type !== 'farm' && b.type !== 'well' && b.type !== 'lumber') glow(cx, base - 18, 44, 0.55);
       }
       for (const u of sim.units) { if (u.burning > 0 || (u.look?.weapon === 'torch')) glow(u.x * TILE, u.y * TILE - 12, 26, 0.9); }

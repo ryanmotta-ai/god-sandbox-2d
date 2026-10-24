@@ -4,13 +4,14 @@ import type { City } from './city';
 import type { Race } from '../gfx/humanoid';
 import { realmName } from './names';
 import { buildEngines } from './siege';
+import { landId, orderInvasion, recallInvasions } from './navy';
 
 export type Trait = 'warlike' | 'peaceful' | 'greedy' | 'diplomat' | 'tyrant' | 'zealot';
 export const TRAIT_NAMES: Record<Trait, string> = { warlike: 'Belicoso', peaceful: 'Pacífico', greedy: 'Ganancioso', diplomat: 'Diplomata', tyrant: 'Tirano', zealot: 'Fanático' };
 
 const COLORS = ['#c0392b', '#2e86de', '#27ae60', '#f1c40f', '#8e44ad', '#e67e22', '#16a085', '#d35400', '#e84393', '#5f6a6a', '#0abde3', '#b8e994', '#ff6b81', '#7f8fa6', '#a3cb38', '#f8a5c2', '#3c40c6', '#cd6133'];
 
-export interface Army { target: number; phase: 'rally' | 'assault'; rx: number; ry: number; since: number }
+export interface Army { target: number; phase: 'rally' | 'assault' | 'sea'; rx: number; ry: number; since: number; /** Crosses water: ships carry it, and only those landed fight. */ sea?: boolean }
 
 export class Kingdom {
   cities: number[] = [];
@@ -25,6 +26,8 @@ export class Kingdom {
   t = 0;
   losses = 0;
   engineT = 0;
+  /** No overseas campaign before this time (no ships, or the last one failed). */
+  seaT = 0;
   constructor(public id: number, public name: string, public race: Race, public color: string, public trait: Trait, public founded: number) {}
 }
 
@@ -81,6 +84,7 @@ export function makePeace(sim: Sim, a: Kingdom, b: Kingdom, truce = 100): void {
   if (a.army && sim.cities.get(a.army.target)?.kingdomId === b.id) a.army = null;
   if (b.army && sim.cities.get(b.army.target)?.kingdomId === a.id) b.army = null;
   for (const u of sim.units) if ((u.kingdomId === a.id || u.kingdomId === b.id) && (u.mode === 'march' || u.mode === 'siege') && !(sim.kingdoms.get(u.kingdomId)?.wars.size)) { u.mode = 'wander'; u.target = 0; u.thinkT = 0; }
+  for (const k of [a, b]) if (!k.wars.size) recallInvasions(sim, k.id);
   sim.note(`${a.name} e ${b.name} fizeram as pazes.`, 'peace');
 }
 
@@ -178,25 +182,44 @@ function acceptance(sim: Sim, a: Kingdom, b: Kingdom): number {
   return p;
 }
 
-/** Muster, march in formation, assault. Armies are just soldiers with orders: the battle is ordinary combat. */
+/** Muster, march in formation, assault. Armies are just soldiers with orders: the battle is ordinary combat. Across water they sail first. */
 function campaign(sim: Sim, k: Kingdom): void {
-  if (!k.wars.size) { k.army = null; return; }
-  const sol = soldiersOf(sim, k).filter(u => u.hp > u.maxHp * 0.3 && u.cityId > 0);
-  if (sol.length < 3) { k.army = null; for (const u of sol) if (u.mode === 'march' || u.mode === 'siege') { u.mode = 'wander'; u.thinkT = 0; } return; }
+  if (!k.wars.size) { k.army = null; strand(sim, k); return; }
+  const all = soldiersOf(sim, k).filter(u => u.hp > u.maxHp * 0.3 && u.cityId > 0);
+  const cap = sim.cities.get(k.capital);
+  if (!cap) { k.army = null; return; }
   let a = k.army;
   const tcity = a ? sim.cities.get(a.target) : null;
   if (!a || !tcity || !k.wars.has(tcity.kingdomId)) {
-    // pick the enemy town nearest to our capital
-    const cap = sim.cities.get(k.capital);
+    if (all.length < 3) { k.army = null; for (const u of all) if (u.mode === 'march' || u.mode === 'siege') { u.mode = 'wander'; u.thinkT = 0; } return; }
+    // pick the enemy town nearest to our capital; a town across the water costs extra and needs ships
+    const capLand = landId(sim, cap.x, cap.y);
     let best: City | null = null, bd = Infinity;
-    for (const eid of k.wars) { const ek = sim.kingdoms.get(eid); if (!ek) continue; for (const cid of ek.cities) { const c = sim.cities.get(cid); if (c && cap) { const d = dist(c, cap); if (d < bd) { bd = d; best = c; } } } }
-    if (!best || !cap) { k.army = null; return; }
+    for (const eid of k.wars) { const ek = sim.kingdoms.get(eid); if (!ek) continue; for (const cid of ek.cities) { const c = sim.cities.get(cid); if (!c) continue; const over = landId(sim, c.x, c.y) !== capLand; if (over && sim.time < k.seaT) continue; const d = dist(c, cap) + (over ? 60 : 0); if (d < bd) { bd = d; best = c; } } }
+    if (!best) { k.army = null; return; }
+    if (landId(sim, best.x, best.y) !== capLand) {
+      const land = orderInvasion(sim, k.id, best);
+      if (!land) { k.seaT = sim.time + 40; k.army = null; return; }
+      k.army = { target: best.id, phase: 'sea', rx: land.x + 0.5, ry: land.y + 0.5, since: sim.time, sea: true };
+      sim.note(`${k.name} embarca um exército rumo a ${best.name}.`, 'war');
+      return;
+    }
     const dx = cap.x - best.x, dy = cap.y - best.y, l = Math.hypot(dx, dy) || 1;
     const stage = Math.min(l, 16);
     a = k.army = { target: best.id, phase: 'rally', rx: best.x + (dx / l) * stage, ry: best.y + (dy / l) * stage, since: sim.time };
     sim.note(`${k.name} reúne um exército contra ${best.name}.`, 'war');
   }
   const tgt = sim.cities.get(a.target)!;
+  let sol = all;
+  if (a.sea) { // only those already ashore by the target belong to the assault; the rest guard home
+    const tl = landId(sim, tgt.x, tgt.y);
+    sol = all.filter(u => !u.inShip && landId(sim, u.x, u.y) === tl);
+    if (a.phase === 'sea') {
+      if (sol.length >= 2) { a.phase = 'assault'; sim.note(`O exército de ${k.name} desembarcou perto de ${tgt.name}!`, 'war'); }
+      else { if (sim.time - a.since > 220) { k.army = null; k.seaT = sim.time + 60; } return; }
+    }
+    if (sol.length < 2) { k.army = null; k.seaT = sim.time + 60; return; }
+  } else if (sol.length < 3) { k.army = null; for (const u of sol) if (u.mode === 'march' || u.mode === 'siege') { u.mode = 'wander'; u.thinkT = 0; } return; }
   const dxr = tgt.x - a.rx, dyr = tgt.y - a.ry, lr = Math.hypot(dxr, dyr) || 1, fx = dxr / lr, fy = dyr / lr;
   const sx = -fy, sy = fx; // sideways
   const COLS = Math.max(4, Math.ceil(Math.sqrt(sol.length * 1.5)));
@@ -211,6 +234,15 @@ function campaign(sim: Sim, k: Kingdom): void {
       u.mode = 'siege'; u.goalX = tgt.x + sx * col * 1.1 - fx * (row * 1.2 - 3); u.goalY = tgt.y + sy * col * 1.1 - fy * (row * 1.2 - 3);
     }
   });
-  buildEngines(sim, k, sol.length);
+  if (!a.sea) buildEngines(sim, k, sol.length);
   if (a.phase === 'rally' && (arrived >= sol.length * 0.7 || sim.time - a.since > 60)) { a.phase = 'assault'; sim.note(`O exército de ${k.name} avança sobre ${tgt.name}!`, 'war'); }
+}
+
+/** After a war overseas ends, whoever is left on a foreign shore becomes a drifter and will join or found a town there. */
+function strand(sim: Sim, k: Kingdom): void {
+  for (const u of soldiersOf(sim, k)) {
+    if (u.inShip || u.cityId <= 0) continue;
+    const c = sim.cities.get(u.cityId);
+    if (c && landId(sim, u.x, u.y) !== landId(sim, c.x, c.y) && u.mode !== 'board') { u.cityId = 0; u.mode = 'wander'; u.thinkT = 0; }
+  }
 }

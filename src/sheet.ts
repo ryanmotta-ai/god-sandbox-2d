@@ -8,6 +8,8 @@ import { wallSprite } from './gfx/walls';
 import { BDEFS, type BType } from './sim/buildings';
 import { engineFrame, E_FRAMES } from './gfx/engines';
 import { ANIM_FRAMES, type Anim } from './gfx/rig';
+import { shipFrame, SHIP_FRAMES } from './gfx/ships';
+import type { ShipKind } from './sim/species';
 
 /** Dev page: ?mode=roster | ?mode=anim&race=human&role=soldier&anim=walk */
 const q = new URLSearchParams(location.search);
@@ -17,11 +19,14 @@ function add(c: HTMLCanvasElement, parent: HTMLElement): void { c.style.width = 
 function row(title: string): HTMLElement { const h = document.createElement('h4'); h.textContent = title; root.appendChild(h); const d = document.createElement('div'); d.className = 'row'; root.appendChild(d); return d; }
 
 const mode = q.get('mode') ?? 'roster';
-if (mode === 'engines') {
+if (mode === 'ships') {
+  const furled = q.get('furled') === '1', races = (q.get('races') ?? 'human,elf,dwarf,orc').split(',') as Race[];
+  for (const race of races) for (const k of ['canoe', 'fishboat', 'cog', 'longship', 'galley', 'galleon'] as ShipKind[]) for (const dir of ['E', 'S', 'N'] as const) { const d = row(`${race} ${k} ${dir}`); for (let f = 0; f < (dir === 'E' ? SHIP_FRAMES : 2); f++) add(shipFrame(k, race, dir, f, '#2e86de', furled).img, d); }
+} else if (mode === 'engines') {
   for (const k of ['ram', 'catapult'] as const) for (const a of ['walk', 'attack'] as const) { const d = row(`${k} ${a}`); for (let f = 0; f < E_FRAMES[a]; f++) add(engineFrame(k, a, false, f), d); }
 } else if (mode === 'buildings') {
   const stage = +(q.get('stage') ?? 3), dmg = +(q.get('dmg') ?? 0);
-  for (const race of ['human', 'elf', 'dwarf', 'orc'] as Race[]) { const d = row(race); for (const t of Object.keys(BDEFS) as BType[]) if (t !== 'wall' && t !== 'gate') add(buildingSprite(t, race, stage, dmg), d); for (const m of [0, 2, 10, 8, 1, 5, 15, 3, 6]) add(wallSprite(race, m, false, 3, dmg), d); add(wallSprite(race, 10, true, 3, dmg), d); add(wallSprite(race, 5, true, 3, dmg), d); }
+  for (const race of ['human', 'elf', 'dwarf', 'orc'] as Race[]) { const d = row(race); const only = q.get('only')?.split(','); for (const t of Object.keys(BDEFS) as BType[]) if (t !== 'wall' && t !== 'gate' && (!only || only.includes(t))) add(buildingSprite(t, race, stage, dmg), d); if (!only) { for (const m of [0, 2, 10, 8, 1, 5, 15, 3, 6]) add(wallSprite(race, m, false, 3, dmg), d); add(wallSprite(race, 10, true, 3, dmg), d); add(wallSprite(race, 5, true, 3, dmg), d); } }
 } else if (mode === 'animals') {
   const kinds: AnimalKind[] = ['sheep', 'cow', 'chicken', 'rabbit', 'deer', 'boar', 'wolf', 'bear', 'snake', 'crab', 'bird'];
   const anims = (q.get('anims') ?? 'walk,run,attack').split(',') as AAnim[];

@@ -5,6 +5,8 @@ import { plantSprite } from '../gfx/flora';
 import { humanoidFrame } from '../gfx/humanoid';
 import { makeLook } from '../gfx/looks';
 import { animalFrame, type AnimalKind } from '../gfx/animals';
+import { shipFrame } from '../gfx/ships';
+import type { ShipKind } from '../sim/species';
 import { SPECIES, type Species } from '../sim/species';
 import type { Race } from '../gfx/humanoid';
 
@@ -65,7 +67,8 @@ export function iconFor(key: string): HTMLCanvasElement {
   else if (/^o\d+$/.test(key)) c = fit(plantSprite(+key.slice(1), 1, 255, 1, 0, 0));
   else if (key.startsWith('u_')) {
     const sp = key.slice(2) as Species;
-    if (SPECIES[sp].civ) c = fit(humanoidFrame(makeLook(sp as Race, 'soldier', 3, '#c0392b'), 'idle', 'S', 0));
+    if (SPECIES[sp].ship) c = fit(shipFrame(sp as ShipKind, 'human', 'E', 0, '#2e86de', true).img);
+    else if (SPECIES[sp].civ) c = fit(humanoidFrame(makeLook(sp as Race, 'soldier', 3, '#c0392b'), 'idle', 'S', 0));
     else if (sp === 'zombie') c = fit(humanoidFrame({ ...makeLook('human', 'peasant', 3), skin: '#7a9a5a', hairStyle: 2 }, 'idle', 'S', 0));
     else c = fit(animalFrame(sp as AnimalKind, sp === 'dragon' ? 'fly' : 'idle', false, 0));
   } else c = glyph(key);

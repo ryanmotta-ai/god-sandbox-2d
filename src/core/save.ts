@@ -6,6 +6,7 @@ import { Building } from '../sim/buildings';
 import { City } from '../sim/city';
 import { Kingdom } from '../sim/kingdom';
 import { rng } from './rng';
+import { initPort } from '../sim/navy';
 import type { Species } from '../sim/species';
 import type { Race } from '../gfx/humanoid';
 
@@ -28,7 +29,7 @@ export function snapshot(sim: Sim): Snapshot {
     version: SAVE_VERSION, seed: w.seed, w: w.w, h: w.h,
     world: { terrain: b64(w.terrain), height: b64(w.height), moist: b64(w.moist), temp: b64(w.temp), obj: b64(w.obj), objAge: b64(w.objAge), zone: b64(w.zone), bld: b64(w.bld) },
     sim: { time: sim.time, tickN: sim.tickN, nextId: sim.nextId, rng: sim.rng.state, grng: rng.state, weather: sim.weather, weatherT: sim.weatherT, stats: sim.stats, log: sim.log.slice(-40) },
-    units: sim.units.filter(u => u.alive).map(u => [u.id, u.species, +u.x.toFixed(3), +u.y.toFixed(3), u.dir, u.hp, u.maxHp, u.age, u.female, u.name, u.hunger, u.cityId, u.kingdomId, u.role, u.variant, u.carry, u.traits, u.kills, u.mode === 'march' || u.mode === 'siege' || u.mode === 'settle' ? u.mode : 'wander', u.goalX, u.goalY, u.job, u.east]),
+    units: sim.units.filter(u => u.alive).map(u => [u.id, u.species, +u.x.toFixed(3), +u.y.toFixed(3), u.dir, u.hp, u.maxHp, u.age, u.female, u.name, u.hunger, u.cityId, u.kingdomId, u.role, u.variant, u.carry, u.traits, u.kills, u.def.ship ? 'ship' : u.mode === 'march' || u.mode === 'siege' || u.mode === 'settle' || u.mode === 'aboard' ? u.mode : 'wander', u.goalX, u.goalY, u.job, u.east, u.inShip, u.mission, u.phase, u.dock, u.dest, u.hold, u.legT]),
     buildings: [...sim.buildings.values()].map(b => [b.id, b.type, b.cityId, b.x, b.y, b.race, b.progress, b.hp, b.crop, b.burning]),
     cities: [...sim.cities.values()].map(c => [c.id, c.name, c.race, c.kingdomId, c.x, c.y, c.stock, c.loyalty, c.radius, c.hallId, c.buildings, c.founded, c.wallsPlanned, c.wallQueue]),
     kingdoms: [...sim.kingdoms.values()].map(k => [k.id, k.name, k.race, k.color, k.trait, k.founded, k.cities, k.king, k.capital, [...k.relations], [...k.wars], [...k.truce], [...k.warSince], [...k.allies]]),
@@ -59,12 +60,14 @@ export function restore(s: Snapshot): Sim {
     const b = new Building(r[0], r[1], r[2], r[3], r[4], r[5] as Race);
     b.progress = r[6]; b.hp = r[7]; b.crop = r[8]; b.burning = r[9];
     sim.buildings.set(b.id, b);
+    if (b.def.water) initPort(sim, b);
     if (b.type === 'gate') for (let j = 0; j < b.def.h; j++) for (let i = 0; i < b.def.w; i++) world.open[(b.y + j) * world.w + b.x + i] = 1;
   }
   for (const r of s.units as any[]) {
     const u = new Unit(r[0], r[1] as Species, r[2], r[3]);
     u.dir = r[4]; u.hp = r[5]; u.maxHp = r[6]; u.age = r[7]; u.female = r[8]; u.name = r[9]; u.hunger = r[10]; u.cityId = r[11]; u.kingdomId = r[12]; u.role = r[13]; u.variant = r[14];
     u.carry = r[15]; u.traits = r[16]; u.kills = r[17]; u.mode = r[18]; u.goalX = r[19]; u.goalY = r[20]; u.job = r[21]; u.east = r[22];
+    u.inShip = r[23] ?? 0; u.mission = r[24] ?? 'moor'; u.phase = r[25] ?? 0; u.dock = r[26] ?? 0; u.dest = r[27] ?? 0; u.hold = r[28] ?? null; u.legT = r[29] ?? 0;
     sim.units.push(u); sim.byId.set(u.id, u);
     if (u.def.civ) sim.refreshLook(u);
   }

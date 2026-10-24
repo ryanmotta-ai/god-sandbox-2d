@@ -48,6 +48,11 @@ Menu: novo mundo (5 formas, tamanho, água/montanhas/florestas/clima, povos, sem
   predadores e presas, fogo que se espalha, lava que esfria, árvores que crescem e semeiam.
 * **Civilização** — grupos fundam vilas; o planejador loteia o terreno, pavimenta ruas e constrói; território com
   borda; colonos fundam novas vilas; reis com temperamento; lealdade que pode virar revolta.
+* **Mar** — vilas costeiras constroem rancho de pesca, cais (sobre o raso), estaleiro e farol (com feixe à noite).
+  Os navios são unidades de verdade, com tripulação a bordo: canoa e barco de pesca (a pesca esgota e repõe o
+  cardume), mercante (**troca física** de excedente por falta entre portos, sem moeda; melhora a relação entre
+  reinos e leva colonos para ilhas vazias), barco de guerra, galé (aríete e arqueiros) e galeão (lança pedras).
+  Frotas patrulham, caçam navios, atacam cais e **levam o exército por mar**: embarca, desembarca na praia e cerca.
 * **Guerra** — diplomacia por relação e temperamento, exércitos que se reúnem, marcham em formação e cercam;
   arqueiros com flechas em arco, torres que atiram, aríetes que derrubam portas, catapultas que lançam pedras;
   conquista troca a cor da vila. **Um modelo só:** a batalha é o combate físico, sem planilha escondida.
@@ -68,11 +73,11 @@ tools       sondas de balanceamento, capturas de tela, folhas de sprites
 ```
 
 Ferramentas úteis: `npx tsx tools/probe2.ts 1200 7 192` (série temporal de um mundo de 4 povos),
-`?mode=roster|anim|flora|animals|buildings|engines` em `/sheet.html` (folha de sprites),
+`?mode=roster|anim|flora|animals|buildings|engines|ships` em `/sheet.html` (folha de sprites),
 `window.aethoria.debugBattle()` no console.
 
 ## Ainda não
 
-Navios e portos, toque/celular.
+Toque/celular.
 
 O jogo antigo (Aetherio) não está mais na árvore, mas segue no histórico: `git checkout 647ec9e` (último commit do jogo antigo).

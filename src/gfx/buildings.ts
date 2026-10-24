@@ -3,6 +3,7 @@ import { ramp, hex, pack } from './color';
 import { hash2, Rng } from '../core/rng';
 import { BDEFS, type BType } from '../sim/buildings';
 import type { Race } from './humanoid';
+import { paintPort } from './port';
 
 /**
  * Procedural buildings, painted facade-first in a 3/4 view: front wall, roof band above it, a sliver of
@@ -27,7 +28,7 @@ const STYLES: Record<Race, Style> = {
 };
 
 const OX = 8; // left margin in the sprite
-export const bSize = (type: BType): { w: number; h: number } => { const d = BDEFS[type]; return { w: d.w * 32 + 16, h: d.h * 32 + 72 }; };
+export const bSize = (type: BType): { w: number; h: number } => { const d = BDEFS[type]; return { w: d.w * 32 + 16, h: d.h * 32 + 72 + (type === 'lighthouse' ? 44 : 0) }; };
 
 /* ---- painter verbs (local coords: x from footprint left, y up from footprint bottom) -------------------- */
 class Canvas {
@@ -139,6 +140,8 @@ function stoneBase(c: Canvas, x: number, y: number, w: number, h: number): void 
 
 /* ---- the buildings --------------------------------------------------------------------------------------- */
 function paint(type: BType, race: Race): Pix {
+  const port = paintPort(type, race, bSize(type).h);
+  if (port) return port;
   const c = new Canvas(type), st = STYLES[race], d = BDEFS[type], W = d.w * 32, rng = new Rng(7 + type.length);
   const arch = race === 'elf';
   switch (type) {
@@ -286,7 +289,7 @@ function paint(type: BType, race: Race): Pix {
 
 /** Hide the part of a finished sprite above `reveal`, draw scaffolding and mud around it. */
 function underConstruction(base: Pix, type: BType, stage: number): Pix {
-  const out = new Pix(base.w, base.h), d = BDEFS[type], H = d.h * 32 + 72;
+  const out = new Pix(base.w, base.h), d = BDEFS[type], H = base.h;
   const bodyTop = (() => { for (let y = 0; y < base.h; y++) for (let x = 0; x < base.w; x++) if (base.data[y * base.w + x] >>> 24) return y; return 0; })();
   const full = base.h - 8 - bodyTop;
   const reveal = stage === 0 ? 0 : stage === 1 ? full * 0.45 : full * 0.82;

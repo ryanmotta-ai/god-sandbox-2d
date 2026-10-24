@@ -5,6 +5,10 @@ const TCOST = Float32Array.from(TERRAIN.map(t => (t.walk ? 1 / t.speed : 0)));
 const TWATER = Uint8Array.from(TERRAIN.map(t => (t.water ? 1 : 0)));
 const OSOLID = Uint8Array.from(OBJECTS.map(o => (o.solid ? 1 : 0)));
 
+const TSEA = Float32Array.from(TERRAIN.map(t => (t.water ? (t.walk ? 1.7 : 1) : 0)));
+/** Cost of a ship entering a tile: deep water is cheap, shallows are slow, anything built on is closed. */
+export const seaCost = (w: World, i: number): number => (w.bld[i] !== 0 ? 0 : TSEA[w.terrain[i]]);
+
 /** Cost of entering a tile, or 0 if blocked. Trees are passable (walked among); boulders, ore and buildings are not. */
 export function stepCost(w: World, i: number, canWade = true): number {
   const c = TCOST[w.terrain[i]];
@@ -13,15 +17,16 @@ export function stepCost(w: World, i: number, canWade = true): number {
 }
 
 /** Straight run between two tiles if every tile on it is open — covers most wandering without a search. */
-function straightPath(w: World, sx: number, sy: number, gx: number, gy: number): Int32Array | null {
+function straightPath(w: World, sx: number, sy: number, gx: number, gy: number, sea: boolean): Int32Array | null {
+  const cost = sea ? seaCost : stepCost;
   const dx = gx - sx, dy = gy - sy, n = Math.max(Math.abs(dx), Math.abs(dy));
   if (n === 0 || n > 28) return null;
   const out = new Int32Array(n);
   let px = sx, py = sy;
   for (let k = 1; k <= n; k++) {
     const x = sx + Math.round((dx * k) / n), y = sy + Math.round((dy * k) / n);
-    if (stepCost(w, y * w.w + x) === 0) return null;
-    if (x !== px && y !== py && (stepCost(w, py * w.w + x) === 0 || stepCost(w, y * w.w + px) === 0)) return null; // no corner cutting
+    if (cost(w, y * w.w + x) === 0) return null;
+    if (x !== px && y !== py && (cost(w, py * w.w + x) === 0 || cost(w, y * w.w + px) === 0)) return null; // no corner cutting
     out[k - 1] = y * w.w + x; px = x; py = y;
   }
   return out;
@@ -40,11 +45,11 @@ function ensure(n: number): void {
  * A* over the tile grid (8-way, no corner cutting). Returns tile indices from the first step to the goal,
  * or null. `maxNodes` bounds the work; if the goal is blocked the search aims at the closest reachable tile.
  */
-export function findPath(w: World, sx: number, sy: number, gx: number, gy: number, maxNodes = 1800): Int32Array | null {
-  const W = w.w, H = w.h;
+export function findPath(w: World, sx: number, sy: number, gx: number, gy: number, maxNodes = 1800, sea = false): Int32Array | null {
+  const W = w.w, H = w.h, cost = sea ? seaCost : stepCost;
   if (sx < 0 || sy < 0 || sx >= W || sy >= H) return null;
   gx = Math.max(0, Math.min(W - 1, gx)); gy = Math.max(0, Math.min(H - 1, gy));
-  const direct = straightPath(w, sx, sy, gx, gy);
+  const direct = straightPath(w, sx, sy, gx, gy, sea);
   if (direct) return direct;
   ensure(W * H);
   stamp++;
@@ -71,14 +76,14 @@ export function findPath(w: World, sx: number, sy: number, gx: number, gy: numbe
     const h0 = hfn(cur);
     if (h0 < bestH) { bestH = h0; best = cur; }
     const cx = cur % W, cy = (cur / W) | 0;
-    const cN = cy > 0 ? stepCost(w, cur - W) : 0, cS = cy < H - 1 ? stepCost(w, cur + W) : 0, cW = cx > 0 ? stepCost(w, cur - 1) : 0, cE = cx < W - 1 ? stepCost(w, cur + 1) : 0;
+    const cN = cy > 0 ? cost(w, cur - W) : 0, cS = cy < H - 1 ? cost(w, cur + W) : 0, cW = cx > 0 ? cost(w, cur - 1) : 0, cE = cx < W - 1 ? cost(w, cur + 1) : 0;
     for (let d = 0; d < 8; d++) {
       const dx = DX[d], dy = DY[d], nx = cx + dx, ny = cy + dy;
       if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
       const ni = ny * W + nx;
       let c: number;
       if (d < 4) c = d === 0 ? cE : d === 1 ? cW : d === 2 ? cS : cN;
-      else { if (!(dx > 0 ? cE : cW) || !(dy > 0 ? cS : cN)) continue; c = stepCost(w, ni); }
+      else { if (!(dx > 0 ? cE : cW) || !(dy > 0 ? cS : cN)) continue; c = cost(w, ni); }
       if (c === 0) { if (ni !== goal) continue; c = 4; }
       const ng = G[cur] + c * (d >= 4 ? 1.414 : 1);
       if (STAMP[ni] === stamp && ng >= G[ni]) continue;

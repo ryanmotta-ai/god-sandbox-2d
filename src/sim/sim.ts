@@ -16,6 +16,7 @@ import { updateCities } from './city';
 import { updateKingdoms } from './kingdom';
 import { updateDynamics } from './dynamics';
 import type { Disaster } from './disasters';
+import { initPort } from './navy';
 
 export interface FxEvent { t: 'blood' | 'hit' | 'spark' | 'smoke' | 'fire' | 'dust' | 'heal' | 'curse' | 'boom' | 'splash' | 'arrow' | 'flash' | 'coin' | 'rubble' | 'lightning' | 'meteor' | 'leaf' | 'zzz' | 'heart'; x: number; y: number; a?: number; b?: number; c?: string }
 export interface LogEntry { t: number; text: string; kind: 'info' | 'war' | 'birth' | 'death' | 'disaster' | 'city' | 'peace' }
@@ -111,6 +112,7 @@ export class Sim {
       if (b.def.field) w.setTerrain(x + i, y + j, T.FIELD);
     }
     w.touch(x, y, 3);
+    if (b.def.water) initPort(this, b);
     if (done) { b.progress = 1; b.crop = type === 'farm' ? 0.2 : 0; }
     this.buildings.set(b.id, b);
     const c = this.cities.get(cityId);
@@ -157,7 +159,7 @@ export class Sim {
     for (const c of this.grid) c.length = 0;
     const gw = this.gw;
     for (const u of this.units) {
-      if (u.state === 'dead') continue;
+      if (u.state === 'dead' || u.inShip) continue;
       const cx = Math.min(gw - 1, Math.max(0, (u.x / CELL) | 0)), cy = Math.max(0, (u.y / CELL) | 0);
       const cell = this.grid[cy * gw + cx];
       if (cell) cell.push(u);
