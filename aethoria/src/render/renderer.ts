@@ -14,6 +14,7 @@ import type { Building } from '../sim/buildings';
 import { Particles } from './fx';
 import { frameFor, flashOf, shadowSprite } from './units';
 import { ambient, Weather } from './atmosphere';
+import type { Sound } from '../core/sound';
 
 interface Slot { baked: BakedChunk | null; ver: number; zone: HTMLCanvasElement | null; zoneVer: number }
 interface Item { y: number; k: 0 | 1 | 2 | 3 | 4; a: number; b: number; o?: Unit | Building }
@@ -39,6 +40,7 @@ export class Renderer {
   /** Tile hover / brush preview in tile coords. */
   hover: { x: number; y: number; r: number; shape: 'circle' | 'square' } | null = null;
   lightCanvas: HTMLCanvasElement;
+  sound: Sound | null = null;
 
   constructor(public canvas: HTMLCanvasElement, public sim: Sim, public cam: Camera) {
     this.ctx = canvas.getContext('2d', { alpha: false })!;
@@ -61,7 +63,8 @@ export class Renderer {
     this.resize();
     const { ctx, cam, sim } = this, world = sim.world, t = this.time;
     // drain sim effects into particles
-    for (const e of sim.fx) this.fx.emit(e);
+    const cam0 = this.cam, cxw = cam0.x / TILE, cyw = cam0.y / TILE, reach = Math.max(18, cam0.vw / cam0.zoom / TILE);
+    for (const e of sim.fx) { this.fx.emit(e); if (this.sound) { const d = Math.hypot(e.x - cxw, e.y - cyw); this.sound.fx(e, Math.max(0, 1 - d / (reach * 1.2)) * Math.min(1, 0.45 + cam0.zoom * 0.2)); } }
     sim.fx.length = 0;
     this.fx.update(dt);
     const z = cam.zoom, shake = this.fx.shake;
@@ -100,6 +103,7 @@ export class Renderer {
     }
 
     this.drawWorldObjects(left, top, vw, vh, alpha);
+    this.drawDisasters();
     this.fx.draw(ctx);
     this.drawArrows(alpha);
     this.drawLighting(left, top, vw, vh);
@@ -144,10 +148,11 @@ export class Renderer {
     const tx0 = Math.max(0, Math.floor(left / TILE) - 2), tx1 = Math.min(world.w - 1, Math.floor((left + vw) / TILE) + 2);
     const ty0 = Math.max(0, Math.floor(top / TILE) - 1), ty1 = Math.min(world.h - 1, Math.floor((top + vh) / TILE) + 4);
     const season = sim.season as Season;
+    const lod = this.cam.zoom >= 1 ? 0 : this.cam.zoom >= 0.5 ? 1 : 2;
     for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
       const i = ty * world.w + tx, terr = world.terrain[i], o = world.obj[i];
-      if (terr === T.MOUNTAIN || terr === T.PEAK) items.push({ y: ty * TILE + TILE - 2, k: 1, a: tx, b: ty });
-      if (o !== O.NONE) items.push({ y: ty * TILE + TILE - 6 + (hash2(tx, ty, 62) - 0.5) * 8 + 1, k: 0, a: tx, b: ty });
+      if ((terr === T.MOUNTAIN || terr === T.PEAK) && (lod < 2 || ((tx + ty) & 1) === 0)) items.push({ y: ty * TILE + TILE - 2, k: 1, a: tx, b: ty });
+      if (o !== O.NONE && !(lod > 0 && MINOR.has(o)) && !(lod > 1 && world.objAge[i] < 170)) items.push({ y: ty * TILE + TILE - 6 + (hash2(tx, ty, 62) - 0.5) * 8 + 1, k: 0, a: tx, b: ty });
     }
     const pad = 3;
     for (const [, b] of sim.buildings) {
@@ -157,6 +162,7 @@ export class Renderer {
     }
     const L = this.cam.zoom >= 1 ? 1 : 0;
     for (const u of sim.units) {
+      if (lod === 2) { if (u.alive && u.x >= tx0 && u.x <= tx1 && u.y >= ty0 && u.y <= ty1 && (u.def.civ || u.species === 'dragon')) { ctx.fillStyle = sim.kingdoms.get(u.kingdomId)?.color ?? (u.species === 'dragon' ? '#e03030' : '#ddd'); ctx.fillRect(Math.round(u.x * TILE) - 2, Math.round(u.y * TILE) - 6, u.species === 'dragon' ? 12 : 5, u.species === 'dragon' ? 8 : 6); } continue; }
       if (u.x < tx0 - 2 || u.x > tx1 + 2 || u.y < ty0 - 3 || u.y > ty1 + 3) continue;
       const ix = u.px + (u.x - u.px) * alpha, iy = u.py + (u.y - u.py) * alpha;
       items.push({ y: iy * TILE + (u.def.fly && u.species !== 'dragon' ? 40 : 0) + u.id * 1e-6, k: 3, a: ix, b: iy, o: u });
@@ -165,8 +171,8 @@ export class Renderer {
     // ground-level things first: crops and shadows (so nothing is shadowed by a neighbour's sprite)
     for (const it of items) {
       if (it.k === 2) { const b = it.o as Building; if (b.type === 'farm' && b.done) { ctx.drawImage(cropSprite(b.crop < 0.12 ? 0 : b.crop < 0.45 ? 1 : b.crop < 0.78 ? 2 : 3), b.x * TILE - 8, b.y * TILE - 30); } }
-      else if (it.k === 3) { const u = it.o as Unit; const s = shadowSprite(Math.round(frameSize(u))); if (u.state !== 'dead' || u.stateT < 1) ctx.drawImage(s, Math.round(it.a * TILE - s.width / 2), Math.round(it.b * TILE - s.height / 2 + 1)); }
-      else if (it.k === 0) { const i = it.b * world.w + it.a, o = world.obj[i]; if (o !== O.NONE && OBJ_SHADOW.has(o)) { const r = o === O.JUNGLE_TREE ? 12 : o === O.PINE || o === O.SNOW_PINE ? 8 : 9; const s = shadowSprite(r); ctx.drawImage(s, Math.round(it.a * TILE + TILE / 2 + (hash2(it.a, it.b, 61) - 0.5) * 12 - s.width / 2 + 3), Math.round(it.b * TILE + TILE - 6 + (hash2(it.a, it.b, 62) - 0.5) * 8 - 2)); } }
+      else if (it.k === 3 && lod === 0) { const u = it.o as Unit; const s = shadowSprite(Math.round(frameSize(u))); if (u.state !== 'dead' || u.stateT < 1) ctx.drawImage(s, Math.round(it.a * TILE - s.width / 2), Math.round(it.b * TILE - s.height / 2 + 1)); }
+      else if (it.k === 0 && lod === 0) { const i = it.b * world.w + it.a, o = world.obj[i]; if (o !== O.NONE && OBJ_SHADOW.has(o)) { const r = o === O.JUNGLE_TREE ? 12 : o === O.PINE || o === O.SNOW_PINE ? 8 : 9; const s = shadowSprite(r); ctx.drawImage(s, Math.round(it.a * TILE + TILE / 2 + (hash2(it.a, it.b, 61) - 0.5) * 12 - s.width / 2 + 3), Math.round(it.b * TILE + TILE - 6 + (hash2(it.a, it.b, 62) - 0.5) * 8 - 2)); } }
     }
     for (const it of items) {
       switch (it.k) {
@@ -284,12 +290,47 @@ export class Renderer {
     ctx.restore(); ctx.fillStyle = '#4a3220'; ctx.fillRect(cx - 3, cy - 3, 6, 6);
   }
 
+  /** Tornado funnels, falling meteors and acid clouds: the disasters that are bodies, not just particles. */
+  private drawDisasters(): void {
+    const { ctx, sim } = this, t = this.time;
+    for (const d of sim.disasters) {
+      const px = d.x * TILE, py = d.y * TILE;
+      if (d.type === 'tornado') {
+        ctx.fillStyle = 'rgba(10,12,24,0.3)'; ctx.beginPath(); ctx.ellipse(px, py + 2, 22, 7, 0, 0, 6.283); ctx.fill();
+        for (let k = 0; k < 20; k++) {
+          const y = py - k * 6, half = 5 + k * 1.9, off = Math.sin(t * 7 + k * 0.55) * (2 + k * 0.4);
+          const shade = k % 3 === 0 ? '#6a6a76' : k % 3 === 1 ? '#8a8a96' : '#a8a8b4';
+          ctx.fillStyle = shade; ctx.fillRect(Math.round(px + off - half), Math.round(y), Math.round(half * 2), 6);
+          ctx.fillStyle = 'rgba(40,40,52,0.55)'; const sx = ((t * 40 + k * 17) % (half * 2));
+          ctx.fillRect(Math.round(px + off - half + sx), Math.round(y + 1), 6, 2); ctx.fillRect(Math.round(px + off - half + ((sx + half) % (half * 2))), Math.round(y + 3), 4, 2);
+        }
+        ctx.fillStyle = '#4a4a58'; ctx.fillRect(Math.round(px - 48), Math.round(py - 122), 96, 8); ctx.fillStyle = '#5a5a68'; ctx.fillRect(Math.round(px - 38), Math.round(py - 130), 76, 8);
+        if (Math.random() < 0.5) this.fx.emit({ t: Math.random() < 0.5 ? 'leaf' : 'dust', x: d.x + (Math.random() - 0.5) * 2.5, y: d.y - Math.random() * 2, a: 0.5 });
+      } else if (d.type === 'meteor') {
+        const p = d.t / d.life, ox = 7 * TILE * (1 - p), oy = -15 * TILE * (1 - p), mx = px + ox, my = py + oy;
+        this.fx.emit({ t: 'fire', x: mx / TILE, y: my / TILE + 0.5 }); this.fx.emit({ t: 'smoke', x: mx / TILE, y: my / TILE });
+        ctx.fillStyle = 'rgba(10,12,24,0.35)'; ctx.beginPath(); ctx.ellipse(px, py + 2, 8 + p * 22, 3 + p * 8, 0, 0, 6.283); ctx.fill();
+        ctx.globalCompositeOperation = 'lighter'; const g = ctx.createRadialGradient(mx, my, 1, mx, my, 26); g.addColorStop(0, 'rgba(255,230,160,0.95)'); g.addColorStop(0.4, 'rgba(255,120,30,0.55)'); g.addColorStop(1, 'rgba(255,60,10,0)'); ctx.fillStyle = g; ctx.fillRect(mx - 26, my - 26, 52, 52); ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = '#3a2a22'; ctx.beginPath(); ctx.arc(mx, my, 7, 0, 6.283); ctx.fill(); ctx.fillStyle = '#ff8a2a'; ctx.fillRect(mx - 3, my - 3, 4, 4);
+      } else if (d.type === 'acid') {
+        const r = d.r * TILE;
+        ctx.fillStyle = 'rgba(80,140,40,0.22)'; ctx.beginPath(); ctx.ellipse(px, py, r, r * 0.6, 0, 0, 6.283); ctx.fill();
+        for (let k = 0; k < 7; k++) { const cx = px + Math.sin(k * 2.1 + t * 0.4) * r * 0.6, cy = py - 70 + Math.cos(k * 1.7) * 14; ctx.fillStyle = k % 2 ? 'rgba(70,96,50,0.8)' : 'rgba(96,126,60,0.8)'; ctx.beginPath(); ctx.ellipse(cx, cy, 34, 16, 0, 0, 6.283); ctx.fill(); }
+        ctx.strokeStyle = 'rgba(150,240,70,0.65)'; ctx.lineWidth = 1; ctx.beginPath();
+        for (let k = 0; k < 26; k++) { const x = px + (((k * 53 + t * 40) % 100) / 100 - 0.5) * r * 1.8, y0 = py - 56 + ((t * 120 + k * 29) % 70); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + 7); }
+        ctx.stroke();
+      }
+    }
+  }
+
   private drawArrows(alpha: number): void {
     const { ctx, sim } = this;
     for (const a of sim.arrows) {
       const p = Math.min(1, (a.t + alpha * 0.05) / a.dur), x = (a.x + (a.tx - a.x) * p) * TILE, y = (a.y + (a.ty - a.y) * p) * TILE;
-      const arc = Math.sin(p * Math.PI) * Math.min(26, Math.hypot(a.tx - a.x, a.ty - a.y) * 3.2);
-      const px = (a.x + (a.tx - a.x) * (p - 0.03)) * TILE, py = (a.y + (a.ty - a.y) * (p - 0.03)) * TILE - Math.sin(Math.max(0, p - 0.03) * Math.PI) * Math.min(26, Math.hypot(a.tx - a.x, a.ty - a.y) * 3.2);
+      const lobbed = a.z === 1, maxArc = lobbed ? 70 : 26, arcK = lobbed ? 7 : 3.2;
+      const arc = Math.sin(p * Math.PI) * Math.min(maxArc, Math.hypot(a.tx - a.x, a.ty - a.y) * arcK);
+      const px = (a.x + (a.tx - a.x) * (p - 0.03)) * TILE, py = (a.y + (a.ty - a.y) * (p - 0.03)) * TILE - Math.sin(Math.max(0, p - 0.03) * Math.PI) * Math.min(maxArc, Math.hypot(a.tx - a.x, a.ty - a.y) * arcK);
+      if (lobbed) { ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(Math.round(x) - 3, Math.round(y), 6, 2); ctx.fillStyle = '#6a6870'; ctx.fillRect(Math.round(x) - 3, Math.round(y - arc) - 3, 6, 6); ctx.fillStyle = '#9a98a0'; ctx.fillRect(Math.round(x) - 3, Math.round(y - arc) - 3, 3, 3); continue; }
       ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(Math.round(x), Math.round(y), 2, 1);
       ctx.strokeStyle = '#d8c8a0'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, y - arc); ctx.stroke();
       ctx.fillStyle = '#c8d0dc'; ctx.fillRect(Math.round(x), Math.round(y - arc), 1, 1);
@@ -349,6 +390,7 @@ export class Renderer {
   }
 }
 
+const MINOR = new Set<number>([O.BUSH, O.BERRIES, O.FLOWER_RED, O.FLOWER_YELLOW, O.FLOWER_BLUE, O.REED, O.ROCK, O.MUSHROOM, O.STUMP, O.GRASS_TUFT, O.BONES]);
 const OBJ_SHADOW = new Set<number>([O.OAK, O.PINE, O.BIRCH, O.PALM, O.JUNGLE_TREE, O.ACACIA, O.SNOW_PINE, O.BOULDER, O.ORE_IRON, O.ORE_GOLD, O.ORE_COPPER, O.CACTUS]);
 const frameSize = (u: Unit): number => (u.species === 'dragon' ? 20 : u.species === 'bear' || u.species === 'cow' ? 13 : u.def.civ ? 8 : u.species === 'bird' ? 4 : u.species === 'chicken' || u.species === 'rabbit' || u.species === 'crab' || u.species === 'snake' ? 5 : 9);
 

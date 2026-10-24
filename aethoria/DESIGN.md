@@ -49,3 +49,19 @@ src/sim     espécies, unidades, IA, cidades, reinos, guerra, poderes
 src/ui      HUD estilo WorldBox (abas, pincel, card, minimapa)
 tests       assert puro, tipado, `npm test`
 ```
+
+## Estado (fim da 1ª entrega)
+
+Feito e verificado por teste headless + captura de tela: gerador de mundo, terreno em pixel, flora, montanhas,
+4 raças com rig e 12 animações, 13 animais, dragão, 13 prédios × 4 estilos, simulação completa (fome → trabalho →
+vila → reino → guerra → cerco), engenhos de cerco, torres, desastres, clima, dia/noite, estações, UI WorldBox-like,
+save/load versionado, som sintetizado.
+
+Números medidos (`tools/probe2.ts`, 4 povos, 192², sem GPU): ~1,3 ms por tick; 1200 s de mundo em ~30 s de CPU.
+O pathfinding era 85% do custo; trechos retos sem A*, teto de nós e recuo após falha o levaram a ~10%.
+
+Lições novas desta reescrita (cada uma achada por um teste ou sonda, não por leitura):
+* Um reino sem cidade é apagado no tick seguinte — cenários de teste precisam fundar a cidade, ou a guerra some.
+* Quem pede paz precisa de um aceitador: sem isso o exército em marcha era desfeito por quem estava perdendo.
+* Todo filtro "unidades da cidade" precisa checar `def.civ`; engenhos de cerco têm `cityId` e não têm guarda-roupa.
+* Com `BUSY` ausente no `think`, o trabalhador reiniciava a tarefa a cada decisão e nunca terminava.

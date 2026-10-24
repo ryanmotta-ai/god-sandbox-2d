@@ -3,6 +3,7 @@ import type { Unit } from './unit';
 import type { City } from './city';
 import type { Race } from '../gfx/humanoid';
 import { realmName } from './names';
+import { buildEngines } from './siege';
 
 export type Trait = 'warlike' | 'peaceful' | 'greedy' | 'diplomat' | 'tyrant' | 'zealot';
 export const TRAIT_NAMES: Record<Trait, string> = { warlike: 'Belicoso', peaceful: 'Pacífico', greedy: 'Ganancioso', diplomat: 'Diplomata', tyrant: 'Tirano', zealot: 'Fanático' };
@@ -22,6 +23,7 @@ export class Kingdom {
   warSince = new Map<number, number>();
   t = 0;
   losses = 0;
+  engineT = 0;
   constructor(public id: number, public name: string, public race: Race, public color: string, public trait: Trait, public founded: number) {}
 }
 
@@ -137,7 +139,7 @@ function diplomacy(sim: Sim, k: Kingdom): void {
       const dur = sim.time - since;
       // exhaustion: outnumbered or long stalemate, and a king who would rather talk
       const wants = (mine < theirs * 0.35 && dur > 25) || dur > 150 || (k.trait === 'peaceful' && dur > 45) || (k.trait === 'diplomat' && dur > 70);
-      if (wants && sim.rng.chance(0.3) && (o.relations.get(k.id) ?? 0) > -100) makePeace(sim, k, o, 90 + (k.trait === 'diplomat' ? 90 : 0));
+      if (wants && sim.rng.chance(0.3) && sim.rng.chance(acceptance(sim, o, k))) makePeace(sim, k, o, 90 + (k.trait === 'diplomat' ? 90 : 0));
       continue;
     }
     if (!near || near.d > 70 || sim.time < (k.truce.get(o.id) ?? 0)) continue;
@@ -145,6 +147,13 @@ function diplomacy(sim: Sim, k: Kingdom): void {
     const thresh = -22 + (k.trait === 'warlike' ? 22 : k.trait === 'peaceful' ? -30 : k.trait === 'tyrant' ? 12 : k.trait === 'greedy' ? 8 : k.trait === 'diplomat' ? -14 : 0) + (k.trait === 'zealot' && k.race !== o.race ? 25 : 0);
     if (rel < thresh && mine >= 3 && sim.time - k.founded > 40 && sim.rng.chance(0.16)) declareWar(sim, k, o, rel < -45 ? 'ódio antigo' : near.d < 25 ? 'disputa de fronteira' : 'ambição');
   }
+}
+
+/** Would `a` agree to peace asked by `b`? A winner on the march rarely stops; a pacifist almost always does. */
+function acceptance(sim: Sim, a: Kingdom, b: Kingdom): number {
+  let p = a.trait === 'warlike' ? 0.15 : a.trait === 'tyrant' ? 0.3 : a.trait === 'zealot' ? 0.3 : a.trait === 'peaceful' || a.trait === 'diplomat' ? 0.9 : 0.5;
+  if (a.army && b.cities.includes(a.army.target)) p *= 0.2;
+  return p;
 }
 
 /** Muster, march in formation, assault. Armies are just soldiers with orders: the battle is ordinary combat. */
@@ -180,5 +189,6 @@ function campaign(sim: Sim, k: Kingdom): void {
       u.mode = 'siege'; u.goalX = tgt.x + sx * col * 1.1 - fx * (row * 1.2 - 3); u.goalY = tgt.y + sy * col * 1.1 - fy * (row * 1.2 - 3);
     }
   });
+  buildEngines(sim, k, sol.length);
   if (a.phase === 'rally' && (arrived >= sol.length * 0.7 || sim.time - a.since > 60)) { a.phase = 'assault'; sim.note(`O exército de ${k.name} avança sobre ${tgt.name}!`, 'war'); }
 }

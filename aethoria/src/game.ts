@@ -1,5 +1,6 @@
 import { generateWorld, DEFAULT_GEN, type GenConfig } from './world/gen';
 import { Sim } from './sim/sim';
+import { Sound } from './core/sound';
 import { newKingdom } from './sim/kingdom';
 import { foundCity } from './sim/city';
 import { Camera } from './render/camera';
@@ -65,6 +66,7 @@ export class Game {
   private acc = 0;
   setup: Setup = DEFAULT_SETUP;
   onWorld: (() => void)[] = [];
+  sound = new Sound();
   follow: Unit | null = null;
   tool: Power | null = null;
   brush = 2;
@@ -76,7 +78,7 @@ export class Game {
     const world = generateWorld(s);
     this.sim = new Sim(world, s.seed);
     populate(this.sim, s);
-    if (!this.cam) { this.cam = new Camera(world.w, world.h); this.renderer = new Renderer(this.canvas, this.sim, this.cam); }
+    if (!this.cam) { this.cam = new Camera(world.w, world.h); this.renderer = new Renderer(this.canvas, this.sim, this.cam); this.renderer.sound = this.sound; }
     else { this.cam.worldW = world.w; this.cam.worldH = world.h; this.cam.x = world.w * TILE / 2; this.cam.y = world.h * TILE / 2; this.renderer.setSim(this.sim); }
     const first = this.sim.units.find(u => u.def.civ);
     if (first) { this.cam.x = first.x * TILE; this.cam.y = first.y * TILE; }

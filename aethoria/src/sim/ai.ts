@@ -6,6 +6,8 @@ import { TERRAIN, T, O, OBJECTS, isTree } from '../world/defs';
 import { hostile, damage, kill, shoot, attackPower, MELEE } from './combat';
 export { updateArrows } from './combat';
 import { thinkAnimal, actDragon } from './fauna';
+import { thinkEngine, actEngine } from './siege';
+import { isEngine } from './species';
 import { hash2 } from '../core/rng';
 import type { Building } from './buildings';
 import { tryFoundCity, type City } from './city';
@@ -109,7 +111,7 @@ export function updateUnits(sim: Sim, dt: number): void {
     u.thinkT -= dt;
     if (u.hitT > 0) { u.hitT -= dt; if (u.hitT <= 0) resolveHit(sim, u); }
     if (u.thinkT <= 0) {
-      if (d.civ) thinkCiv(sim, u); else thinkAnimal(sim, u);
+      if (d.civ) thinkCiv(sim, u); else if (isEngine(u.species)) thinkEngine(sim, u); else thinkAnimal(sim, u);
     }
     act(sim, u, dt);
   }
@@ -142,7 +144,7 @@ function findHostile(sim: Sim, u: Unit, r: number): Unit | null {
   return sim.nearest(u.x, u.y, r, o => hostile(sim, u, o));
 }
 
-const BUSY = new Set(['chop', 'mine', 'quarry', 'farm', 'build', 'haul', 'eat', 'forage', 'settle', 'goto', 'patrol']);
+const BUSY = new Set(['hunt', 'chop', 'mine', 'quarry', 'farm', 'build', 'haul', 'eat', 'forage', 'settle', 'goto', 'patrol']);
 
 function thinkCiv(sim: Sim, u: Unit): void {
   const city = sim.cities.get(u.cityId);
@@ -169,6 +171,11 @@ function thinkCiv(sim: Sim, u: Unit): void {
   if (BUSY.has(u.mode)) return; // let the job finish; act() ends it
   if (u.mode === 'attack' || u.mode === 'flee') { u.mode = 'wander'; u.target = 0; }
   if (u.age < 16) { if (city) { const h = city.hall(sim); if (h && sim.rng.chance(0.7)) { wanderNear(sim, u, h.doorX, h.doorY, 6); return; } } u.mode = 'wander'; return; }
+  // short of food: the hungry-handed hunt. Orcs do it by nature; anyone with a weapon does it in a pinch.
+  if (city && u.def.diet !== 'herb' && u.age >= 16 && u.role !== 'king' && (u.role === 'peasant' || u.role === 'soldier' || u.role === 'archer') && city.stock.food < city.pop * (u.species === 'orc' ? 3 : 1.2) && sim.rng.chance(u.species === 'orc' ? 0.5 : 0.25)) {
+    const prey = sim.nearest(u.x, u.y, 16, o => o.alive && !o.def.civ && o.def.food >= 3 && o.def.diet === 'herb');
+    if (prey) { u.mode = 'hunt'; u.target = prey.id; return; }
+  }
   if (!city) {
     if (u.mode === 'settle') return;
     // drifters join the nearest friendly town, or found one with company
@@ -388,6 +395,11 @@ function act(sim: Sim, u: Unit, dt: number): void {
       if (m === 'moving') { setAct(u, 'run'); u.state = 'walk'; } else { idleAct(); }
       return;
     }
+    case 'hunt': {
+      const t = sim.byId.get(u.target);
+      if (!t || !t.alive || u.carry) { u.mode = 'wander'; u.target = 0; u.thinkT = 0.1; return; }
+      return fightTarget(sim, u, t, dt);
+    }
     case 'attack': case 'march': case 'siege': {
       const t = sim.byId.get(u.target);
       if (!t || !t.alive || !hostile(sim, u, t)) {
@@ -405,6 +417,7 @@ function act(sim: Sim, u: Unit, dt: number): void {
     }
     case 'graze': { setAct(u, 'eat'); if (u.actT > 2.4) { u.hunger = Math.max(0, u.hunger - 28); u.mode = 'wander'; u.thinkT = 0.2; } return; }
     case 'dragon': return actDragon(sim, u, dt);
+    case 'engine': case 'engine-move': return actEngine(sim, u, dt);
     case 'dead': return;
     default: u.mode = 'wander';
   }

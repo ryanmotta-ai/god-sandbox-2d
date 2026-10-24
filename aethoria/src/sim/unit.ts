@@ -57,6 +57,8 @@ export class Unit {
   breedT = 0;
   /** Cached sprite facing for animals (east/west only). */
   east = false;
+  /** Siege engines: seconds-ish without a war to fight (they fall apart). */
+  idleT = 0;
   kills = 0;
   /** Seconds a fire/curse/etc. effect remains. */
   burning = 0;

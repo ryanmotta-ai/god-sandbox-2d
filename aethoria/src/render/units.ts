@@ -2,6 +2,7 @@ import type { Unit } from '../sim/unit';
 import { humanoidFrame, SPR_W, SPR_H, CX, GROUND, type Look } from '../gfx/humanoid';
 import { animalFrame, A_SIZE, A_FRAMES, type AnimalKind, type AAnim } from '../gfx/animals';
 import { ANIM_FRAMES, type Anim } from '../gfx/rig';
+import { engineFrame, E_SIZE, E_FRAMES, type EngineKind } from '../gfx/engines';
 import { TILE } from '../core/config';
 import { SPECIES } from '../sim/species';
 
@@ -13,11 +14,16 @@ const ONE_SHOT = new Set(['attack', 'shoot', 'die']);
 const AN_MAP: Record<string, AAnim> = { idle: 'idle', walk: 'walk', run: 'run', attack: 'attack', eat: 'eat', die: 'die', fly: 'fly', breath: 'breath', chop: 'idle', mine: 'idle', farm: 'idle', hammer: 'idle', shoot: 'idle', cast: 'idle', carry: 'walk', sleep: 'idle' };
 const AN_FPS: Record<string, number> = { idle: 2, walk: 7, run: 11, attack: 9, eat: 2.2, die: 6, fly: 9, breath: 8 };
 
-export const sizeOf = (u: Unit): number => u.species === 'dragon' ? 18 : u.species === 'bear' || u.species === 'cow' ? 12 : u.species === 'chicken' || u.species === 'rabbit' || u.species === 'crab' || u.species === 'snake' || u.species === 'bird' ? 5 : u.def.civ ? 7 : 9;
+export const sizeOf = (u: Unit): number => u.species === 'ram' || u.species === 'catapult' ? 14 : u.species === 'dragon' ? 18 : u.species === 'bear' || u.species === 'cow' ? 12 : u.species === 'chicken' || u.species === 'rabbit' || u.species === 'crab' || u.species === 'snake' || u.species === 'bird' ? 5 : u.def.civ ? 7 : 9;
 
 /** Pick the frame to show for `u` at wall-clock `t`. Walk/work loop on global time; swings and deaths run from the moment they began. */
 export function frameFor(u: Unit, t: number, wading: boolean): Drawn {
   const act = u.act;
+  if (u.species === 'ram' || u.species === 'catapult') {
+    const kind = u.species as EngineKind, anim = act === 'attack' ? 'attack' : 'walk', sz = E_SIZE[kind];
+    const f = anim === 'attack' ? Math.min(E_FRAMES.attack - 1, Math.floor(u.actT * 5)) : act === 'walk' ? Math.floor((t * 6 + u.id) % E_FRAMES.walk) : 0;
+    return { img: engineFrame(kind, anim, u.east, f), dx: -sz.gx, dy: -sz.gy, lift: 0, shadow: 14, w: sz.w, h: sz.h, clip: 0 };
+  }
   if (u.def.civ || u.species === 'zombie') {
     const anim = HUM_MAP[act] ?? 'idle', n = ANIM_FRAMES[anim];
     let f: number;

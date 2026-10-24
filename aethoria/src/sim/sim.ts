@@ -94,6 +94,7 @@ export class Sim {
 
   /** (Re)build a civilised unit's appearance from role/kingdom. */
   refreshLook(u: Unit): void {
+    if (!u.def.civ) return; // engines and animals have no wardrobe
     const k = this.kingdoms.get(u.kingdomId);
     const role: Role = u.age < 16 ? 'child' : u.role;
     u.look = makeLook(u.species as Race, role, u.id * 31 + u.variant, k?.color ?? '#c0392b', u.female);

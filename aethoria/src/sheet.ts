@@ -5,6 +5,7 @@ import { O } from './world/defs';
 import { animalFrame, A_FRAMES, type AnimalKind, type AAnim } from './gfx/animals';
 import { buildingSprite } from './gfx/buildings';
 import { BDEFS, type BType } from './sim/buildings';
+import { engineFrame, E_FRAMES } from './gfx/engines';
 import { ANIM_FRAMES, type Anim } from './gfx/rig';
 
 /** Dev page: ?mode=roster | ?mode=anim&race=human&role=soldier&anim=walk */
@@ -15,7 +16,9 @@ function add(c: HTMLCanvasElement, parent: HTMLElement): void { c.style.width = 
 function row(title: string): HTMLElement { const h = document.createElement('h4'); h.textContent = title; root.appendChild(h); const d = document.createElement('div'); d.className = 'row'; root.appendChild(d); return d; }
 
 const mode = q.get('mode') ?? 'roster';
-if (mode === 'buildings') {
+if (mode === 'engines') {
+  for (const k of ['ram', 'catapult'] as const) for (const a of ['walk', 'attack'] as const) { const d = row(`${k} ${a}`); for (let f = 0; f < E_FRAMES[a]; f++) add(engineFrame(k, a, false, f), d); }
+} else if (mode === 'buildings') {
   const stage = +(q.get('stage') ?? 3), dmg = +(q.get('dmg') ?? 0);
   for (const race of ['human', 'elf', 'dwarf', 'orc'] as Race[]) { const d = row(race); for (const t of Object.keys(BDEFS) as BType[]) add(buildingSprite(t, race, stage, dmg), d); }
 } else if (mode === 'animals') {

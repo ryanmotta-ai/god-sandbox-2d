@@ -47,6 +47,8 @@ export class Building {
   haveWood = 0; haveStone = 0;
   /** Flash on damage. */
   hurtT = 0;
+  /** Tower reload. */
+  cd = 0;
   constructor(public id: number, public type: BType, public cityId: number, public x: number, public y: number, public race: Race) {
     const d = BDEFS[type];
     this.maxHp = this.hp = d.hp;

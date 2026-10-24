@@ -178,7 +178,24 @@ export function paintZone(sim: Sim, c: City): void {
 }
 
 /* ---- per-second town logic ----------------------------------------------------------------- */
+/** Towers shoot the realm's enemies — and zombies, and dragons — with real arrows. */
+function towers(sim: Sim, dt: number): void {
+  for (const b of sim.buildings.values()) {
+    if (b.type !== 'tower' || !b.done || b.ruin) continue;
+    b.cd -= dt; if (b.cd > 0) continue;
+    const c = sim.cities.get(b.cityId), k = c && sim.kingdoms.get(c.kingdomId);
+    if (!k) continue;
+    const foe = sim.nearest(b.cx, b.cy, 11, o => o.alive && ((o.kingdomId !== 0 && k.wars.has(o.kingdomId)) || o.species === 'zombie' || o.species === 'dragon'));
+    if (!foe) { b.cd = 0.5; continue; }
+    b.cd = 1.5;
+    const dist = Math.hypot(foe.x - b.cx, foe.y - b.cy);
+    sim.arrows.push({ x: b.cx, y: b.y - 0.9, tx: foe.x, ty: foe.y, t: 0, dur: Math.max(0.3, dist / 13), dmg: 14, from: 0, kingdom: k.id, z: 0 });
+    sim.fx.push({ t: 'arrow', x: b.cx, y: b.y - 0.9 });
+  }
+}
+
 export function updateCities(sim: Sim, dt: number): void {
+  towers(sim, dt);
   if (sim.tickN % 20 === 0) countPeople(sim);
   for (const [, c] of sim.cities) {
     c.t += dt; c.planT += dt; c.roleT += dt; c.birthT += dt; c.settleT += dt;
@@ -195,7 +212,7 @@ function countPeople(sim: Sim): void {
     if (!u.alive) continue;
     sim.counts[u.species] = (sim.counts[u.species] ?? 0) + 1;
     const c = sim.cities.get(u.cityId);
-    if (!c) continue;
+    if (!c || !u.def.civ) continue;
     c.pop++;
     if (u.age >= 16) { c.adults++; c.roles[u.role] = (c.roles[u.role] ?? 0) + 1; }
   }
@@ -252,7 +269,7 @@ function homes(sim: Sim, c: City): number {
 }
 
 function balanceRoles(sim: Sim, c: City): void {
-  const adults = sim.units.filter(u => u.cityId === c.id && u.age >= 16 && u.alive && u.role !== 'king' && u.mode !== 'march' && u.mode !== 'siege' && u.mode !== 'settle');
+  const adults = sim.units.filter(u => u.def.civ && u.cityId === c.id && u.age >= 16 && u.alive && u.role !== 'king' && u.mode !== 'march' && u.mode !== 'siege' && u.mode !== 'settle');
   if (!adults.length) return;
   const n = adults.length;
   const farms = c.count(sim, 'farm', true);

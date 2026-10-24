@@ -1,7 +1,7 @@
 import type { AnimalKind } from '../gfx/animals';
 import type { Race } from '../gfx/humanoid';
 
-export type Species = Race | AnimalKind | 'zombie';
+export type Species = Race | AnimalKind | 'zombie' | 'ram' | 'catapult';
 export type Diet = 'herb' | 'carn' | 'omni' | 'none';
 
 export interface SpeciesDef {
@@ -37,6 +37,8 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   dwarf: S({ id: 'dwarf', name: 'Anão', civ: true, hp: 130, dmg: 11, armor: 3, speed: 1.5, maxAge: 140, sight: 8, diet: 'omni', breed: 0, food: 0, cap: 0 }),
   orc: S({ id: 'orc', name: 'Orc', civ: true, hp: 150, dmg: 13, armor: 1, speed: 1.9, maxAge: 48, sight: 9, diet: 'carn', breed: 0, food: 0, cap: 0 }),
   zombie: S({ id: 'zombie', name: 'Zumbi', civ: false, hp: 90, dmg: 10, armor: 0, speed: 1.1, maxAge: 9999, sight: 10, diet: 'none', aggressive: true, breed: 0, food: 0, cap: 0 }),
+  ram: S({ id: 'ram', name: 'Aríete', civ: false, hp: 320, dmg: 0, armor: 7, speed: 0.95, maxAge: 9999, sight: 12, diet: 'none', breed: 0, food: 0, cap: 0 }),
+  catapult: S({ id: 'catapult', name: 'Catapulta', civ: false, hp: 150, dmg: 0, armor: 3, speed: 0.75, maxAge: 9999, sight: 16, diet: 'none', breed: 0, food: 0, cap: 0 }),
   sheep: S({ id: 'sheep', name: 'Ovelha', civ: false, hp: 30, dmg: 0, armor: 0, speed: 1.3, maxAge: 14, sight: 6, diet: 'herb', skittish: true, herd: true, breed: 40, food: 4, cap: 18 }),
   cow: S({ id: 'cow', name: 'Vaca', civ: false, hp: 55, dmg: 0, armor: 0, speed: 1.1, maxAge: 20, sight: 5, diet: 'herb', herd: true, breed: 55, food: 7, cap: 10 }),
   chicken: S({ id: 'chicken', name: 'Galinha', civ: false, hp: 10, dmg: 0, armor: 0, speed: 1.4, maxAge: 8, sight: 4, diet: 'herb', skittish: true, herd: true, breed: 30, food: 1, cap: 14 }),
@@ -51,5 +53,6 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   dragon: S({ id: 'dragon', name: 'Dragão', civ: false, hp: 900, dmg: 55, armor: 12, speed: 3.6, maxAge: 500, sight: 18, diet: 'carn', aggressive: true, fly: true, breed: 0, food: 0, cap: 0 }),
 };
 
-export const isAnimal = (s: Species): boolean => !SPECIES[s].civ && s !== 'zombie';
+export const isAnimal = (s: Species): boolean => !SPECIES[s].civ && s !== 'zombie' && s !== 'ram' && s !== 'catapult';
+export const isEngine = (s: Species): boolean => s === 'ram' || s === 'catapult';
 export const RACES: Race[] = ['human', 'elf', 'dwarf', 'orc'];

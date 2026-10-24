@@ -7,6 +7,7 @@ import { hash2 } from '../core/rng';
 export function hostile(sim: Sim, a: Unit, b: Unit): boolean {
   if (a === b || !a.alive || !b.alive) return false;
   const da = a.def, db = b.def;
+  if (a.kingdomId && b.kingdomId) return a.kingdomId !== b.kingdomId && sim.kingdoms.get(a.kingdomId)?.wars.has(b.kingdomId) === true;
   if (a.species === 'zombie') return b.species !== 'zombie';
   if (b.species === 'zombie') return da.civ || da.aggressive === true && db.civ;
   if (da.civ && db.civ) {
@@ -75,6 +76,13 @@ export function kill(sim: Sim, u: Unit, by: Unit | null, why = ''): void {
   if (u.def.civ && (by?.species === 'zombie' || (u.traits.includes('plague') && sim.rng.chance(0.45)))) { u.stateT = 99; sim.spawn('zombie', u.x, u.y); }
 }
 
+/** A catapult stone: slow, high, and it breaks things where it lands. */
+export function lob(sim: Sim, from: Unit, tx: number, ty: number): void {
+  const dist = Math.hypot(tx - from.x, ty - from.y);
+  sim.arrows.push({ x: from.x, y: from.y - 0.8, tx, ty, t: 0, dur: Math.max(0.6, dist / 7), dmg: -1, from: from.id, kingdom: from.kingdomId, z: 1 });
+  sim.fx.push({ t: 'boom', x: from.x, y: from.y - 0.4, a: 0.2 });
+}
+
 export function shoot(sim: Sim, from: Unit, target: Unit): void {
   const dx = target.x - from.x, dy = target.y - from.y, dist = Math.hypot(dx, dy);
   const lead = Math.min(1.2, dist * 0.05);
@@ -95,7 +103,13 @@ export function updateArrows(sim: Sim, dt: number): void {
     arr[i] = arr[arr.length - 1]; arr.pop();
     const shooter = sim.byId.get(a.from);
     const k = sim.kingdoms.get(a.kingdom);
-    const victim = sim.nearest(a.tx, a.ty, 1.1, o => o.alive && (shooter ? hostile(sim, shooter, o) : (k ? o.kingdomId !== a.kingdom && k.wars.has(o.kingdomId) : false)));
+    if (a.z === 1) { // stone: area damage to people and buildings of the enemy
+      sim.fx.push({ t: 'rubble', x: a.tx, y: a.ty }); sim.fx.push({ t: 'boom', x: a.tx, y: a.ty, a: 0.3 });
+      sim.near(a.tx, a.ty, 2.2, o => { if (o.alive && k && o.kingdomId && o.kingdomId !== a.kingdom && k.wars.has(o.kingdomId)) damage(sim, o, 55, shooter ?? null); });
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const bi = sim.world.bld[(Math.floor(a.ty) + j) * sim.world.w + Math.floor(a.tx) + i]; if (!bi) continue; const b = sim.buildings.get(bi), c = b && sim.cities.get(b.cityId); if (b && c && k?.wars.has(c.kingdomId)) { b.hp -= 45; b.hurtT = 0.25; if (b.hp <= 0) sim.destroyBuilding(b, shooter ?? null); } }
+      continue;
+    }
+    const victim = sim.nearest(a.tx, a.ty, 1.1, o => o.alive && (shooter ? hostile(sim, shooter, o) : (k ? (o.kingdomId !== a.kingdom && k.wars.has(o.kingdomId)) || o.species === 'zombie' || o.species === 'dragon' : false)));
     if (victim) damage(sim, victim, a.dmg, shooter ?? null);
     else sim.fx.push({ t: 'dust', x: a.tx, y: a.ty, a: 0.3 });
   }
