@@ -1,6 +1,6 @@
 # Aethoria — contrato de design
 
-Reescrita do zero do sandbox de deuses (o jogo antigo vive na tag `legacy-aetherio`). Alvo: **sentir como WorldBox** — mundo pintável, vivo,
+Reescrita do zero do sandbox de deuses (o jogo antigo vive no histórico: commit `647ec9e`). Alvo: **sentir como WorldBox** — mundo pintável, vivo,
 legível de longe, caótico de perto — com pixel art detalhada e animação de
 verdade.
 

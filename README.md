@@ -75,4 +75,4 @@ Ferramentas úteis: `npx tsx tools/probe2.ts 1200 7 192` (série temporal de um 
 
 Navios e portos, muralhas e portões, alianças entre reinos, música, toque/celular.
 
-O jogo antigo (Aetherio) não está mais na árvore, mas segue no histórico: `git checkout legacy-aetherio`.
+O jogo antigo (Aetherio) não está mais na árvore, mas segue no histórico: `git checkout 647ec9e` (último commit do jogo antigo).

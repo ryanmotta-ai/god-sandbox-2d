@@ -1,7 +1,7 @@
 # Aethoria
 
 Sandbox divino 2D em pixel art, no espírito de WorldBox. TypeScript + Canvas2D, sem framework, sem
-asset: toda a arte é desenhada por código. O jogo antigo (Aetherio) vive na tag `legacy-aetherio`.
+asset: toda a arte é desenhada por código. O jogo antigo (Aetherio) vive no histórico do git (commit `647ec9e`, também em `main`).
 
 **Antes de editar, invoque o skill `aethoria`** — é o mapa: onde cada coisa mora, como o tick flui e
 quais invariantes quebram sem erro de compilação. Em tarefa de código, o skill `ponytail` também vale.
