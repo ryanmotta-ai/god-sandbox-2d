@@ -42,6 +42,7 @@ main.ts  rAF → game.frame(dt) → ui.update(dt)
 | Tornado, meteoro, vulcão… | `sim/disasters.ts`; poderes (dados) em `sim/powers.ts` |
 | Desenhar o mundo, FX, luz, clima | `render/renderer.ts`, `render/fx.ts`, `render/atmosphere.ts` |
 | HUD, ferramentas, inspetor, minimapa | `ui/ui.ts`, `ui/inspector.ts`, `ui/icons.ts` |
+| Música ambiente (humor: dia/noite/chuva/guerra) | `core/music.ts` (usa o `AudioContext` de `core/sound.ts`) |
 | Salvar/carregar | `core/save.ts` (lista de campos única + `tests/save.test.ts`) |
 
 ## Invariantes que quebram em silêncio

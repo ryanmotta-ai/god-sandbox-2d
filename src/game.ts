@@ -1,6 +1,7 @@
 import { generateWorld, DEFAULT_GEN, type GenConfig } from './world/gen';
 import { Sim } from './sim/sim';
 import { Sound } from './core/sound';
+import { Music } from './core/music';
 import { newKingdom } from './sim/kingdom';
 import { foundCity } from './sim/city';
 import { Camera } from './render/camera';
@@ -67,6 +68,7 @@ export class Game {
   setup: Setup = DEFAULT_SETUP;
   onWorld: (() => void)[] = [];
   sound = new Sound();
+  music = new Music(this.sound);
   follow: Unit | null = null;
   tool: Power | null = null;
   brush = 2;
@@ -124,6 +126,7 @@ export class Game {
       if (performance.now() - t0 > 14) { this.acc = Math.min(this.acc, TICK_DT * 2); break; }
     }
     if (this.follow) { if (this.follow.alive) { const a = this.speed > 0 ? this.acc / TICK_DT : 1; this.cam.x += ((this.follow.px + (this.follow.x - this.follow.px) * a) * TILE - this.cam.x) * Math.min(1, dt * 6); this.cam.y += ((this.follow.py + (this.follow.y - this.follow.py) * a) * TILE - this.cam.y) * Math.min(1, dt * 6); } else this.follow = null; }
+    this.music.update(this.sim);
     this.renderer.draw(dt, this.speed > 0 ? this.acc / TICK_DT : 1);
   }
 }
