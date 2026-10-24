@@ -168,8 +168,8 @@ export class Renderer {
     }
     const L = this.cam.zoom >= 1 ? 1 : 0;
     for (const u of sim.units) {
-      if (lod === 2) { if (u.alive && !u.inShip && u.x >= tx0 && u.x <= tx1 && u.y >= ty0 && u.y <= ty1 && (u.def.civ || u.species === 'dragon' || u.def.ship)) { ctx.fillStyle = sim.kingdoms.get(u.kingdomId)?.color ?? (u.species === 'dragon' ? '#e03030' : '#ddd'); ctx.fillRect(Math.round(u.x * TILE) - 2, Math.round(u.y * TILE) - 6, u.species === 'dragon' ? 12 : u.def.ship ? 9 : 5, u.species === 'dragon' ? 8 : u.def.ship ? 4 : 6); } continue; }
-      if (u.inShip || u.x < tx0 - 2 || u.x > tx1 + 2 || u.y < ty0 - 3 || u.y > ty1 + 3) continue;
+      if (lod === 2) { if (u.alive && !u.inShip && !u.inside && u.x >= tx0 && u.x <= tx1 && u.y >= ty0 && u.y <= ty1 && (u.def.civ || u.species === 'dragon' || u.def.ship)) { ctx.fillStyle = sim.kingdoms.get(u.kingdomId)?.color ?? (u.species === 'dragon' ? '#e03030' : '#ddd'); ctx.fillRect(Math.round(u.x * TILE) - 2, Math.round(u.y * TILE) - 6, u.species === 'dragon' ? 12 : u.def.ship ? 9 : 5, u.species === 'dragon' ? 8 : u.def.ship ? 4 : 6); } continue; }
+      if (u.inShip || u.inside || u.x < tx0 - 2 || u.x > tx1 + 2 || u.y < ty0 - 3 || u.y > ty1 + 3) continue;
       const ix = u.px + (u.x - u.px) * alpha, iy = u.py + (u.y - u.py) * alpha;
       items.push({ y: iy * TILE + (u.def.fly && u.species !== 'dragon' ? 40 : 0) + u.id * 1e-6, k: 3, a: ix, b: iy, o: u });
     }
@@ -230,9 +230,37 @@ export class Renderer {
         if (k && (u.mode === 'march' || u.mode === 'siege' || u.role === 'king')) { ctx.fillStyle = k.color; ctx.fillRect(px - 2, py - 44, 4, 3); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(px - 2, py - 41, 4, 1); if (u.role === 'king') { ctx.fillStyle = '#ffd84a'; ctx.fillRect(px - 2, py - 46, 4, 2); } }
       }
     }
+    if (u.alive && this.cam.zoom >= 2 && (u.mode === 'chat' || u.mode === 'tavern' || u.mode === 'market' || u.mode === 'dance' || u.mode === 'play')) this.bubble(u, px, py - 49);
     if (this.selected && this.selected.kind === 'unit' && this.selected.id === u.id) {
       ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 0.55 + 0.35 * Math.sin(this.time * 6); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.ellipse(px, py, 11, 5, 0, 0, 6.283); ctx.stroke(); ctx.globalAlpha = 1;
+    }
+  }
+
+  /** A speech bubble over someone chatting, drinking, shopping or playing: a small pixel glyph in a white balloon. */
+  private bubble(u: Unit, px: number, py: number): void {
+    const { ctx, sim } = this, t = this.time;
+    let glyph = -1;
+    if (u.mode === 'chat') {
+      const o = sim.byId.get(u.partner);
+      if (!o || (Math.floor(t * 0.6) + (u.id < u.partner ? 0 : 1)) % 2 !== 0) return; // they take turns
+      const k = Math.floor(t * 0.6 / 2 + u.id) % 4;
+      glyph = k === 3 && o.female !== u.female ? 3 : k === 3 ? 0 : k;
+    } else if (u.mode === 'tavern') { if (u.act !== 'eat') return; glyph = 4; }
+    else if (u.mode === 'market') { if (Math.floor(t * 0.4 + u.id) % 3 !== 0) return; glyph = 5; }
+    else if (u.mode === 'dance') { if (Math.floor(t * 0.8 + u.id) % 3 !== 0) return; glyph = 2; }
+    else { if (Math.floor(t * 1.2 + u.id) % 4 !== 0) return; glyph = 1; }
+    const x = Math.round(px) - 6, y = Math.round(py);
+    ctx.fillStyle = 'rgba(20,18,30,0.8)'; ctx.fillRect(x - 1, y - 1, 15, 12); ctx.fillRect(x + 4, y + 11, 4, 2);
+    ctx.fillStyle = '#fbfaf2'; ctx.fillRect(x, y, 13, 10); ctx.fillRect(x + 5, y + 10, 2, 2);
+    const dots = (): void => { ctx.fillStyle = '#4a4a5a'; for (let i = 0; i < 3; i++) if (Math.floor(t * 4) % 4 > i - 1) ctx.fillRect(x + 2 + i * 4, y + 5, 2, 2); };
+    switch (glyph) {
+      case 0: dots(); break;
+      case 1: ctx.fillStyle = '#d83a3a'; ctx.fillRect(x + 6, y + 1, 2, 5); ctx.fillRect(x + 6, y + 7, 2, 2); break;
+      case 2: ctx.fillStyle = '#c8941a'; ctx.fillRect(x + 4, y + 6, 3, 3); ctx.fillRect(x + 6, y + 1, 1, 6); ctx.fillRect(x + 7, y + 1, 3, 2); break;
+      case 3: ctx.fillStyle = '#ff5a7a'; for (const [dx, dy, w] of [[2, 2, 3], [7, 2, 3], [2, 4, 8], [3, 6, 6], [5, 8, 2]]) ctx.fillRect(x + dx, y + dy, w, 2); break;
+      case 4: ctx.fillStyle = '#e8b030'; ctx.fillRect(x + 3, y + 2, 5, 6); ctx.fillStyle = '#fff'; ctx.fillRect(x + 3, y + 2, 5, 2); ctx.fillStyle = '#c88a1a'; ctx.fillRect(x + 8, y + 3, 2, 4); break;
+      default: ctx.fillStyle = '#e8b020'; ctx.fillRect(x + 4, y + 2, 5, 6); ctx.fillRect(x + 3, y + 3, 7, 4); ctx.fillStyle = '#fff2a0'; ctx.fillRect(x + 5, y + 3, 1, 3);
     }
   }
 

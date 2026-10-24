@@ -69,6 +69,8 @@ export class Unit {
   /** Ships: what they are doing (fish, trade, settle, invade, patrol, moor), the step of it, home dock, destination, hold [food,wood,stone,ore], a timer. */
   mission = 'moor'; phase = 0; dock = 0; dest = 0; hold: number[] | null = null; legT = 0;
   home = 0; // building id
+  /** Leisure: chat partner, the building the unit sleeps inside (hidden like a rider), seconds left in a pastime. */
+  partner = 0; inside = 0; socialT = 0;
   born = 0;
 
   constructor(public id: number, public species: Species, x: number, y: number) {

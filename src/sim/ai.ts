@@ -8,6 +8,7 @@ export { updateArrows } from './combat';
 import { thinkAnimal, actDragon } from './fauna';
 import { thinkEngine, actEngine } from './siege';
 import { thinkShip, actShip, actBoard, geo } from './navy';
+import { thinkLeisure, actSocial, tickInside, LEISURE } from './social';
 import { isEngine } from './species';
 import { hash2 } from '../core/rng';
 import type { Building } from './buildings';
@@ -88,6 +89,7 @@ export function updateUnits(sim: Sim, dt: number): void {
       if (s && s.alive) { u.x = s.x; u.y = s.y; u.hunger = Math.min(60, u.hunger + dt * 0.1); continue; }
       u.inShip = 0; u.mode = 'wander';
     }
+    if (u.inside && tickInside(sim, u, dt)) continue; // asleep indoors
     // hunger: civs and carnivores feel it; herbivores graze it off
     if (d.diet !== 'none' && u.species !== 'zombie') {
       u.hunger += dt * (d.civ ? 0.55 : d.diet === 'herb' ? 0.14 : 0.2);
@@ -175,9 +177,9 @@ function thinkCiv(sim: Sim, u: Unit): void {
     const berry = findObj(sim, u, 14, o => o === O.BERRIES);
     if (berry) { u.mode = 'forage'; u.goalX = berry.x + 0.5; u.goalY = berry.y + 0.5; u.path = null; releaseJob(sim, u); return; }
   }
-  if (BUSY.has(u.mode)) return; // let the job finish; act() ends it
+  if (BUSY.has(u.mode) || LEISURE.has(u.mode)) return; // let the job (or the pastime) finish; act() ends it
   if (u.mode === 'attack' || u.mode === 'flee') { u.mode = 'wander'; u.target = 0; }
-  if (u.age < 16) { if (city) { const h = city.hall(sim); if (h && sim.rng.chance(0.7)) { wanderNear(sim, u, h.doorX, h.doorY, 6); return; } } u.mode = 'wander'; return; }
+  if (u.age < 16) { if (city && thinkLeisure(sim, u, city)) return; if (city) { const h = city.hall(sim); if (h && sim.rng.chance(0.7)) { wanderNear(sim, u, h.doorX, h.doorY, 6); return; } } u.mode = 'wander'; return; }
   // short of food: the hungry-handed hunt. Orcs do it by nature; anyone with a weapon does it in a pinch.
   if (city && u.def.diet !== 'herb' && u.age >= 16 && u.role !== 'king' && (u.role === 'peasant' || u.role === 'soldier' || u.role === 'archer') && city.stock.food < city.pop * (u.species === 'orc' ? 3 : 1.2) && sim.rng.chance(u.species === 'orc' ? 0.5 : 0.25)) {
     const prey = sim.nearest(u.x, u.y, 16, o => o.alive && !o.def.civ && o.def.food >= 3 && o.def.diet === 'herb');
@@ -193,6 +195,7 @@ function thinkCiv(sim: Sim, u: Unit): void {
   }
   // carrying something? deliver first
   if (u.carry) { const dst = city.dropoff(sim); if (dst) { u.mode = 'haul'; u.goalX = dst.doorX + 0.5; u.goalY = dst.doorY + 0.5; u.path = null; return; } u.carry = null; }
+  if (thinkLeisure(sim, u, city)) return;
   switch (u.role) {
     case 'woodcutter': return startGather(sim, u, city, 'chop', 16, (o) => isTree(o) && o !== O.DEAD_TREE ? true : o === O.DEAD_TREE);
     case 'miner': return startGather(sim, u, city, 'mine', 18, (o) => o === O.ROCK || o === O.BOULDER || o === O.ORE_IRON || o === O.ORE_COPPER || o === O.ORE_GOLD);
@@ -430,6 +433,7 @@ function act(sim: Sim, u: Unit, dt: number): void {
     case 'graze': { setAct(u, 'eat'); if (u.actT > 2.4) { u.hunger = Math.max(0, u.hunger - 28); u.mode = 'wander'; u.thinkT = 0.2; } return; }
     case 'dragon': return actDragon(sim, u, dt);
     case 'engine': case 'engine-move': return actEngine(sim, u, dt);
+    case 'tavern': case 'market': case 'chat': case 'play': case 'dance': case 'water': case 'home': case 'rest': return actSocial(sim, u, dt);
     case 'ship': return actShip(sim, u, dt);
     case 'board': return actBoard(sim, u, dt);
     case 'aboard': return;

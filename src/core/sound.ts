@@ -44,7 +44,7 @@ export class Sound {
   fx(e: FxEvent, gain: number): void {
     if (!this.ctx || !this.enabled || gain < 0.03 || this.live > 14) return;
     const now = performance.now(), k = e.t;
-    const gap: Partial<Record<string, number>> = { hit: 70, blood: 140, spark: 90, boom: 120, splash: 120, arrow: 90, dust: 160, heal: 200, curse: 200, lightning: 200, coin: 160, rubble: 180, fire: 260, smoke: 1e9, leaf: 400, heart: 500, flash: 1e9, meteor: 400, zzz: 1e9 };
+    const gap: Partial<Record<string, number>> = { hit: 70, blood: 140, spark: 90, boom: 120, splash: 120, arrow: 90, dust: 160, heal: 200, curse: 200, lightning: 200, coin: 160, rubble: 180, fire: 260, smoke: 1e9, leaf: 400, heart: 500, flash: 1e9, meteor: 400, zzz: 1e9, note: 700, confetti: 1e9 };
     if (now - (this.last.get(k) ?? 0) < (gap[k] ?? 100)) return;
     this.last.set(k, now);
     this.live++; setTimeout(() => this.live--, 250);
@@ -61,6 +61,7 @@ export class Sound {
       case 'rubble': this.burst(0.5, 0.5 * v, 700, 'lowpass', 0.8); this.tone(80, 40, 0.4, 0.4 * v, 'sine'); break;
       case 'heal': [660, 880, 1100].forEach((f, i) => this.tone(f, f * 1.01, 0.22, 0.14 * v, 'sine', i * 0.06)); break;
       case 'curse': this.tone(210, 90, 0.4, 0.2 * v, 'sawtooth'); break;
+      case 'note': { const f = [523, 587, 659, 784, 880][Math.floor(Math.random() * 5)]; this.tone(f, f, 0.35, 0.06 * v, 'triangle'); break; }
       case 'coin': this.tone(1400, 1500, 0.1, 0.09 * v, 'square'); this.tone(2100, 2200, 0.14, 0.08 * v, 'square', 0.07); break;
       case 'fire': this.burst(0.05, 0.18 * v, 1500 + Math.random() * 1500, 'bandpass', 2); break;
       case 'meteor': this.burst(0.6, 0.4 * v, 300, 'lowpass', 0.7); break;

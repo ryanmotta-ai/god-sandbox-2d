@@ -36,7 +36,7 @@ main.ts  rAF → game.frame(dt) → ui.update(dt)
 | Mobília de rua (postes, bancos, barris) | `gfx/props.ts` (`propAt`: função pura do tile, sem estado) |
 | Navios, portos, pesca, troca, colonização e invasão por mar | `sim/navy.ts` (mapas de terra/mar, docas, estaleiro, missões), `sim/fleet.ts` (guerra naval); arte `gfx/ships.ts`, `gfx/port.ts` |
 | Aríete, catapulta | `gfx/engines.ts` (arte), `sim/siege.ts` (IA e construção) |
-| Comportamento de aldeão | `sim/ai.ts` (`thinkCiv`, `act`) |
+| Comportamento de aldeão | `sim/ai.ts` (`thinkCiv`, `act`); lazer, sono, festa em `sim/social.ts` |
 | Bichos | `sim/fauna.ts` |
 | Quem ataca quem, dano, flecha | `sim/combat.ts` (`hostile` é a única regra) |
 | Vila: papéis, o que construir, onde, muralhas | `sim/city.ts` (`balanceRoles`, `planBuilding`, `findLot`, `planWalls`); arte `gfx/walls.ts` |

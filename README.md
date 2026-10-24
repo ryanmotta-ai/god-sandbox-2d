@@ -54,6 +54,9 @@ Menu: novo mundo (5 formas, tamanho, água/montanhas/florestas/clima, povos, sem
   cardume), mercante (**troca física** de excedente por falta entre portos, sem moeda; melhora a relação entre
   reinos e leva colonos para ilhas vazias), barco de guerra, galé (aríete e arqueiros) e galeão (lança pedras).
   Frotas patrulham, caçam navios, atacam cais e **levam o exército por mar**: embarca, desembarca na praia e cerca.
+* **Vida nas ruas** — de noite a vila dorme dentro de casa (as janelas acesas e as ruas vazias), de manhã todos saem; ao entardecer
+  o povo vai à taverna, de dia ao mercado, buscam água no poço, conversam aos pares (balões de fala), as crianças brincam de pega e,
+  de vez em quando, a vila faz **festa** na praça com dança, música e confete.
 * **Guerra** — diplomacia por relação e temperamento, exércitos que se reúnem, marcham em formação e cercam;
   arqueiros com flechas em arco, torres que atiram, aríetes que derrubam portas, catapultas que lançam pedras;
   conquista troca a cor da vila. **Um modelo só:** a batalha é o combate físico, sem planilha escondida.

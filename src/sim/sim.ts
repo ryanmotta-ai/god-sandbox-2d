@@ -18,7 +18,7 @@ import { updateDynamics } from './dynamics';
 import type { Disaster } from './disasters';
 import { initPort } from './navy';
 
-export interface FxEvent { t: 'blood' | 'hit' | 'spark' | 'smoke' | 'fire' | 'dust' | 'heal' | 'curse' | 'boom' | 'splash' | 'arrow' | 'flash' | 'coin' | 'rubble' | 'lightning' | 'meteor' | 'leaf' | 'zzz' | 'heart'; x: number; y: number; a?: number; b?: number; c?: string }
+export interface FxEvent { t: 'blood' | 'hit' | 'spark' | 'smoke' | 'fire' | 'dust' | 'heal' | 'curse' | 'boom' | 'splash' | 'arrow' | 'flash' | 'coin' | 'rubble' | 'lightning' | 'meteor' | 'leaf' | 'zzz' | 'heart' | 'note' | 'confetti'; x: number; y: number; a?: number; b?: number; c?: string }
 export interface LogEntry { t: number; text: string; kind: 'info' | 'war' | 'birth' | 'death' | 'disaster' | 'city' | 'peace' }
 export interface Arrow { x: number; y: number; tx: number; ty: number; t: number; dur: number; dmg: number; from: number; kingdom: number; z: number }
 
@@ -130,7 +130,7 @@ export class Sim {
     this.buildings.delete(b.id);
     const c = this.cities.get(b.cityId);
     if (c) c.buildings = c.buildings.filter(id => id !== b.id);
-    for (const u of this.units) if (u.job === b.id) u.job = 0;
+    for (const u of this.units) { if (u.job === b.id) u.job = 0; if (u.inside === b.id) { u.inside = 0; u.x = b.doorX + 0.5; u.y = b.doorY + 0.5; u.px = u.x; u.py = u.y; u.mode = 'wander'; } }
     if (rubble) this.fx.push({ t: 'rubble', x: b.cx, y: b.cy, a: b.def.w });
   }
 
@@ -159,7 +159,7 @@ export class Sim {
     for (const c of this.grid) c.length = 0;
     const gw = this.gw;
     for (const u of this.units) {
-      if (u.state === 'dead' || u.inShip) continue;
+      if (u.state === 'dead' || u.inShip || u.inside) continue;
       const cx = Math.min(gw - 1, Math.max(0, (u.x / CELL) | 0)), cy = Math.max(0, (u.y / CELL) | 0);
       const cell = this.grid[cy * gw + cx];
       if (cell) cell.push(u);

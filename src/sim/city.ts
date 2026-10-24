@@ -6,6 +6,7 @@ import type { Race } from '../gfx/humanoid';
 import { placeName } from './names';
 import { Kingdom, newKingdom } from './kingdom';
 import type { Role } from '../gfx/looks';
+import { updateSocial } from './social';
 import { portWants, findDockSite, yardStep, nearWater, requestSettlement } from './navy';
 
 export class City {
@@ -27,6 +28,8 @@ export class City {
   /** A site across the water a merchant ship will carry settlers to, and when it was asked for. */
   seaSite: { x: number; y: number; wx: number; wy: number; t: number } | null = null;
   portT = 0;
+  /** Festival seconds left, and when the last one began. */
+  festT = 0; festLast = -999;
   /** Derived each second from what stands in town: not saved. */
   perks = { bakery: false, healer: false, content: 0 };
   constructor(public id: number, public name: string, public race: Race, public kingdomId: number, public x: number, public y: number) {}
@@ -248,6 +251,7 @@ function cityStep(sim: Sim, c: City): void {
     if (b.type === 'orchard') b.crop = Math.min(1, b.crop + 0.008);
     if (b.burning > 0) { b.burning--; b.hp -= 20; if (b.hp <= 0) sim.destroyBuilding(b, null); }
   }
+  updateSocial(sim, c);
   c.perks = perksOf(sim, c);
   if (c.perks.healer) healPeople(sim, c);
   if (c.roleT >= 4) { c.roleT = 0; balanceRoles(sim, c); }
