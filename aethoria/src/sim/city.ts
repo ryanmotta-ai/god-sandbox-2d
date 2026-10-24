@@ -1,0 +1,354 @@
+import type { Sim } from './sim';
+import type { Unit, Carry } from './unit';
+import { Building, BDEFS, type BType } from './buildings';
+import { TERRAIN, T, OBJECTS, O } from '../world/defs';
+import type { Race } from '../gfx/humanoid';
+import { placeName } from './names';
+import { Kingdom, newKingdom } from './kingdom';
+import type { Role } from '../gfx/looks';
+
+export class City {
+  buildings: number[] = [];
+  stock = { food: 0, wood: 0, stone: 0, ore: 0, gold: 0 };
+  /** 0..100. Falls with hunger, distance from the crown and war; at 0 the town rebels. */
+  loyalty = 70;
+  radius = 7;
+  hallId = 0;
+  pop = 0;
+  adults = 0;
+  roles: Partial<Record<Role, number>> = {};
+  t = 0; planT = 0; roleT = 0; birthT = 0; failedLots = 0; settleT = 0; zoneRadius = 0;
+  founded = 0;
+  constructor(public id: number, public name: string, public race: Race, public kingdomId: number, public x: number, public y: number) {}
+
+  hall(sim: Sim): Building | null {
+    const h = sim.buildings.get(this.hallId);
+    if (h && h.done && !h.ruin) return h;
+    for (const id of this.buildings) { const b = sim.buildings.get(id); if (b && b.type === 'campfire' && !b.ruin) return b; }
+    return null;
+  }
+  dropoff(sim: Sim): Building | null {
+    let best: Building | null = null, bd = Infinity;
+    for (const id of this.buildings) {
+      const b = sim.buildings.get(id);
+      if (!b || !b.done || b.ruin || (b.type !== 'storehouse' && b.type !== 'hall' && b.type !== 'campfire')) continue;
+      const d = (b.cx - this.x) ** 2 + (b.cy - this.y) ** 2;
+      if (d < bd) { bd = d; best = b; }
+    }
+    return best;
+  }
+  get cap(): number { return 80 + this.buildings.length * 12; }
+  deposit(c: Carry): void {
+    const s = this.stock;
+    if (c.good === 'food') s.food = Math.min(this.cap * 2, s.food + c.n);
+    else if (c.good === 'wood') s.wood = Math.min(this.cap * 2, s.wood + c.n);
+    else if (c.good === 'stone') s.stone = Math.min(this.cap * 2, s.stone + c.n);
+    else if (c.good === 'ore') s.ore += c.n;
+    else s.gold += c.n;
+  }
+  count(sim: Sim, type: BType, doneOnly = false): number {
+    let n = 0;
+    for (const id of this.buildings) { const b = sim.buildings.get(id); if (b && b.type === type && !b.ruin && (!doneOnly || b.done)) n++; }
+    return n;
+  }
+  onBuilt(sim: Sim, b: Building): void {
+    if (b.type === 'hall') this.hallId = b.id;
+    paintRoad(sim, this, b);
+    sim.zoneVer++;
+  }
+}
+
+/* ---- lots ----------------------------------------------------------------------------------- */
+const LOT = 5;
+const OK_BUILD = new Set<number>([T.GRASS, T.DIRT, T.SAVANNA, T.TUNDRA, T.SNOW, T.DESERT, T.SAND, T.ROAD, T.JUNGLE, T.HILL, T.ASH, T.ENCHANTED]);
+const OK_FARM = new Set<number>([T.GRASS, T.DIRT, T.SAVANNA, T.JUNGLE, T.FIELD, T.ENCHANTED]);
+const LOTS: [number, number][] = [];
+for (let j = -7; j <= 7; j++) for (let i = -7; i <= 7; i++) if (i || j) LOTS.push([i, j]);
+LOTS.sort((a, b) => Math.hypot(a[0], a[1] * 1.15) - Math.hypot(b[0], b[1] * 1.15));
+
+function footprintOk(sim: Sim, city: City, x: number, y: number, type: BType): boolean {
+  const w = sim.world, d = BDEFS[type], ok = d.field ? OK_FARM : OK_BUILD;
+  for (let j = -1; j <= d.h; j++) for (let i = 0; i < d.w; i++) {
+    const tx = x + i, ty = y + j;
+    if (!w.inb(tx, ty)) return false;
+    const idx = ty * w.w + tx;
+    const inside = j >= 0 && j < d.h;
+    if (inside) {
+      if (!ok.has(w.terrain[idx]) || w.bld[idx] !== 0 || OBJECTS[w.obj[idx]].solid || w.fire[idx]) return false;
+      const z = w.zone[idx];
+      if (z !== 0 && z !== city.id) return false;
+    } else if (j === d.h) { // door tile must be walkable and not blocked
+      if (!TERRAIN[w.terrain[idx]].walk || w.bld[idx] !== 0) return false;
+    }
+  }
+  return true;
+}
+
+/** Find a lot for `type` around the town centre (inner ring first; farms prefer the outside). */
+function findLot(sim: Sim, city: City, type: BType): { x: number; y: number } | null {
+  const d = BDEFS[type], ax = city.x - 2, ay = city.y - 2;
+  const maxD = city.radius / LOT + 0.6;
+  const minRing = type === 'farm' || type === 'windmill' ? 1.8 : type === 'tower' ? 2.4 : 0;
+  for (const [i, j] of LOTS) {
+    const ring = Math.hypot(i, j);
+    if (ring > maxD) break;
+    if (ring < minRing) continue;
+    const x = ax + i * LOT + Math.floor((LOT - d.w) / 2), y = ay + j * LOT + Math.floor((LOT - d.h) / 2) + (d.h <= 2 ? 0 : 0);
+    if (footprintOk(sim, city, x, y, type)) return { x, y };
+  }
+  return null;
+}
+
+function paintRoad(sim: Sim, city: City, b: Building): void {
+  const w = sim.world, hx = city.x, hy = city.y + 1;
+  let x = b.doorX, y = b.doorY;
+  const put = (tx: number, ty: number): void => {
+    if (!w.inb(tx, ty)) return;
+    const i = ty * w.w + tx;
+    if (w.bld[i] !== 0) return;
+    const t = w.terrain[i];
+    if (t === T.GRASS || t === T.DIRT || t === T.SAVANNA || t === T.SAND || t === T.JUNGLE || t === T.TUNDRA || t === T.ASH || t === T.DESERT) { w.setTerrain(tx, ty, T.ROAD); if (OBJECTS[w.obj[i]].tree || w.obj[i] === O.GRASS_TUFT || w.obj[i] === O.BUSH) w.obj[i] = 0; }
+  };
+  put(x, y);
+  let guard = 60;
+  while ((x !== hx || y !== hy) && guard-- > 0) {
+    if (Math.abs(x - hx) > 0 && (y === hy || (x - hx) % 5 !== 0 || Math.abs(y - hy) < 1)) x += Math.sign(hx - x); else y += Math.sign(hy - y);
+    put(x, y);
+  }
+}
+
+/* ---- founding ------------------------------------------------------------------------------- */
+export function siteOk(sim: Sim, x: number, y: number, minGap: number, kingdomId = 0): boolean {
+  const w = sim.world;
+  if (!w.inb(x, y) || !OK_FARM.has(w.t(x, y))) return false;
+  for (let j = -2; j <= 3; j++) for (let i = -2; i <= 2; i++) { const t = w.t(x + i, y + j); if (!OK_BUILD.has(t) || w.bld[(y + j) * w.w + x + i] !== 0 && w.inb(x + i, y + j)) return false; }
+  for (const [, c] of sim.cities) {
+    const gap = c.kingdomId === kingdomId ? minGap * 0.7 : minGap;
+    if (Math.hypot(c.x - x, c.y - y) < gap) return false;
+  }
+  return true;
+}
+
+export function foundCity(sim: Sim, race: Race, x: number, y: number, founders: Unit[], kingdom?: Kingdom): City {
+  const id = sim.nextId++;
+  const name = placeName(sim.rng, race);
+  let k = kingdom;
+  if (!k) { k = newKingdom(sim, race); }
+  const c = new City(id, name, race, k.id, x, y);
+  c.founded = sim.time;
+  c.stock.food = 10; c.stock.wood = 12;
+  sim.cities.set(id, c);
+  k.cities.push(id);
+  if (!k.capital) k.capital = id;
+  sim.addBuilding('campfire', id, x, y, race, true);
+  paintZone(sim, c);
+  let first = true;
+  for (const u of founders) {
+    u.cityId = id; u.kingdomId = k.id; u.mode = 'wander';
+    if (first && !k.king) { u.role = 'king'; k.king = u.id; first = false; } else if (u.role === 'king') u.role = 'peasant';
+    sim.refreshLook(u);
+  }
+  sim.zoneVer++;
+  sim.note(`${k.name} fundou ${name}.`, 'city');
+  return c;
+}
+
+export function tryFoundCity(sim: Sim, u: Unit, force = false): void {
+  const x = Math.floor(u.x), y = Math.floor(u.y);
+  const group: Unit[] = [];
+  sim.near(u.x, u.y, 7, o => { if (o.def.civ && o.species === u.species && !o.cityId && o.age >= 16 && o.alive && (force || !o.kingdomId || o.kingdomId === u.kingdomId)) group.push(o); });
+  if (group.length < (force ? 1 : 2)) return;
+  if (!siteOk(sim, x, y, 16, u.kingdomId)) return;
+  const prev = sim.kingdoms.get(u.kingdomId);
+  foundCity(sim, u.species as Race, x, y, group.slice(0, 6), prev);
+}
+
+/* ---- zone (territory) ---------------------------------------------------------------------- */
+export function paintZone(sim: Sim, c: City): void {
+  const w = sim.world, r = c.radius, r2 = r * r;
+  const x0 = Math.max(0, Math.floor(c.x - r - 1)), x1 = Math.min(w.w - 1, Math.ceil(c.x + r + 1)), y0 = Math.max(0, Math.floor(c.y - r - 1)), y1 = Math.min(w.h - 1, Math.ceil(c.y + r + 1));
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const i = y * w.w + x, inside = (x - c.x) ** 2 + (y - c.y) ** 2 <= r2;
+    if (inside && (w.zone[i] === 0)) w.zone[i] = c.id;
+    else if (!inside && w.zone[i] === c.id) w.zone[i] = 0;
+  }
+  c.zoneRadius = r;
+  sim.zoneVer++;
+}
+
+/* ---- per-second town logic ----------------------------------------------------------------- */
+export function updateCities(sim: Sim, dt: number): void {
+  if (sim.tickN % 20 === 0) countPeople(sim);
+  for (const [, c] of sim.cities) {
+    c.t += dt; c.planT += dt; c.roleT += dt; c.birthT += dt; c.settleT += dt;
+    if (c.t < 1) continue;
+    c.t -= 1;
+    cityStep(sim, c);
+  }
+}
+
+function countPeople(sim: Sim): void {
+  for (const [, c] of sim.cities) { c.pop = 0; c.adults = 0; c.roles = {}; }
+  for (const k of Object.keys(sim.counts)) delete sim.counts[k as keyof typeof sim.counts];
+  for (const u of sim.units) {
+    if (!u.alive) continue;
+    sim.counts[u.species] = (sim.counts[u.species] ?? 0) + 1;
+    const c = sim.cities.get(u.cityId);
+    if (!c) continue;
+    c.pop++;
+    if (u.age >= 16) { c.adults++; c.roles[u.role] = (c.roles[u.role] ?? 0) + 1; }
+  }
+}
+
+function cityStep(sim: Sim, c: City): void {
+  const k = sim.kingdoms.get(c.kingdomId);
+  // tier & territory
+  const targetR = Math.min(26, 6 + 2.3 * Math.sqrt(c.pop));
+  if (Math.abs(targetR - c.radius) > 0.25) { c.radius += Math.sign(targetR - c.radius) * 0.25; if (Math.floor(c.radius * 2) !== Math.floor(c.zoneRadius * 2)) paintZone(sim, c); }
+  // farms ripen even untended; windmills speed it up
+  const mills = c.count(sim, 'windmill', true);
+  for (const id of c.buildings) {
+    const b = sim.buildings.get(id);
+    if (!b || !b.done || b.ruin) continue;
+    if (b.type === 'farm') b.crop = Math.min(1, b.crop + 0.012 + mills * 0.004);
+    if (b.burning > 0) { b.burning--; b.hp -= 20; if (b.hp <= 0) sim.destroyBuilding(b, null); }
+  }
+  if (c.roleT >= 4) { c.roleT = 0; balanceRoles(sim, c); }
+  if (c.planT >= 3) { c.planT = 0; planBuilding(sim, c); }
+  // births: housing and food permitting
+  const housing = homes(sim, c);
+  if (c.birthT >= Math.max(3.5, 14 / (1 + c.adults / 7)) && c.adults >= 2 && c.pop < housing && c.stock.food >= Math.min(12, c.pop * 2 + 2)) {
+    c.birthT = 0;
+    const mothers = sim.units.filter(u => u.cityId === c.id && u.female && u.age >= 18 && u.age < 45 && u.alive);
+    const m = mothers.length ? sim.rng.pick(mothers) : null;
+    const h = c.hall(sim);
+    const spot = sim.freeSpot(m ? m.x : (h ? h.doorX : c.x), m ? m.y : (h ? h.doorY : c.y), 3);
+    if (spot) {
+      const kid = sim.spawn(c.race, spot.x, spot.y, { age: 0, city: c.id, kingdom: c.kingdomId, role: 'peasant' });
+      kid.hunger = 20; sim.stats.births++;
+      sim.fx.push({ t: 'heart', x: spot.x, y: spot.y - 0.6 });
+    }
+  }
+  // loyalty: fed and near the crown is content
+  if (k) {
+    const cap = sim.cities.get(k.capital);
+    const far = cap && cap !== c ? Math.hypot(cap.x - c.x, cap.y - c.y) : 0;
+    const target = 78 + (c.stock.food > c.pop * 2 ? 8 : -22) - Math.max(0, far - 24) * 0.6 - (k.wars.size ? 10 : 0) - (c.pop > 40 ? 6 : 0) + (k.trait === 'tyrant' ? -10 : k.trait === 'diplomat' ? 6 : 0);
+    c.loyalty += (target - c.loyalty) * 0.04;
+    if (c.loyalty < 14 && c.id !== k.capital && c.pop >= 6) rebel(sim, c, k);
+  }
+  // expansion: crowded, big towns send settlers
+  if (c.settleT > 25 && c.adults >= 14 && c.failedLots >= 2 && k) { c.settleT = 0; sendSettlers(sim, c, k); }
+}
+
+function homes(sim: Sim, c: City): number {
+  let n = 0;
+  for (const id of c.buildings) { const b = sim.buildings.get(id); if (b && b.done && !b.ruin) n += b.def.beds; }
+  return n + 3;
+}
+
+function balanceRoles(sim: Sim, c: City): void {
+  const adults = sim.units.filter(u => u.cityId === c.id && u.age >= 16 && u.alive && u.role !== 'king' && u.mode !== 'march' && u.mode !== 'siege' && u.mode !== 'settle');
+  if (!adults.length) return;
+  const n = adults.length;
+  const farms = c.count(sim, 'farm', true);
+  const sites = c.buildings.reduce((a, id) => { const b = sim.buildings.get(id); return a + (b && !b.done && !b.ruin ? 1 : 0); }, 0);
+  const damaged = c.buildings.some(id => { const b = sim.buildings.get(id); return b && b.done && b.hp < b.maxHp * 0.6; });
+  const war = sim.kingdoms.get(c.kingdomId)?.wars.size ?? 0;
+  const barracks = c.count(sim, 'barracks', true);
+  const soldiers = n < 6 ? 0 : Math.round(n * (barracks ? (war ? 0.4 : 0.26) : 0.1));
+  const want: Partial<Record<Role, number>> = {
+    farmer: Math.min(Math.ceil(n * 0.4), farms * 2),
+    woodcutter: Math.max(1, Math.round(n * (c.stock.wood < 30 ? 0.3 : 0.14))),
+    builder: sites > 0 ? Math.min(5, 1 + sites) : damaged ? 1 : 0,
+    miner: c.stock.stone < 60 ? Math.max(0, Math.round(n * 0.16)) : 0,
+    soldier: Math.round(soldiers * 0.6), archer: Math.round(soldiers * 0.3), knight: c.count(sim, 'smith', true) && c.stock.ore >= 10 ? Math.round(soldiers * 0.2) : 0,
+  };
+  const have: Partial<Record<Role, number>> = {};
+  for (const u of adults) have[u.role] = (have[u.role] ?? 0) + 1;
+  const order: Role[] = ['farmer', 'builder', 'woodcutter', 'soldier', 'archer', 'miner', 'knight'];
+  const idle = adults.filter(u => u.role === 'peasant');
+  for (const r of order) {
+    let need = (want[r] ?? 0) - (have[r] ?? 0);
+    while (need > 0) {
+      let u = idle.pop();
+      if (!u) { // steal from the most over-staffed civilian role
+        const over = adults.find(a => (a.role === 'woodcutter' || a.role === 'miner' || a.role === 'farmer') && a.role !== r && (have[a.role] ?? 0) > (want[a.role] ?? 0) + 1);
+        if (!over) break;
+        have[over.role] = (have[over.role] ?? 1) - 1; u = over;
+      }
+      u.role = r; u.thinkT = 0; u.mode = 'wander'; u.path = null; releaseJobOf(sim, u); sim.refreshLook(u); need--; have[r] = (have[r] ?? 0) + 1;
+    }
+    // trim
+    let extra = (have[r] ?? 0) - (want[r] ?? 0) - 1;
+    for (const u of adults) { if (extra <= 0) break; if (u.role === r && r !== 'farmer') { u.role = 'peasant'; releaseJobOf(sim, u); sim.refreshLook(u); extra--; } }
+  }
+}
+function releaseJobOf(sim: Sim, u: Unit): void { if (u.job) { const b = sim.buildings.get(u.job); if (b && b.workers > 0) b.workers--; u.job = 0; } }
+
+function planBuilding(sim: Sim, c: City): void {
+  const sites = c.buildings.reduce((a, id) => { const b = sim.buildings.get(id); return a + (b && !b.done && !b.ruin ? 1 : 0); }, 0);
+  if (sites >= 1 + Math.floor(c.pop / 12)) return;
+  const housing = homes(sim, c), adults = c.adults;
+  const has = (t: BType): number => c.count(sim, t);
+  const want: BType[] = [];
+  if (housing < c.pop + 2) want.push(c.stock.stone >= 6 && c.pop >= 8 ? 'house' : 'hut');
+  if (has('farm') < Math.ceil(adults / 5)) want.push('farm');
+  if (!has('storehouse') && c.pop >= 5) want.push('storehouse');
+  if (!has('lumber') && c.pop >= 7) want.push('lumber');
+  if (!c.hallId && c.pop >= 8 && !has('hall')) want.push('hall');
+  if (!has('well') && c.pop >= 12) want.push('well');
+  if (!has('barracks') && c.pop >= 10 && c.hallId) want.push('barracks');
+  if (!has('smith') && c.pop >= 16 && has('barracks')) want.push('smith');
+  if (has('farm') >= 3 && !has('windmill')) want.push('windmill');
+  if (!has('temple') && c.pop >= 20) want.push('temple');
+  if (has('tower') < Math.floor(c.pop / 16)) want.push('tower');
+  if (c.pop >= 14 && housing < c.pop + 6) want.push(c.stock.stone >= 6 ? 'house' : 'hut');
+  for (const type of want) {
+    const d = BDEFS[type];
+    if (c.stock.wood < d.cost.wood || c.stock.stone < d.cost.stone) continue;
+    let spot = findLot(sim, c, type);
+    if (!spot) { c.failedLots++; continue; }
+    if (type === 'hall') { // the hall replaces the campfire at the centre
+      const camp = c.buildings.map(id => sim.buildings.get(id)).find(b => b && b.type === 'campfire');
+      if (camp) sim.removeBuilding(camp, false);
+      spot = { x: c.x - 1, y: c.y - 1 };
+      if (!footprintOk(sim, c, spot.x, spot.y, 'hall')) { spot = findLot(sim, c, 'hall'); if (!spot) { sim.addBuilding('campfire', c.id, c.x, c.y, c.race, true); continue; } }
+    }
+    c.failedLots = 0;
+    c.stock.wood -= d.cost.wood; c.stock.stone -= d.cost.stone;
+    const b = sim.addBuilding(type, c.id, spot.x, spot.y, c.race, false);
+    if (type === 'hall') c.hallId = 0;
+    void b;
+    return;
+  }
+}
+
+/* ---- politics of a town --------------------------------------------------------------------- */
+function rebel(sim: Sim, c: City, parent: Kingdom): void {
+  const k = newKingdom(sim, c.race);
+  parent.cities = parent.cities.filter(id => id !== c.id);
+  c.kingdomId = k.id; k.cities.push(c.id); k.capital = c.id; c.loyalty = 65;
+  for (const u of sim.units) if (u.cityId === c.id) { u.kingdomId = k.id; if (u.role === 'king') u.role = 'peasant'; }
+  const lead = sim.units.filter(u => u.cityId === c.id && u.age >= 18 && u.alive).sort((a, b) => b.age - a.age)[0];
+  if (lead) { lead.role = 'king'; k.king = lead.id; }
+  for (const u of sim.units) if (u.cityId === c.id) sim.refreshLook(u);
+  k.wars.add(parent.id); parent.wars.add(k.id); k.relations.set(parent.id, -80); parent.relations.set(k.id, -80);
+  sim.zoneVer++;
+  sim.note(`${c.name} se rebelou contra ${parent.name} e fundou ${k.name}!`, 'war');
+}
+
+function sendSettlers(sim: Sim, c: City, k: Kingdom): void {
+  const h = c.hall(sim);
+  if (!h) return;
+  for (let tries = 0; tries < 40; tries++) {
+    const a = sim.rng.range(0, 6.283), d = sim.rng.range(c.radius + 8, c.radius + 20);
+    const x = Math.floor(c.x + Math.cos(a) * d), y = Math.floor(c.y + Math.sin(a) * d);
+    if (!siteOk(sim, x, y, 15, k.id)) continue;
+    const crew = sim.units.filter(u => u.cityId === c.id && u.age >= 18 && u.alive && (u.role === 'peasant' || u.role === 'woodcutter') && !u.carry).slice(0, 4);
+    if (crew.length < 2) return;
+    for (const u of crew) { u.cityId = 0; u.mode = 'settle'; u.goalX = x + 0.5 + sim.rng.range(-1, 1); u.goalY = y + 0.5 + sim.rng.range(0, 2); u.path = null; u.role = 'peasant'; }
+    sim.note(`${c.name} enviou colonos para fundar uma nova vila.`, 'city');
+    return;
+  }
+}

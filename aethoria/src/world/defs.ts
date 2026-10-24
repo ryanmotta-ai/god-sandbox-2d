@@ -52,7 +52,7 @@ export const O = {
 
 export interface ObjectDef {
   name: string;
-  /** Blocks walking. */
+  /** Blocks walking (trees do not: people walk among them). */
   solid: boolean;
   tree: boolean;
   /** Wood yielded when felled (trees) or units yielded (ore/rock). */
@@ -65,14 +65,14 @@ const obj = (name: string, solid: boolean, tree: boolean, yieldAmt: number, flam
 
 export const OBJECTS: ObjectDef[] = [
   obj('', false, false, 0, 0),
-  obj('Carvalho', true, true, 4, 0.7), obj('Pinheiro', true, true, 4, 0.8), obj('Bétula', true, true, 3, 0.7),
-  obj('Palmeira', true, true, 3, 0.5), obj('Árvore da selva', true, true, 5, 0.6), obj('Acácia', true, true, 3, 0.6),
-  obj('Árvore seca', true, true, 2, 0.9), obj('Cacto', false, false, 0, 0.1),
+  obj('Carvalho', false, true, 4, 0.7), obj('Pinheiro', false, true, 4, 0.8), obj('Bétula', false, true, 3, 0.7),
+  obj('Palmeira', false, true, 3, 0.5), obj('Árvore da selva', false, true, 5, 0.6), obj('Acácia', false, true, 3, 0.6),
+  obj('Árvore seca', false, true, 2, 0.9), obj('Cacto', false, false, 0, 0.1),
   obj('Arbusto', false, false, 0, 0.8), obj('Frutinhas', false, false, 2, 0.8),
   obj('Flor', false, false, 0, 0.9), obj('Flor', false, false, 0, 0.9), obj('Flor', false, false, 0, 0.9),
   obj('Junco', false, false, 0, 0.6), obj('Pedra', false, false, 2, 0), obj('Rochedo', true, false, 4, 0),
   obj('Ferro', true, false, 6, 0), obj('Ouro', true, false, 4, 0), obj('Cobre', true, false, 5, 0),
-  obj('Cogumelo', false, false, 1, 0.3), obj('Toco', false, false, 1, 0.4), obj('Pinheiro nevado', true, true, 4, 0.7),
+  obj('Cogumelo', false, false, 1, 0.3), obj('Toco', false, false, 1, 0.4), obj('Pinheiro nevado', false, true, 4, 0.7),
   obj('Capim', false, false, 0, 0.9), obj('Ossos', false, false, 0, 0),
 ];
 

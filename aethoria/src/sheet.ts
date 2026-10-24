@@ -2,6 +2,7 @@ import { humanoidFrame, type Race } from './gfx/humanoid';
 import { makeLook, type Role } from './gfx/looks';
 import { plantSprite, type Season } from './gfx/flora';
 import { O } from './world/defs';
+import { animalFrame, A_FRAMES, type AnimalKind, type AAnim } from './gfx/animals';
 import { ANIM_FRAMES, type Anim } from './gfx/rig';
 
 /** Dev page: ?mode=roster | ?mode=anim&race=human&role=soldier&anim=walk */
@@ -12,7 +13,13 @@ function add(c: HTMLCanvasElement, parent: HTMLElement): void { c.style.width = 
 function row(title: string): HTMLElement { const h = document.createElement('h4'); h.textContent = title; root.appendChild(h); const d = document.createElement('div'); d.className = 'row'; root.appendChild(d); return d; }
 
 const mode = q.get('mode') ?? 'roster';
-if (mode === 'flora') {
+if (mode === 'animals') {
+  const kinds: AnimalKind[] = ['sheep', 'cow', 'chicken', 'rabbit', 'deer', 'boar', 'wolf', 'bear', 'snake', 'crab', 'bird'];
+  const anims = (q.get('anims') ?? 'walk,run,attack').split(',') as AAnim[];
+  for (const k of kinds) for (const a of anims) { const d = row(`${k} ${a}`); for (let f = 0; f < A_FRAMES[a]; f++) add(animalFrame(k, a, false, f), d); }
+} else if (mode === 'dragon') {
+  for (const a of ['walk', 'fly', 'breath', 'idle'] as AAnim[]) { const d = row('dragon ' + a); for (let f = 0; f < A_FRAMES[a]; f++) add(animalFrame('dragon', a, false, f), d); }
+} else if (mode === 'flora') {
   const ids = Object.values(O).filter(v => v > 0);
   for (const season of [1, 2, 3, 0] as Season[]) {
     const d = row('season ' + season);
