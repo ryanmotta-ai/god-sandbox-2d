@@ -10,7 +10,7 @@ import type { Preset } from '../world/gen';
 import type { Race } from '../gfx/humanoid';
 import { SPECIES } from '../sim/species';
 import { YEAR_SECONDS } from '../sim/species';
-import { saveGame, loadGame, hasSave } from '../core/save';
+import { saveGame, loadGame, hasSave, exportSave, importSave } from '../core/save';
 import type { Unit } from '../sim/unit';
 import type { Building } from '../sim/buildings';
 
@@ -189,8 +189,11 @@ export class UI {
     const g = this.game, modal = h('div', { class: 'modal', onclick: (e: Event) => { if (e.target === modal) modal.remove(); } });
     const act = (t: string, f: () => void): HTMLElement => h('button', { class: 'btn', style: { width: '100%', margin: '4px 0', padding: '8px' }, onclick: () => { modal.remove(); f(); } }, t);
     modal.append(h('div', { class: 'card panel', style: { width: '320px' } }, h('h2', {}, 'MENU'),
-      act('Novo mundo…', () => this.newWorldDialog()), act('Salvar mundo', () => { saveGame(g); this.toast('Mundo salvo.'); }),
-      act('Carregar mundo', () => { if (!loadGame(g)) this.toast('Nenhum save encontrado.'); }), act('Fechar', () => {})));
+      act('Novo mundo…', () => this.newWorldDialog()), act('Salvar mundo', () => { this.toast(saveGame(g) ? 'Mundo salvo.' : 'Não foi possível salvar (armazenamento cheio?).'); }),
+      act('Carregar mundo', () => { if (!loadGame(g)) this.toast('Nenhum save encontrado.'); }),
+      act('Exportar arquivo…', () => exportSave(g)),
+      act('Importar arquivo…', () => { const i = h('input', { type: 'file', accept: '.json', onchange: async () => { const f = i.files?.[0]; if (f) this.toast((await importSave(g, f)) ? 'Mundo importado.' : 'Arquivo inválido.'); } }); i.click(); }),
+      act('Fechar', () => {})));
     this.root.append(modal);
   }
 

@@ -1,5 +1,7 @@
 import { generateWorld, DEFAULT_GEN, type GenConfig } from './world/gen';
 import { Sim } from './sim/sim';
+import { newKingdom } from './sim/kingdom';
+import { foundCity } from './sim/city';
 import { Camera } from './render/camera';
 import { Renderer } from './render/renderer';
 import { TICK_DT } from './core/config';
@@ -80,6 +82,33 @@ export class Game {
     if (first) { this.cam.x = first.x * TILE; this.cam.y = first.y * TILE; }
     this.acc = 0; this.follow = null;
     for (const f of this.onWorld) f();
+  }
+
+  /** Replace the running world with a restored one (load / import). */
+  useSim(sim: Sim): void {
+    this.sim = sim;
+    this.cam.worldW = sim.world.w; this.cam.worldH = sim.world.h;
+    this.renderer.setSim(sim);
+    this.setup = { ...this.setup, size: sim.world.w, seed: sim.world.seed };
+    this.acc = 0; this.follow = null;
+    for (const f of this.onWorld) f();
+  }
+
+  /** Dev helper: two armies of `n` face each other on open ground near the camera. */
+  debugBattle(n = 14): void {
+    const sim = this.sim, cx = Math.floor(this.cam.x / TILE), cy = Math.floor(this.cam.y / TILE);
+    const a = newKingdom(sim, 'human'), b = newKingdom(sim, 'orc');
+    a.wars.add(b.id); b.wars.add(a.id);
+    const roles: Unit['role'][] = ['knight', 'soldier', 'soldier', 'archer'];
+    for (const [k, race, dx] of [[a, 'human', -16], [b, 'orc', 16]] as const) {
+      const home = foundCity(sim, race, cx + dx * 2, cy, [], k); // a realm without a town is deleted next tick
+      for (let i = 0; i < n; i++) {
+        const sp = sim.freeSpot(cx + dx + (i % 4) * (dx < 0 ? -1.4 : 1.4), cy - 3 + Math.floor(i / 4) * 1.5, 3);
+        if (!sp) continue;
+        const u = sim.spawn(race, sp.x, sp.y, { role: roles[i % 4], kingdom: k.id, city: home.id });
+        u.mode = 'march'; u.goalX = cx + (dx < 0 ? 5 : -5); u.goalY = sp.y;
+      }
+    }
   }
 
   /** Advance by real `dt` seconds: fixed 20 Hz sim steps (as many as the speed asks, within a frame budget), then draw. */
