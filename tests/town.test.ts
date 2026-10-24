@@ -22,7 +22,7 @@ assert.ok(have.has('hall'), 'no hall');
 const healer = c.buildings.map(id => sim.buildings.get(id)!).find(b => b.type === 'healer' && b.done);
 assert.ok(healer, 'no healer built');
 const patient = sim.units.find(u => u.def.civ && u.cityId === c.id && u.alive && !u.inShip && Math.hypot(u.x - healer!.cx, u.y - healer!.cy) < 40)!;
-patient.hp = 5; patient.x = healer!.doorX + 0.5; patient.y = healer!.doorY + 0.5; patient.mode = 'wander'; patient.path = null;
+sim.time = Math.floor(sim.time / 120) * 120 + 60 - 52; patient.inside = 0; patient.hp = 5; patient.x = healer!.doorX + 0.5; patient.y = healer!.doorY + 0.5; patient.mode = 'wander'; patient.path = null;
 for (let i = 0; i < 20 * 6; i++) { patient.x = healer!.doorX + 0.5; patient.y = healer!.doorY + 0.5; sim.tick(); }
 assert.ok(patient.hp > 20, `the healer did not mend (hp ${patient.hp})`);
 
