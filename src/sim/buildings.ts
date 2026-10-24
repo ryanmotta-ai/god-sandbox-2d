@@ -1,6 +1,6 @@
 import type { Race } from '../gfx/humanoid';
 
-export type BType = 'campfire' | 'hut' | 'house' | 'farm' | 'storehouse' | 'lumber' | 'barracks' | 'tower' | 'temple' | 'hall' | 'well' | 'smith' | 'windmill';
+export type BType = 'campfire' | 'hut' | 'house' | 'farm' | 'storehouse' | 'lumber' | 'barracks' | 'tower' | 'temple' | 'hall' | 'well' | 'smith' | 'windmill' | 'wall' | 'gate';
 
 export interface BDef {
   type: BType; name: string;
@@ -30,6 +30,8 @@ export const BDEFS: Record<BType, BDef> = {
   hall: { type: 'hall', name: 'Salão', w: 4, h: 3, cost: { wood: 24, stone: 24 }, hp: 900, beds: 4, build: 60, slots: 0 },
   well: { type: 'well', name: 'Poço', w: 1, h: 1, cost: { wood: 2, stone: 6 }, hp: 90, beds: 0, build: 12, slots: 0 },
   smith: { type: 'smith', name: 'Ferraria', w: 2, h: 2, cost: { wood: 8, stone: 10 }, hp: 260, beds: 0, build: 28, slots: 1 },
+  wall: { type: 'wall', name: 'Muralha', w: 1, h: 1, cost: { wood: 1, stone: 3 }, hp: 420, beds: 0, build: 5, slots: 0 },
+  gate: { type: 'gate', name: 'Portão', w: 1, h: 1, cost: { wood: 4, stone: 4 }, hp: 300, beds: 0, build: 8, slots: 0 },
   windmill: { type: 'windmill', name: 'Moinho', w: 2, h: 2, cost: { wood: 14, stone: 6 }, hp: 240, beds: 0, build: 30, slots: 1 },
 };
 

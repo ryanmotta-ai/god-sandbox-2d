@@ -20,6 +20,9 @@ export class City {
   t = 0; planT = 0; roleT = 0; birthT = 0; failedLots = 0; settleT = 0; zoneRadius = 0;
   founded = 0;
   empty = 0;
+  /** Wall ring: planned once, then placed segment by segment as stone allows. [x, y, 1 = gate]. */
+  wallsPlanned = false;
+  wallQueue: [number, number, number][] = [];
   constructor(public id: number, public name: string, public race: Race, public kingdomId: number, public x: number, public y: number) {}
 
   hall(sim: Sim): Building | null {
@@ -307,8 +310,56 @@ function balanceRoles(sim: Sim, c: City): void {
 }
 function releaseJobOf(sim: Sim, u: Unit): void { if (u.job) { const b = sim.buildings.get(u.job); if (b && b.workers > 0) b.workers--; u.job = 0; } }
 
+/** Where the ring goes: a rectangle around every building that is not a field, with a gate in the middle of each side. */
+function planWalls(sim: Sim, c: City): void {
+  const k = sim.kingdoms.get(c.kingdomId);
+  if (c.wallsPlanned || c.pop < 22 || !(c.count(sim, 'barracks', true) || (k && k.wars.size)) || c.stock.stone < 45 || c.stock.wood < 20) return;
+  let x0 = c.x, x1 = c.x, y0 = c.y, y1 = c.y, n = 0;
+  for (const id of c.buildings) {
+    const b = sim.buildings.get(id);
+    if (!b || b.ruin || b.type === 'farm' || b.type === 'windmill' || b.type === 'wall' || b.type === 'gate' || b.type === 'lumber') continue;
+    x0 = Math.min(x0, b.x); x1 = Math.max(x1, b.x + b.def.w - 1); y0 = Math.min(y0, b.y); y1 = Math.max(y1, b.y + b.def.h); n++;
+  }
+  if (n < 5) return;
+  const M = 3, w = sim.world;
+  x0 = Math.max(1, x0 - M); y0 = Math.max(1, y0 - M); x1 = Math.min(w.w - 2, x1 + M); y1 = Math.min(w.h - 2, y1 + M);
+  const mx = (x0 + x1) >> 1, my = (y0 + y1) >> 1, ring: [number, number, number][] = [];
+  const add = (x: number, y: number): void => { ring.push([x, y, (x === mx && (y === y0 || y === y1)) || (y === my && (x === x0 || x === x1)) ? 1 : 0]); };
+  for (let x = x0; x <= x1; x++) { add(x, y0); add(x, y1); }
+  for (let y = y0 + 1; y < y1; y++) { add(x0, y); add(x1, y); }
+  // gates first, then walls from the gates outward, so the town is never sealed while it is half built
+  ring.sort((a, b) => b[2] - a[2] || Math.hypot(a[0] - c.x, a[1] - c.y) - Math.hypot(b[0] - c.x, b[1] - c.y));
+  c.wallQueue = ring; c.wallsPlanned = true;
+  sim.note(`${c.name} começa a erguer muralhas.`, 'city');
+}
+
+function wallTileOk(sim: Sim, c: City, x: number, y: number): boolean {
+  const w = sim.world;
+  if (!w.inb(x, y)) return false;
+  const i = y * w.w + x;
+  return OK_BUILD.has(w.terrain[i]) && w.bld[i] === 0 && !OBJECTS[w.obj[i]].solid && (w.zone[i] === 0 || w.zone[i] === c.id);
+}
+
+function placeWalls(sim: Sim, c: City): void {
+  if (!c.wallQueue.length) return;
+  let sites = 0;
+  for (const id of c.buildings) { const b = sim.buildings.get(id); if (b && (b.type === 'wall' || b.type === 'gate') && !b.done) sites++; }
+  for (let placed = 0; placed < 3 && sites < 6 && c.wallQueue.length; ) {
+    const [x, y, gate] = c.wallQueue[0];
+    if (!wallTileOk(sim, c, x, y)) { c.wallQueue.shift(); continue; }
+    const type: BType = gate ? 'gate' : 'wall', d = BDEFS[type];
+    if (c.stock.wood < d.cost.wood || c.stock.stone < d.cost.stone) return;
+    c.wallQueue.shift(); c.stock.wood -= d.cost.wood; c.stock.stone -= d.cost.stone;
+    if (gate) { const w = sim.world, i = y * w.w + x; if (w.terrain[i] !== T.ROAD) w.setTerrain(x, y, T.ROAD); }
+    sim.addBuilding(type, c.id, x, y, c.race, false);
+    placed++; sites++;
+  }
+}
+
 function planBuilding(sim: Sim, c: City): void {
-  const sites = c.buildings.reduce((a, id) => { const b = sim.buildings.get(id); return a + (b && !b.done && !b.ruin ? 1 : 0); }, 0);
+  planWalls(sim, c);
+  placeWalls(sim, c);
+  const sites = c.buildings.reduce((a, id) => { const b = sim.buildings.get(id); return a + (b && !b.done && !b.ruin && b.type !== 'wall' && b.type !== 'gate' ? 1 : 0); }, 0);
   if (sites >= 1 + Math.floor(c.pop / 12)) return;
   const housing = homes(sim, c), adults = c.adults;
   const has = (t: BType): number => c.count(sim, t);

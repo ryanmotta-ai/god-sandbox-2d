@@ -107,6 +107,7 @@ export class Sim {
       const idx = (y + j) * w.w + x + i;
       w.bld[idx] = b.id;
       w.obj[idx] = 0;
+      if (type === 'gate') w.open[idx] = 1;
       if (b.def.field) w.setTerrain(x + i, y + j, T.FIELD);
     }
     w.touch(x, y, 3);
@@ -121,7 +122,7 @@ export class Sim {
     const w = this.world;
     for (let j = 0; j < b.def.h; j++) for (let i = 0; i < b.def.w; i++) {
       const idx = (b.y + j) * w.w + b.x + i;
-      if (w.bld[idx] === b.id) w.bld[idx] = 0;
+      if (w.bld[idx] === b.id) { w.bld[idx] = 0; w.open[idx] = 0; }
     }
     w.touch(b.x, b.y, 3);
     this.buildings.delete(b.id);

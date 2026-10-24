@@ -37,7 +37,7 @@ main.ts  rAF → game.frame(dt) → ui.update(dt)
 | Comportamento de aldeão | `sim/ai.ts` (`thinkCiv`, `act`) |
 | Bichos | `sim/fauna.ts` |
 | Quem ataca quem, dano, flecha | `sim/combat.ts` (`hostile` é a única regra) |
-| Vila: papéis, o que construir, onde | `sim/city.ts` (`balanceRoles`, `planBuilding`, `findLot`) |
+| Vila: papéis, o que construir, onde, muralhas | `sim/city.ts` (`balanceRoles`, `planBuilding`, `findLot`, `planWalls`); arte `gfx/walls.ts` |
 | Reis, relações, guerra, paz, conquista | `sim/kingdom.ts` |
 | Tornado, meteoro, vulcão… | `sim/disasters.ts`; poderes (dados) em `sim/powers.ts` |
 | Desenhar o mundo, FX, luz, clima | `render/renderer.ts`, `render/fx.ts`, `render/atmosphere.ts` |

@@ -8,7 +8,7 @@ const OSOLID = Uint8Array.from(OBJECTS.map(o => (o.solid ? 1 : 0)));
 /** Cost of entering a tile, or 0 if blocked. Trees are passable (walked among); boulders, ore and buildings are not. */
 export function stepCost(w: World, i: number, canWade = true): number {
   const c = TCOST[w.terrain[i]];
-  if (c === 0 || (!canWade && TWATER[w.terrain[i]]) || w.bld[i] !== 0 || OSOLID[w.obj[i]] !== 0) return 0;
+  if (c === 0 || (!canWade && TWATER[w.terrain[i]]) || (w.bld[i] !== 0 && w.open[i] === 0) || OSOLID[w.obj[i]] !== 0) return 0;
   return c;
 }
 

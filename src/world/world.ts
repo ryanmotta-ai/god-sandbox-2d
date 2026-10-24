@@ -26,6 +26,8 @@ export class World {
   zone: Uint16Array;
   /** Occupying building id + 1; 0 = none. */
   bld: Uint16Array;
+  /** 1 where a building tile can be walked through (an open gate). */
+  open: Uint8Array;
   /** Per-chunk version; renderer re-bakes when it changes. */
   chunkVer: Uint32Array;
   activeFires = new Set<number>();
@@ -43,6 +45,7 @@ export class World {
     this.fire = new Uint8Array(n);
     this.zone = new Uint16Array(n);
     this.bld = new Uint16Array(n);
+    this.open = new Uint8Array(n);
     this.chunkVer = new Uint32Array(this.cw * Math.ceil(h / CHUNK)).fill(1);
   }
 
@@ -81,7 +84,7 @@ export class World {
   isWalkable(x: number, y: number): boolean {
     if (!this.inb(x, y)) return false;
     const i = y * this.w + x;
-    return TERRAIN[this.terrain[i]].walk && !OBJECTS[this.obj[i]].solid && this.bld[i] === 0;
+    return TERRAIN[this.terrain[i]].walk && !OBJECTS[this.obj[i]].solid && (this.bld[i] === 0 || this.open[i] === 1);
   }
 
   /** Walkable ignoring buildings (units may path through their own gates). */

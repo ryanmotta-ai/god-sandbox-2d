@@ -6,6 +6,7 @@ import { makeWaterFrames, WATER_FRAMES } from '../gfx/water';
 import { plantSprite, PCX, PBASE, type Season } from '../gfx/flora';
 import { mountainSprite, MCX, MBASE } from '../gfx/mountain';
 import { buildingSprite, cropSprite, bSize } from '../gfx/buildings';
+import { wallSprite, WALL_H } from '../gfx/walls';
 import { hash2 } from '../core/rng';
 import { T, O, TERRAIN } from '../world/defs';
 import type { Sim } from '../sim/sim';
@@ -233,8 +234,12 @@ export class Renderer {
     const d = b.def, size = bSize(b.type);
     const stage = b.progress >= 1 ? 3 : b.progress < 0.34 ? 0 : b.progress < 0.67 ? 1 : 2;
     const dmg = b.hp < b.maxHp * 0.3 ? 2 : b.hp < b.maxHp * 0.65 ? 1 : 0;
-    const spr = buildingSprite(b.type, b.race, stage, dmg);
-    const x = b.x * TILE - 8, y = (b.y + d.h) * TILE - size.h + 8;
+    let spr: HTMLCanvasElement, x = b.x * TILE - 8, y = (b.y + d.h) * TILE - size.h + 8;
+    if (b.type === 'wall' || b.type === 'gate') { // wall pieces join their neighbours
+      const world = sim.world, link = (dx: number, dy: number): number => { const t = sim.buildings.get(world.bld[(b.y + dy) * world.w + b.x + dx])?.type; return t === 'wall' || t === 'gate' || t === 'tower' ? 1 : 0; };
+      const mask = link(0, -1) | (link(1, 0) << 1) | (link(0, 1) << 2) | (link(-1, 0) << 3);
+      spr = wallSprite(b.race, mask, b.type === 'gate', stage, dmg); y = (b.y + 1) * TILE - WALL_H + 8;
+    } else spr = buildingSprite(b.type, b.race, stage, dmg);
     ctx.drawImage(spr, x, y);
     if (b.hurtT > 0) { b.hurtT -= 0.016; ctx.globalAlpha = 0.5; ctx.drawImage(flashOf(spr), x, y); ctx.globalAlpha = 1; }
     const city = sim.cities.get(b.cityId), k = city ? sim.kingdoms.get(city.kingdomId) : null;

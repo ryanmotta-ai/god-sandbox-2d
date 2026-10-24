@@ -4,6 +4,7 @@ import { plantSprite, type Season } from './gfx/flora';
 import { O } from './world/defs';
 import { animalFrame, A_FRAMES, type AnimalKind, type AAnim } from './gfx/animals';
 import { buildingSprite } from './gfx/buildings';
+import { wallSprite } from './gfx/walls';
 import { BDEFS, type BType } from './sim/buildings';
 import { engineFrame, E_FRAMES } from './gfx/engines';
 import { ANIM_FRAMES, type Anim } from './gfx/rig';
@@ -20,7 +21,7 @@ if (mode === 'engines') {
   for (const k of ['ram', 'catapult'] as const) for (const a of ['walk', 'attack'] as const) { const d = row(`${k} ${a}`); for (let f = 0; f < E_FRAMES[a]; f++) add(engineFrame(k, a, false, f), d); }
 } else if (mode === 'buildings') {
   const stage = +(q.get('stage') ?? 3), dmg = +(q.get('dmg') ?? 0);
-  for (const race of ['human', 'elf', 'dwarf', 'orc'] as Race[]) { const d = row(race); for (const t of Object.keys(BDEFS) as BType[]) add(buildingSprite(t, race, stage, dmg), d); }
+  for (const race of ['human', 'elf', 'dwarf', 'orc'] as Race[]) { const d = row(race); for (const t of Object.keys(BDEFS) as BType[]) if (t !== 'wall' && t !== 'gate') add(buildingSprite(t, race, stage, dmg), d); for (const m of [0, 2, 10, 8, 1, 5, 15, 3, 6]) add(wallSprite(race, m, false, 3, dmg), d); add(wallSprite(race, 10, true, 3, dmg), d); add(wallSprite(race, 5, true, 3, dmg), d); }
 } else if (mode === 'animals') {
   const kinds: AnimalKind[] = ['sheep', 'cow', 'chicken', 'rabbit', 'deer', 'boar', 'wolf', 'bear', 'snake', 'crab', 'bird'];
   const anims = (q.get('anims') ?? 'walk,run,attack').split(',') as AAnim[];

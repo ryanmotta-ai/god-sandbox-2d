@@ -30,7 +30,7 @@ export function snapshot(sim: Sim): Snapshot {
     sim: { time: sim.time, tickN: sim.tickN, nextId: sim.nextId, rng: sim.rng.state, grng: rng.state, weather: sim.weather, weatherT: sim.weatherT, stats: sim.stats, log: sim.log.slice(-40) },
     units: sim.units.filter(u => u.alive).map(u => [u.id, u.species, +u.x.toFixed(3), +u.y.toFixed(3), u.dir, u.hp, u.maxHp, u.age, u.female, u.name, u.hunger, u.cityId, u.kingdomId, u.role, u.variant, u.carry, u.traits, u.kills, u.mode === 'march' || u.mode === 'siege' || u.mode === 'settle' ? u.mode : 'wander', u.goalX, u.goalY, u.job, u.east]),
     buildings: [...sim.buildings.values()].map(b => [b.id, b.type, b.cityId, b.x, b.y, b.race, b.progress, b.hp, b.crop, b.burning]),
-    cities: [...sim.cities.values()].map(c => [c.id, c.name, c.race, c.kingdomId, c.x, c.y, c.stock, c.loyalty, c.radius, c.hallId, c.buildings, c.founded]),
+    cities: [...sim.cities.values()].map(c => [c.id, c.name, c.race, c.kingdomId, c.x, c.y, c.stock, c.loyalty, c.radius, c.hallId, c.buildings, c.founded, c.wallsPlanned, c.wallQueue]),
     kingdoms: [...sim.kingdoms.values()].map(k => [k.id, k.name, k.race, k.color, k.trait, k.founded, k.cities, k.king, k.capital, [...k.relations], [...k.wars], [...k.truce], [...k.warSince]]),
   };
 }
@@ -52,13 +52,14 @@ export function restore(s: Snapshot): Sim {
   }
   for (const r of s.cities as any[]) {
     const c = new City(r[0], r[1], r[2] as Race, r[3], r[4], r[5]);
-    c.stock = r[6]; c.loyalty = r[7]; c.radius = r[8]; c.hallId = r[9]; c.buildings = r[10]; c.founded = r[11]; c.zoneRadius = c.radius;
+    c.stock = r[6]; c.loyalty = r[7]; c.radius = r[8]; c.hallId = r[9]; c.buildings = r[10]; c.founded = r[11]; c.zoneRadius = c.radius; c.wallsPlanned = r[12] ?? false; c.wallQueue = r[13] ?? [];
     sim.cities.set(c.id, c);
   }
   for (const r of s.buildings as any[]) {
     const b = new Building(r[0], r[1], r[2], r[3], r[4], r[5] as Race);
     b.progress = r[6]; b.hp = r[7]; b.crop = r[8]; b.burning = r[9];
     sim.buildings.set(b.id, b);
+    if (b.type === 'gate') for (let j = 0; j < b.def.h; j++) for (let i = 0; i < b.def.w; i++) world.open[(b.y + j) * world.w + b.x + i] = 1;
   }
   for (const r of s.units as any[]) {
     const u = new Unit(r[0], r[1] as Species, r[2], r[3]);

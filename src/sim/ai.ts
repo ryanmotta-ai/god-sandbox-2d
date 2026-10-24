@@ -271,7 +271,9 @@ function startBuild(sim: Sim, u: Unit, city: City): void {
     if (d < bd) { bd = d; best = b; }
   }
   if (!best) { wanderNear(sim, u, city.x + 0.5, city.y + 0.5, 6); return; }
-  best.workers++; u.job = best.id; u.mode = 'build'; u.goalX = best.doorX + 0.5; u.goalY = best.doorY + 0.5; u.jobT = 0; u.path = null;
+  // a one-tile wall piece may have no free door tile (houses crowd it): work it from any side
+  const small = best.def.w === 1 && best.def.h === 1;
+  best.workers++; u.job = best.id; u.mode = 'build'; u.goalX = small ? best.cx : best.doorX + 0.5; u.goalY = small ? best.cy : best.doorY + 0.5; u.jobT = 0; u.path = null;
 }
 
 function startPatrol(sim: Sim, u: Unit, city: City): void {
@@ -371,7 +373,7 @@ function act(sim: Sim, u: Unit, dt: number): void {
     case 'build': {
       const b = sim.buildings.get(u.job);
       if (!b || b.ruin) { releaseJob(sim, u); u.mode = 'wander'; return; }
-      const m = moveTo(sim, u, u.goalX, u.goalY, dt, 1, 1.1);
+      const m = moveTo(sim, u, u.goalX, u.goalY, dt, 1, b.def.w === 1 && b.def.h === 1 ? 1.6 : 1.1);
       if (m === 'moving') { setAct(u, 'walk'); return; }
       if (m === 'blocked') { releaseJob(sim, u); u.mode = 'wander'; return; }
       face(u, b.cx - u.x, b.cy - u.y);
@@ -440,7 +442,7 @@ export function nearestEnemyBuilding(sim: Sim, u: Unit, r: number): Building | n
   if (!k) return null;
   let best: Building | null = null, bd = r * r;
   for (const [, b] of sim.buildings) {
-    if (b.ruin) continue;
+    if (b.ruin || b.type === 'wall' || b.type === 'gate') continue;
     const c = sim.cities.get(b.cityId);
     if (!c || !k.wars.has(c.kingdomId)) continue;
     const d = (b.cx - u.x) ** 2 + (b.cy - u.y) ** 2;
