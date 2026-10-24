@@ -9,11 +9,12 @@ import { TRAIT_NAMES, soldiersOf, makePeace } from '../sim/kingdom';
 import { SPECIES } from '../sim/species';
 import { kill } from '../sim/combat';
 import { TILE } from '../core/config';
+import { aboard, shipMission } from '../sim/navy';
 
 export type Sel = { kind: 'unit' | 'building' | 'city' | 'kingdom'; id: number };
 
-const MODE: Record<string, string> = { wander: 'Vagando', goto: 'Andando', chop: 'Cortando madeira', mine: 'Minerando', quarry: 'Cortando pedra', farm: 'Cultivando', build: 'Construindo', haul: 'Carregando', eat: 'Comendo', forage: 'Colhendo frutas', flee: 'Fugindo', attack: 'Lutando', march: 'Marchando', siege: 'Cercando', patrol: 'Patrulhando', graze: 'Pastando', settle: 'Migrando', dragon: 'Caçando', dead: 'Morto' };
-const ROLE: Record<string, string> = { peasant: 'Aldeão', farmer: 'Fazendeiro', woodcutter: 'Lenhador', miner: 'Minerador', builder: 'Construtor', soldier: 'Soldado', archer: 'Arqueiro', knight: 'Cavaleiro', king: 'Rei', mage: 'Mago', child: 'Criança' };
+const MODE: Record<string, string> = { wander: 'Vagando', goto: 'Andando', chop: 'Cortando madeira', mine: 'Minerando', quarry: 'Cortando pedra', farm: 'Cultivando', build: 'Construindo', haul: 'Carregando', eat: 'Comendo', forage: 'Colhendo frutas', flee: 'Fugindo', attack: 'Lutando', march: 'Marchando', siege: 'Cercando', patrol: 'Patrulhando', graze: 'Pastando', settle: 'Migrando', dragon: 'Caçando', board: 'Indo ao cais', aboard: 'A bordo', ship: 'Navegando', dead: 'Morto' };
+const ROLE: Record<string, string> = { fisher: 'Pescador', sailor: 'Marujo', peasant: 'Aldeão', farmer: 'Fazendeiro', woodcutter: 'Lenhador', miner: 'Minerador', builder: 'Construtor', soldier: 'Soldado', archer: 'Arqueiro', knight: 'Cavaleiro', king: 'Rei', mage: 'Mago', child: 'Criança' };
 const TRAIT: Record<string, string> = { strong: 'Forte', quick: 'Veloz', plague: 'Peste', brave: 'Corajoso' };
 
 type Updater = () => void;
@@ -66,7 +67,19 @@ export class Inspector {
   private col = (f: number): string => (f > 0.5 ? '#5ad25a' : f > 0.25 ? '#e0c030' : '#e0504a');
   private hungerCol = (f: number): string => (f < 0.5 ? '#5ad25a' : f < 0.8 ? '#e0c030' : '#e0504a');
 
+  private ship(u: Unit): void {
+    const sim = this.game.sim, d = u.def, k = sim.kingdoms.get(u.kingdomId), c = sim.cities.get(u.cityId);
+    this.head(`u_${u.species}`, u.name || d.name, d.name);
+    this.el.append(this.bar('Casco', () => u.hp / u.maxHp, this.col), this.kv('Missão', () => shipMission(u)), this.kv('A bordo', () => String(aboard(sim, u).length)),
+      this.kv('Carga', () => u.hold ? `comida ${u.hold[0] | 0} · madeira ${u.hold[1] | 0} · pedra ${u.hold[2] | 0} · minério ${u.hold[3] | 0}` : '—'), this.kv('Abates', () => String(u.kills)));
+    const chips = h('div', { class: 'chips' });
+    if (k) chips.append(this.link(k.name, k.color, () => this.onSelect({ kind: 'kingdom', id: k.id })));
+    if (c) chips.append(this.link(c.name, null, () => this.onSelect({ kind: 'city', id: c.id })));
+    this.el.append(chips, h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: () => { this.game.follow = this.game.follow === u ? null : u; } }, 'Seguir'), h('button', { class: 'btn small danger', onclick: () => kill(sim, u, null, 'ira divina') }, 'Afundar')));
+  }
+
   private unit(u: Unit): void {
+    if (u.def.ship) return this.ship(u);
     const sim = this.game.sim, d = u.def;
     this.head(`u_${u.species}`, u.name || d.name, `${d.name}${d.civ ? ' · ' + (u.age < 16 ? 'Criança' : ROLE[u.role] ?? '') : ''}`);
     this.el.append(
@@ -127,10 +140,12 @@ export class Inspector {
     this.el.append(h('div', { class: 'sub', style: { marginTop: '6px' } }, 'Vilas'), cities);
     const wars = h('div', { class: 'chips' });
     for (const id of k.wars) { const o = sim.kingdoms.get(id); if (o) wars.append(this.link('⚔ ' + o.name, o.color, () => this.onSelect({ kind: 'kingdom', id }))); }
+    const allies = h('div', { class: 'chips' });
+    for (const id of k.allies) { const o = sim.kingdoms.get(id); if (o) allies.append(this.link('🤝 ' + o.name, o.color, () => this.onSelect({ kind: 'kingdom', id }))); }
     const rels = h('div', { class: 'chips' });
     const rel = [...k.relations.entries()].filter(([id]) => sim.kingdoms.has(id) && !k.wars.has(id)).sort((a, b) => a[1] - b[1]).slice(0, 5);
     for (const [id, v] of rel) { const o = sim.kingdoms.get(id)!; rels.append(this.link(`${o.name.split(' de ')[1] ?? o.name} ${v > 0 ? '+' : ''}${v.toFixed(0)}`, o.color, () => this.onSelect({ kind: 'kingdom', id }))); }
-    this.el.append(h('div', { class: 'sub' }, k.wars.size ? 'Em guerra com' : 'Em paz'), wars, h('div', { class: 'sub' }, 'Relações'), rels,
+    this.el.append(h('div', { class: 'sub' }, k.wars.size ? 'Em guerra com' : 'Em paz'), wars, ...(k.allies.size ? [h('div', { class: 'sub' }, 'Aliados'), allies] : []), h('div', { class: 'sub' }, 'Relações'), rels,
       h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: () => { for (const id of [...k.wars]) { const o = sim.kingdoms.get(id); if (o) makePeace(sim, k, o, 160); } } }, 'Impor paz'),
         h('button', { class: 'btn small', onclick: () => { const c = sim.cities.get(k.capital); if (c) { this.game.cam.x = c.x * TILE; this.game.cam.y = c.y * TILE; } } }, 'Capital')));
   }

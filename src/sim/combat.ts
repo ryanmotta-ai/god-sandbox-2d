@@ -2,6 +2,7 @@ import type { Sim, Arrow } from './sim';
 import type { Unit } from './unit';
 import { SPECIES } from './species';
 import { hash2 } from '../core/rng';
+import { sinkShip } from './navy';
 
 /** Who may hurt whom. One rule, used by every AI. */
 export function hostile(sim: Sim, a: Unit, b: Unit): boolean {
@@ -45,7 +46,7 @@ export function damage(sim: Sim, target: Unit, raw: number, from: Unit | null): 
   target.hp -= dmg; target.hurtT = 0.18;
   sim.fx.push({ t: 'hit', x: target.x, y: target.y - 0.4 });
   if (target.def.civ || target.def.diet !== 'none') sim.fx.push({ t: 'blood', x: target.x, y: target.y - 0.3 });
-  if (from) {
+  if (from && !target.def.ship) {
     const dx = target.x - from.x, dy = target.y - from.y, l = Math.hypot(dx, dy) || 1;
     const nx = target.x + (dx / l) * 0.18, ny = target.y + (dy / l) * 0.18;
     if (sim.walkable(nx, ny)) { target.x = nx; target.y = ny; }
@@ -72,6 +73,7 @@ export function kill(sim: Sim, u: Unit, by: Unit | null, why = ''): void {
     if (k && k.king === u.id) { sim.note(`${k.name}: o rei ${u.name} morreu${by ? ` (${by.def.name})` : why ? ` (${why})` : ''}.`, 'death'); k.king = 0; }
   }
   if (u.species === 'dragon') sim.note('Um dragão foi abatido!', 'death');
+  if (u.def.ship) sinkShip(sim, u);
   // the dead rise: a zombie's victim, or the plague's, comes back wrong
   if (u.def.civ && (by?.species === 'zombie' || (u.traits.includes('plague') && sim.rng.chance(0.45)))) { u.stateT = 99; sim.spawn('zombie', u.x, u.y); }
 }

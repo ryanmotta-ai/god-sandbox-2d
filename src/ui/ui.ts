@@ -50,6 +50,7 @@ export class UI {
       h('button', { class: 'btn', title: 'Bordas dos reinos', onclick: (e: Event) => { g.renderer.showBorders = !g.renderer.showBorders; (e.currentTarget as HTMLElement).classList.toggle('on', g.renderer.showBorders); } }, 'Bordas'),
       h('button', { class: 'btn on', title: 'Nomes das vilas', onclick: (e: Event) => { g.renderer.showNames = !g.renderer.showNames; (e.currentTarget as HTMLElement).classList.toggle('on', g.renderer.showNames); } }, 'Nomes'),
       h('button', { class: 'btn on', title: 'Som', onclick: (e: Event) => { g.sound.unlock(); g.sound.setEnabled(!g.sound.enabled); (e.currentTarget as HTMLElement).classList.toggle('on', g.sound.enabled); } }, 'Som'),
+      h('button', { class: 'btn on', title: 'Música', onclick: (e: Event) => { g.sound.unlock(); g.music.start(); g.music.setEnabled(!g.music.enabled); (e.currentTarget as HTMLElement).classList.toggle('on', g.music.enabled); } }, 'Música'),
       h('button', { class: 'btn', onclick: () => this.menu() }, '☰ Menu'));
     menu.children[0].classList.add('on');
     this.feed = h('div', { id: 'feed' });
@@ -212,7 +213,7 @@ export class UI {
   private pickAt(sx: number, sy: number): Sel | null {
     const g = this.game, sim = g.sim, w = g.cam.toWorld(sx, sy), tx = w.x / TILE, ty = w.y / TILE;
     let best: Unit | null = null, bd = 1.5;
-    sim.near(tx, ty + 0.5, 2, u => { const flyOff = u.species === 'bird' ? 0.9 : u.species === 'dragon' ? 1.5 : 0; const d = Math.hypot(u.x - tx, u.y - flyOff - (ty + 0.3)); if (d < bd) { bd = d; best = u; } });
+    sim.near(tx, ty + 0.5, 2, u => { const flyOff = u.species === 'bird' ? 0.9 : u.species === 'dragon' ? 1.5 : u.def.ship ? 1.3 : 0; const d = Math.hypot(u.x - tx, u.y - flyOff - (ty + 0.3)) * (u.def.ship ? 0.6 : 1); if (d < bd) { bd = d; best = u; } });
     if (best) return { kind: 'unit', id: (best as Unit).id };
     // buildings are tall: also test the sprite's roof area above the footprint
     let bb: Building | null = null;
@@ -227,7 +228,7 @@ export class UI {
     const c = this.canvas, g = this.game, p = this.pointer;
     c.addEventListener('contextmenu', e => e.preventDefault());
     c.addEventListener('pointerdown', e => {
-      g.sound.unlock();
+      g.sound.unlock(); g.music.start();
       const dpr = window.devicePixelRatio || 1;
       p.x = e.clientX * dpr; p.y = e.clientY * dpr; p.sx = p.x; p.sy = p.y; p.moved = false; p.fire = 0;
       c.setPointerCapture(e.pointerId);

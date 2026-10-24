@@ -42,12 +42,21 @@ Menu: novo mundo (5 formas, tamanho, água/montanhas/florestas/clima, povos, sem
   neve, névoa e tempestade com raios.
 * **Arte** — tudo desenhado por código, 1 tile = 32 px: humanos, elfos, anões e orcs com rig esquelético
   (cinemática inversa nas pernas e braços, 4 direções reais, 13 animações: andar, correr, golpear, atirar,
-  cortar, minerar, cultivar, martelar, conjurar, morrer…); 11 animais, dragão e zumbi; aríete e catapulta; 13 tipos de
-  prédio em 4 estilos de raça, com obra em andamento, dano e fumaça de chaminé.
+  cortar, minerar, cultivar, martelar, conjurar, morrer…); 11 animais, dragão e zumbi; aríete e catapulta; 33 tipos de
+  prédio (casas, mercado, taverna, padaria, estábulo, casa de cura, chafariz, fortaleza, pomar…) em 4 estilos de raça e 4 variações
+  cada, com obra em andamento, dano, fumaça, placa que balança, forno aceso e jatos de chafariz; postes, bancos, barris e carroças nas ruas.
 * **Vida** — fome, idade, nascimento, trabalho físico (lenha, pedra, fazenda, construção, caça), ecologia com
   predadores e presas, fogo que se espalha, lava que esfria, árvores que crescem e semeiam.
 * **Civilização** — grupos fundam vilas; o planejador loteia o terreno, pavimenta ruas e constrói; território com
   borda; colonos fundam novas vilas; reis com temperamento; lealdade que pode virar revolta.
+* **Mar** — vilas costeiras constroem rancho de pesca, cais (sobre o raso), estaleiro e farol (com feixe à noite).
+  Os navios são unidades de verdade, com tripulação a bordo: canoa e barco de pesca (a pesca esgota e repõe o
+  cardume), mercante (**troca física** de excedente por falta entre portos, sem moeda; melhora a relação entre
+  reinos e leva colonos para ilhas vazias), barco de guerra, galé (aríete e arqueiros) e galeão (lança pedras).
+  Frotas patrulham, caçam navios, atacam cais e **levam o exército por mar**: embarca, desembarca na praia e cerca.
+* **Vida nas ruas** — de noite a vila dorme dentro de casa (as janelas acesas e as ruas vazias), de manhã todos saem; ao entardecer
+  o povo vai à taverna, de dia ao mercado, buscam água no poço, conversam aos pares (balões de fala), as crianças brincam de pega e,
+  de vez em quando, a vila faz **festa** na praça com dança, música e confete.
 * **Guerra** — diplomacia por relação e temperamento, exércitos que se reúnem, marcham em formação e cercam;
   arqueiros com flechas em arco, torres que atiram, aríetes que derrubam portas, catapultas que lançam pedras;
   conquista troca a cor da vila. **Um modelo só:** a batalha é o combate físico, sem planilha escondida.
@@ -68,11 +77,11 @@ tools       sondas de balanceamento, capturas de tela, folhas de sprites
 ```
 
 Ferramentas úteis: `npx tsx tools/probe2.ts 1200 7 192` (série temporal de um mundo de 4 povos),
-`?mode=roster|anim|flora|animals|buildings|engines` em `/sheet.html` (folha de sprites),
+`?mode=roster|anim|flora|animals|buildings|engines|ships` em `/sheet.html` (folha de sprites),
 `window.aethoria.debugBattle()` no console.
 
 ## Ainda não
 
-Navios e portos, muralhas e portões, alianças entre reinos, música, toque/celular.
+Toque/celular.
 
 O jogo antigo (Aetherio) não está mais na árvore, mas segue no histórico: `git checkout 647ec9e` (último commit do jogo antigo).

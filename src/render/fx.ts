@@ -40,6 +40,8 @@ export class Particles {
       case 'leaf': for (let i = 0; i < 5; i++) this.add({ x: x + r(-6, 6), y, z: r(18, 30), vx: r(-12, 12), vz: r(-10, 8), g: 30, life: r(0.8, 1.4), max: 1.4, size: 2, c: Math.random() < 0.5 ? '#4a9a38' : '#7ab84a' }); break;
       case 'coin': this.add({ x, y, z: 14, vz: 26, g: 60, life: 0.5, max: 0.5, size: 2, c: '#ffd84a', add: true }); break;
       case 'heart': this.add({ x, y, z: 10, vz: 22, life: 1.1, max: 1.1, kind: KIND.text, c: '♥' }); break;
+      case 'note': this.add({ x: x + r(-4, 4), y, z: 16, vx: r(-6, 6), vz: r(16, 26), life: 1.5, max: 1.5, kind: KIND.text, c: Math.random() < 0.5 ? '♪' : '♫' }); break;
+      case 'confetti': for (let i = 0; i < 10; i++) this.add({ x: x + r(-14, 14), y: y + r(-6, 6), z: r(34, 54), vx: r(-12, 12), vy: r(-6, 6), vz: r(-6, 4), g: 26, life: r(1.2, 2), max: 2, size: 2, c: ['#ff5a7a', '#ffd84a', '#5ad0ff', '#7aff9a', '#ff9a3a', '#c88aff'][i % 6] }); break;
       case 'zzz': this.add({ x, y, z: 14, vz: 14, life: 1.6, max: 1.6, kind: KIND.text, c: 'z' }); break;
       case 'flash': this.flash = Math.max(this.flash, e.a ?? 0.6); break;
       case 'lightning': {
@@ -77,7 +79,7 @@ export class Particles {
         case KIND.smoke: ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = Math.min(0.55, t * 0.7); ctx.fillStyle = p.c; { const s = Math.round(p.size); ctx.fillRect(sx - (s >> 1), sy - (s >> 1), s, s); } break;
         case KIND.fire: { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.min(1, t * 1.6); const s = Math.max(1, Math.round(p.size * t)); ctx.fillStyle = t > 0.6 ? '#ffe28a' : t > 0.3 ? '#ff8a2a' : '#c4301a'; ctx.fillRect(sx - (s >> 1), sy - s, s, s); break; }
         case KIND.ring: ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = t * 0.7; ctx.strokeStyle = p.c; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(sx, sy, p.size + (1 - t) * 14, (p.size + (1 - t) * 14) * 0.5, 0, 0, 6.283); ctx.stroke(); break;
-        case KIND.text: ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = Math.min(1, t * 2); ctx.fillStyle = p.c === '♥' ? '#ff5a7a' : '#dde8ff'; ctx.font = 'bold 9px sans-serif'; ctx.fillText(p.c, sx, sy); break;
+        case KIND.text: ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = Math.min(1, t * 2); ctx.fillStyle = p.c === '♥' ? '#ff5a7a' : p.c === '♪' || p.c === '♫' ? '#ffe27a' : '#dde8ff'; ctx.font = 'bold 9px sans-serif'; ctx.fillText(p.c, sx, sy); break;
       }
     }
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;

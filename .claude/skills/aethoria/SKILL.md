@@ -32,16 +32,19 @@ main.ts  rAF → game.frame(dt) → ui.update(dt)
 | Humanoides: proporções, andar, golpe | `gfx/rig.ts` (poses + IK), `gfx/humanoid.ts` (desenho), `gfx/looks.ts` (visual por raça/função) |
 | Animais, dragão | `gfx/animals.ts` |
 | Árvores, pedras, minérios | `gfx/flora.ts`; montanhas `gfx/mountain.ts` |
-| Prédios (por raça/estágio/dano) | `gfx/buildings.ts`; dados em `sim/buildings.ts` |
+| Prédios (por raça/estágio/dano/variação) | `gfx/buildings.ts` (casas e utilitários), `gfx/town.ts` (cívicos), `gfx/port.ts` (porto); dados em `sim/buildings.ts`; efeitos em `city.ts` (`perksOf`) |
+| Mobília de rua (postes, bancos, barris) | `gfx/props.ts` (`propAt`: função pura do tile, sem estado) |
+| Navios, portos, pesca, troca, colonização e invasão por mar | `sim/navy.ts` (mapas de terra/mar, docas, estaleiro, missões), `sim/fleet.ts` (guerra naval); arte `gfx/ships.ts`, `gfx/port.ts` |
 | Aríete, catapulta | `gfx/engines.ts` (arte), `sim/siege.ts` (IA e construção) |
-| Comportamento de aldeão | `sim/ai.ts` (`thinkCiv`, `act`) |
+| Comportamento de aldeão | `sim/ai.ts` (`thinkCiv`, `act`); lazer, sono, festa em `sim/social.ts` |
 | Bichos | `sim/fauna.ts` |
 | Quem ataca quem, dano, flecha | `sim/combat.ts` (`hostile` é a única regra) |
-| Vila: papéis, o que construir, onde | `sim/city.ts` (`balanceRoles`, `planBuilding`, `findLot`) |
+| Vila: papéis, o que construir, onde, muralhas | `sim/city.ts` (`balanceRoles`, `planBuilding`, `findLot`, `planWalls`); arte `gfx/walls.ts` |
 | Reis, relações, guerra, paz, conquista | `sim/kingdom.ts` |
 | Tornado, meteoro, vulcão… | `sim/disasters.ts`; poderes (dados) em `sim/powers.ts` |
 | Desenhar o mundo, FX, luz, clima | `render/renderer.ts`, `render/fx.ts`, `render/atmosphere.ts` |
 | HUD, ferramentas, inspetor, minimapa | `ui/ui.ts`, `ui/inspector.ts`, `ui/icons.ts` |
+| Música ambiente (humor: dia/noite/chuva/guerra) | `core/music.ts` (usa o `AudioContext` de `core/sound.ts`) |
 | Salvar/carregar | `core/save.ts` (lista de campos única + `tests/save.test.ts`) |
 
 ## Invariantes que quebram em silêncio
@@ -57,6 +60,11 @@ main.ts  rAF → game.frame(dt) → ui.update(dt)
 8. **`FxEvent` novo?** cubra em `render/fx.ts` e, se tiver som, em `core/sound.ts`.
 9. **Sprites são cacheados por chave**: variação nova de aparência entra na chave (ex. `keyOf(look)`).
 10. **Tuning pelos números**: `tools/probe2.ts` (mundo de 4 povos) e `tools/probe.ts` (um povo).
+
+11. **Navio é `Unit` com `def.ship`** (pathing em água: `findPath(..., sea=true)`). Quem está a bordo tem `inShip`: fica
+    fora da grade espacial, do desenho e do `think`; se o navio afunda, vira nadador. Filtro "unidades da cidade" que
+    não pode contar passageiro deve checar `!u.inShip`. Prédio de água (`def.water`) tem `ax/ay` (cais, em terra) e
+    `bx/by` (atracadouro) calculados em `initPort`, que o save refaz.
 
 ## Ferramentas
 

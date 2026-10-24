@@ -7,6 +7,8 @@ import { hostile, damage, kill, shoot, attackPower, MELEE } from './combat';
 export { updateArrows } from './combat';
 import { thinkAnimal, actDragon } from './fauna';
 import { thinkEngine, actEngine } from './siege';
+import { thinkShip, actShip, actBoard, geo } from './navy';
+import { thinkLeisure, actSocial, tickInside, LEISURE } from './social';
 import { isEngine } from './species';
 import { hash2 } from '../core/rng';
 import type { Building } from './buildings';
@@ -82,16 +84,22 @@ export function updateUnits(sim: Sim, dt: number): void {
     const d = u.def;
     u.age += dt / YEAR_SECONDS;
     if (u.age > d.maxAge * (0.85 + hash2(u.id, 1, 9) * 0.3)) { kill(sim, u, null, 'velhice'); continue; }
+    if (u.inShip) { // riding a ship: hidden, fed from the ship's stores, carried wherever it goes
+      const s = sim.byId.get(u.inShip);
+      if (s && s.alive) { u.x = s.x; u.y = s.y; u.hunger = Math.min(60, u.hunger + dt * 0.1); continue; }
+      u.inShip = 0; u.mode = 'wander';
+    }
+    if (u.inside && tickInside(sim, u, dt)) continue; // asleep indoors
     // hunger: civs and carnivores feel it; herbivores graze it off
     if (d.diet !== 'none' && u.species !== 'zombie') {
       u.hunger += dt * (d.civ ? 0.55 : d.diet === 'herb' ? 0.14 : 0.2);
       if (u.hunger >= 100) { u.hp -= dt * 1.2; if (u.hp <= 0) { kill(sim, u, null, 'fome'); continue; } }
     }
-    if (!d.fly && d.id !== 'crab' && tt0(sim, u) && !sim.walkable(u.x, u.y) && sim.tickN % 10 === u.id % 10) { const sp = sim.freeSpot(u.x, u.y, 4); if (sp) { u.x = sp.x; u.y = sp.y; u.path = null; } }
+    if (!d.fly && !d.ship && d.id !== 'crab' && tt0(sim, u) && !sim.walkable(u.x, u.y) && sim.tickN % 10 === u.id % 10) { const sp = sim.freeSpot(u.x, u.y, 4); if (sp) { u.x = sp.x; u.y = sp.y; u.path = null; } }
     // drowning / lava
     const ti = Math.floor(u.y) * w.w + Math.floor(u.x);
     const tt = w.terrain[ti];
-    if (!d.fly) {
+    if (!d.fly && !d.ship) {
       if (tt === T.DEEP) { u.hp -= 25 * dt; if (u.hp <= 0) { sim.fx.push({ t: 'splash', x: u.x, y: u.y }); kill(sim, u, null, 'afogamento'); continue; } }
       else if (tt === T.LAVA) { kill(sim, u, null, 'lava'); continue; }
     }
@@ -111,7 +119,7 @@ export function updateUnits(sim: Sim, dt: number): void {
     u.thinkT -= dt;
     if (u.hitT > 0) { u.hitT -= dt; if (u.hitT <= 0) resolveHit(sim, u); }
     if (u.thinkT <= 0) {
-      if (d.civ) thinkCiv(sim, u); else if (isEngine(u.species)) thinkEngine(sim, u); else thinkAnimal(sim, u);
+      if (d.civ) thinkCiv(sim, u); else if (isEngine(u.species)) thinkEngine(sim, u); else if (d.ship) thinkShip(sim, u); else thinkAnimal(sim, u);
     }
     act(sim, u, dt);
   }
@@ -141,10 +149,11 @@ function resolveHit(sim: Sim, u: Unit): void {
 function isFighter(u: Unit): boolean { return u.role === 'soldier' || u.role === 'archer' || u.role === 'knight' || u.role === 'king'; }
 
 function findHostile(sim: Sim, u: Unit, r: number): Unit | null {
-  return sim.nearest(u.x, u.y, r, o => hostile(sim, u, o));
+  const ranged = u.look?.weapon === 'bow'; // only bowmen can answer a ship
+  return sim.nearest(u.x, u.y, r, o => hostile(sim, u, o) && (!o.def.ship || ranged));
 }
 
-const BUSY = new Set(['hunt', 'chop', 'mine', 'quarry', 'farm', 'build', 'haul', 'eat', 'forage', 'settle', 'goto', 'patrol']);
+const BUSY = new Set(['board', 'hunt', 'chop', 'mine', 'quarry', 'farm', 'build', 'haul', 'eat', 'forage', 'settle', 'goto', 'patrol']);
 
 function thinkCiv(sim: Sim, u: Unit): void {
   const city = sim.cities.get(u.cityId);
@@ -168,9 +177,9 @@ function thinkCiv(sim: Sim, u: Unit): void {
     const berry = findObj(sim, u, 14, o => o === O.BERRIES);
     if (berry) { u.mode = 'forage'; u.goalX = berry.x + 0.5; u.goalY = berry.y + 0.5; u.path = null; releaseJob(sim, u); return; }
   }
-  if (BUSY.has(u.mode)) return; // let the job finish; act() ends it
+  if (BUSY.has(u.mode) || LEISURE.has(u.mode)) return; // let the job (or the pastime) finish; act() ends it
   if (u.mode === 'attack' || u.mode === 'flee') { u.mode = 'wander'; u.target = 0; }
-  if (u.age < 16) { if (city) { const h = city.hall(sim); if (h && sim.rng.chance(0.7)) { wanderNear(sim, u, h.doorX, h.doorY, 6); return; } } u.mode = 'wander'; return; }
+  if (u.age < 16) { if (city && thinkLeisure(sim, u, city)) return; if (city) { const h = city.hall(sim); if (h && sim.rng.chance(0.7)) { wanderNear(sim, u, h.doorX, h.doorY, 6); return; } } u.mode = 'wander'; return; }
   // short of food: the hungry-handed hunt. Orcs do it by nature; anyone with a weapon does it in a pinch.
   if (city && u.def.diet !== 'herb' && u.age >= 16 && u.role !== 'king' && (u.role === 'peasant' || u.role === 'soldier' || u.role === 'archer') && city.stock.food < city.pop * (u.species === 'orc' ? 3 : 1.2) && sim.rng.chance(u.species === 'orc' ? 0.5 : 0.25)) {
     const prey = sim.nearest(u.x, u.y, 16, o => o.alive && !o.def.civ && o.def.food >= 3 && o.def.diet === 'herb');
@@ -186,6 +195,7 @@ function thinkCiv(sim: Sim, u: Unit): void {
   }
   // carrying something? deliver first
   if (u.carry) { const dst = city.dropoff(sim); if (dst) { u.mode = 'haul'; u.goalX = dst.doorX + 0.5; u.goalY = dst.doorY + 0.5; u.path = null; return; } u.carry = null; }
+  if (thinkLeisure(sim, u, city)) return;
   switch (u.role) {
     case 'woodcutter': return startGather(sim, u, city, 'chop', 16, (o) => isTree(o) && o !== O.DEAD_TREE ? true : o === O.DEAD_TREE);
     case 'miner': return startGather(sim, u, city, 'mine', 18, (o) => o === O.ROCK || o === O.BOULDER || o === O.ORE_IRON || o === O.ORE_COPPER || o === O.ORE_GOLD);
@@ -214,9 +224,11 @@ function wanderNear(sim: Sim, u: Unit, cx: number, cy: number, r: number): void 
 export function findObj(sim: Sim, u: Unit, r: number, pred: (o: number) => boolean, cx = u.x, cy = u.y): { x: number; y: number } | null {
   const w = sim.world, x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(w.w - 1, Math.floor(cx + r)), y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(w.h - 1, Math.floor(cy + r));
   let best: { x: number; y: number } | null = null, bd = Infinity;
+  const land = geo(sim).land, here = land[Math.floor(u.y) * w.w + Math.floor(u.x)]; // nothing across the water or behind a mountain wall
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
     const i = y * w.w + x, o = w.obj[i];
     if (o === 0 || !pred(o)) continue;
+    if (here && land[i] !== here) continue;
     if (isTree(o) && w.objAge[i] < 170) continue; // let saplings grow
     const d = (x - u.x) ** 2 + (y - u.y) ** 2 + hash2(x, y, 3) * 4;
     if (d < bd) { bd = d; best = { x, y }; }
@@ -238,8 +250,9 @@ function startGather(sim: Sim, u: Unit, city: City, mode: 'chop' | 'mine', r: nu
 function findQuarry(sim: Sim, cx: number, cy: number, r: number, u: Unit): { x: number; y: number } | null {
   const w = sim.world;
   let best: { x: number; y: number } | null = null, bd = Infinity;
+  const land = geo(sim).land, here = land[Math.floor(u.y) * w.w + Math.floor(u.x)];
   for (let y = Math.max(1, Math.floor(cy - r)); y <= Math.min(w.h - 2, Math.floor(cy + r)); y++) for (let x = Math.max(1, Math.floor(cx - r)); x <= Math.min(w.w - 2, Math.floor(cx + r)); x++) {
-    if (!w.isWalkable(x, y) || TERRAIN[w.terrain[y * w.w + x]].water) continue;
+    if (!w.isWalkable(x, y) || TERRAIN[w.terrain[y * w.w + x]].water || (here && land[y * w.w + x] !== here)) continue;
     const t = w.terrain[(y - 1) * w.w + x];
     if (t !== T.MOUNTAIN && t !== T.PEAK) continue; // the face is north of where one stands
     const d = (x - cx) ** 2 + (y - cy) ** 2 + (x - u.x) ** 2 * 0.3 + hash2(x, y, 7) * 30;
@@ -252,7 +265,7 @@ function startFarm(sim: Sim, u: Unit, city: City): void {
   let best: Building | null = null, bs = -1;
   for (const id of city.buildings) {
     const b = sim.buildings.get(id);
-    if (!b || b.type !== 'farm' || !b.done || b.ruin || b.workers >= b.def.slots) continue;
+    if (!b || (b.type !== 'farm' && b.type !== 'orchard') || !b.done || b.ruin || b.workers >= b.def.slots) continue;
     const s = b.crop + 0.3 - Math.hypot(b.cx - u.x, b.cy - u.y) * 0.01;
     if (s > bs) { bs = s; best = b; }
   }
@@ -271,7 +284,9 @@ function startBuild(sim: Sim, u: Unit, city: City): void {
     if (d < bd) { bd = d; best = b; }
   }
   if (!best) { wanderNear(sim, u, city.x + 0.5, city.y + 0.5, 6); return; }
-  best.workers++; u.job = best.id; u.mode = 'build'; u.goalX = best.doorX + 0.5; u.goalY = best.doorY + 0.5; u.jobT = 0; u.path = null;
+  // a one-tile wall piece may have no free door tile (houses crowd it): work it from any side
+  const small = best.def.w === 1 && best.def.h === 1;
+  best.workers++; u.job = best.id; u.mode = 'build'; u.goalX = small ? best.cx : best.doorX + 0.5; u.goalY = small ? best.cy : best.doorY + 0.5; u.jobT = 0; u.path = null;
 }
 
 function startPatrol(sim: Sim, u: Unit, city: City): void {
@@ -303,7 +318,7 @@ function act(sim: Sim, u: Unit, dt: number): void {
       if (m === 'moving') { setAct(u, 'walk'); return; }
       if (m === 'blocked') { u.mode = 'wander'; return; }
       setAct(u, 'eat'); u.state = 'eat';
-      if (u.actT > 1.3) { if (city && city.stock.food > 0) { city.stock.food -= 1; u.hunger = Math.max(0, u.hunger - 65); } u.mode = 'wander'; u.thinkT = 0.2; }
+      if (u.actT > 1.3) { if (city && city.stock.food > 0) { city.stock.food -= 1; u.hunger = Math.max(0, u.hunger - (city.perks.bakery ? 80 : 65)); } u.mode = 'wander'; u.thinkT = 0.2; }
       return;
     }
     case 'forage': {
@@ -364,14 +379,14 @@ function act(sim: Sim, u: Unit, dt: number): void {
       u.jobT += dt;
       if (u.jobT > 5.5) {
         u.jobT = 0;
-        if (b.crop >= 0.7) { u.carry = { good: 'food', n: Math.round(6 + b.crop * 6) }; b.crop = 0.05; releaseJob(sim, u); u.mode = 'wander'; u.thinkT = 0.05; }
+        if (b.crop >= 0.7) { u.carry = { good: 'food', n: Math.round((b.type === 'orchard' ? 9 : 6) + b.crop * 6) }; b.crop = 0.05; releaseJob(sim, u); u.mode = 'wander'; u.thinkT = 0.05; }
       }
       return;
     }
     case 'build': {
       const b = sim.buildings.get(u.job);
       if (!b || b.ruin) { releaseJob(sim, u); u.mode = 'wander'; return; }
-      const m = moveTo(sim, u, u.goalX, u.goalY, dt, 1, 1.1);
+      const m = moveTo(sim, u, u.goalX, u.goalY, dt, 1, b.def.w === 1 && b.def.h === 1 ? 1.6 : 1.1);
       if (m === 'moving') { setAct(u, 'walk'); return; }
       if (m === 'blocked') { releaseJob(sim, u); u.mode = 'wander'; return; }
       face(u, b.cx - u.x, b.cy - u.y);
@@ -418,6 +433,10 @@ function act(sim: Sim, u: Unit, dt: number): void {
     case 'graze': { setAct(u, 'eat'); if (u.actT > 2.4) { u.hunger = Math.max(0, u.hunger - 28); u.mode = 'wander'; u.thinkT = 0.2; } return; }
     case 'dragon': return actDragon(sim, u, dt);
     case 'engine': case 'engine-move': return actEngine(sim, u, dt);
+    case 'tavern': case 'market': case 'chat': case 'play': case 'dance': case 'water': case 'home': case 'rest': return actSocial(sim, u, dt);
+    case 'ship': return actShip(sim, u, dt);
+    case 'board': return actBoard(sim, u, dt);
+    case 'aboard': return;
     case 'dead': return;
     default: u.mode = 'wander';
   }
@@ -440,7 +459,7 @@ export function nearestEnemyBuilding(sim: Sim, u: Unit, r: number): Building | n
   if (!k) return null;
   let best: Building | null = null, bd = r * r;
   for (const [, b] of sim.buildings) {
-    if (b.ruin) continue;
+    if (b.ruin || b.type === 'wall' || b.type === 'gate') continue;
     const c = sim.cities.get(b.cityId);
     if (!c || !k.wars.has(c.kingdomId)) continue;
     const d = (b.cx - u.x) ** 2 + (b.cy - u.y) ** 2;

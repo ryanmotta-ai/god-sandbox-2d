@@ -6,6 +6,9 @@ import { makeWaterFrames, WATER_FRAMES } from '../gfx/water';
 import { plantSprite, PCX, PBASE, type Season } from '../gfx/flora';
 import { mountainSprite, MCX, MBASE } from '../gfx/mountain';
 import { buildingSprite, cropSprite, bSize } from '../gfx/buildings';
+import { orchardSprite } from '../gfx/town';
+import { propAt, propSprite, PROP_GX, PROP_GY, LAMP } from '../gfx/props';
+import { wallSprite, WALL_H } from '../gfx/walls';
 import { hash2 } from '../core/rng';
 import { T, O, TERRAIN } from '../world/defs';
 import type { Sim } from '../sim/sim';
@@ -17,11 +20,11 @@ import { ambient, Weather } from './atmosphere';
 import type { Sound } from '../core/sound';
 
 interface Slot { baked: BakedChunk | null; ver: number; zone: HTMLCanvasElement | null; zoneVer: number }
-interface Item { y: number; k: 0 | 1 | 2 | 3 | 4; a: number; b: number; o?: Unit | Building }
+interface Item { y: number; k: 0 | 1 | 2 | 3 | 4; a: number; b: number; o?: Unit | Building; p?: number }
 
 /** Where each building's roof ridge sits (px above the footprint's bottom edge), for flags and chimney smoke. */
-const RIDGE: Record<string, number> = { hut: 48, house: 70, hall: 82, barracks: 64, tower: 72, temple: 60, storehouse: 54, lumber: 40, smith: 60, windmill: 66, well: 34, campfire: 14, farm: 30 };
-const CHIMNEY: Record<string, [number, number]> = { hut: [0.74, 54], house: [0.78, 84], hall: [0.78, 98], smith: [0.7, 62] };
+const RIDGE: Record<string, number> = { keep: 128, hut: 48, house: 70, hall: 82, barracks: 64, tower: 72, temple: 60, storehouse: 54, lumber: 40, smith: 60, windmill: 66, well: 34, campfire: 14, farm: 30 };
+const CHIMNEY: Record<string, [number, number]> = { hut: [0.74, 54], house: [0.78, 84], hall: [0.78, 98], smith: [0.7, 62], tavern: [0.8, 92], bakery: [0.7, 84], healer: [0.78, 70], townhouse: [0.14, 92] };
 
 /** One Canvas2D renderer. Terrain/water/foam/borders are baked or patterned; everything standing up is depth-sorted together. */
 export class Renderer {
@@ -40,6 +43,8 @@ export class Renderer {
   /** Tile hover / brush preview in tile coords. */
   hover: { x: number; y: number; r: number; shape: 'circle' | 'square' } | null = null;
   lightCanvas: HTMLCanvasElement;
+  /** Street lamps seen this frame (tile coords), for the night glow pass. */
+  lamps: [number, number][] = [];
   sound: Sound | null = null;
 
   constructor(public canvas: HTMLCanvasElement, public sim: Sim, public cam: Camera) {
@@ -144,7 +149,7 @@ export class Renderer {
 
   private drawWorldObjects(left: number, top: number, vw: number, vh: number, alpha: number): void {
     const { ctx, sim } = this, world = sim.world, t = this.time, items = this.items;
-    items.length = 0;
+    items.length = 0; this.lamps.length = 0;
     const tx0 = Math.max(0, Math.floor(left / TILE) - 2), tx1 = Math.min(world.w - 1, Math.floor((left + vw) / TILE) + 2);
     const ty0 = Math.max(0, Math.floor(top / TILE) - 1), ty1 = Math.min(world.h - 1, Math.floor((top + vh) / TILE) + 4);
     const season = sim.season as Season;
@@ -152,6 +157,7 @@ export class Renderer {
     for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
       const i = ty * world.w + tx, terr = world.terrain[i], o = world.obj[i];
       if ((terr === T.MOUNTAIN || terr === T.PEAK) && (lod < 2 || ((tx + ty) & 1) === 0)) items.push({ y: ty * TILE + TILE - 2, k: 1, a: tx, b: ty });
+      if (terr === T.ROAD && lod === 0 && world.zone[i] !== 0) { const pr = propAt(world, tx, ty); if (pr) { items.push({ y: ty * TILE + TILE - 3, k: 4, a: tx, b: ty, o: undefined, p: pr.kind * 8 + pr.v } as Item); if (pr.kind === LAMP) this.lamps.push([tx, ty]); } }
       if (o !== O.NONE && !(lod > 0 && MINOR.has(o)) && !(lod > 1 && world.objAge[i] < 170)) items.push({ y: ty * TILE + TILE - 6 + (hash2(tx, ty, 62) - 0.5) * 8 + 1, k: 0, a: tx, b: ty });
     }
     const pad = 3;
@@ -162,8 +168,8 @@ export class Renderer {
     }
     const L = this.cam.zoom >= 1 ? 1 : 0;
     for (const u of sim.units) {
-      if (lod === 2) { if (u.alive && u.x >= tx0 && u.x <= tx1 && u.y >= ty0 && u.y <= ty1 && (u.def.civ || u.species === 'dragon')) { ctx.fillStyle = sim.kingdoms.get(u.kingdomId)?.color ?? (u.species === 'dragon' ? '#e03030' : '#ddd'); ctx.fillRect(Math.round(u.x * TILE) - 2, Math.round(u.y * TILE) - 6, u.species === 'dragon' ? 12 : 5, u.species === 'dragon' ? 8 : 6); } continue; }
-      if (u.x < tx0 - 2 || u.x > tx1 + 2 || u.y < ty0 - 3 || u.y > ty1 + 3) continue;
+      if (lod === 2) { if (u.alive && !u.inShip && !u.inside && u.x >= tx0 && u.x <= tx1 && u.y >= ty0 && u.y <= ty1 && (u.def.civ || u.species === 'dragon' || u.def.ship)) { ctx.fillStyle = sim.kingdoms.get(u.kingdomId)?.color ?? (u.species === 'dragon' ? '#e03030' : '#ddd'); ctx.fillRect(Math.round(u.x * TILE) - 2, Math.round(u.y * TILE) - 6, u.species === 'dragon' ? 12 : u.def.ship ? 9 : 5, u.species === 'dragon' ? 8 : u.def.ship ? 4 : 6); } continue; }
+      if (u.inShip || u.inside || u.x < tx0 - 2 || u.x > tx1 + 2 || u.y < ty0 - 3 || u.y > ty1 + 3) continue;
       const ix = u.px + (u.x - u.px) * alpha, iy = u.py + (u.y - u.py) * alpha;
       items.push({ y: iy * TILE + (u.def.fly && u.species !== 'dragon' ? 40 : 0) + u.id * 1e-6, k: 3, a: ix, b: iy, o: u });
     }
@@ -171,7 +177,7 @@ export class Renderer {
     // ground-level things first: crops and shadows (so nothing is shadowed by a neighbour's sprite)
     for (const it of items) {
       if (it.k === 2) { const b = it.o as Building; if (b.type === 'farm' && b.done) { ctx.drawImage(cropSprite(b.crop < 0.12 ? 0 : b.crop < 0.45 ? 1 : b.crop < 0.78 ? 2 : 3), b.x * TILE - 8, b.y * TILE - 30); } }
-      else if (it.k === 3 && lod === 0) { const u = it.o as Unit; const s = shadowSprite(Math.round(frameSize(u))); if (u.state !== 'dead' || u.stateT < 1) ctx.drawImage(s, Math.round(it.a * TILE - s.width / 2), Math.round(it.b * TILE - s.height / 2 + 1)); }
+      else if (it.k === 3 && lod === 0 && !(it.o as Unit).def.ship) { const u = it.o as Unit; const s = shadowSprite(Math.round(frameSize(u))); if (u.state !== 'dead' || u.stateT < 1) ctx.drawImage(s, Math.round(it.a * TILE - s.width / 2), Math.round(it.b * TILE - s.height / 2 + 1)); }
       else if (it.k === 0 && lod === 0) { const i = it.b * world.w + it.a, o = world.obj[i]; if (o !== O.NONE && OBJ_SHADOW.has(o)) { const r = o === O.JUNGLE_TREE ? 12 : o === O.PINE || o === O.SNOW_PINE ? 8 : 9; const s = shadowSprite(r); ctx.drawImage(s, Math.round(it.a * TILE + TILE / 2 + (hash2(it.a, it.b, 61) - 0.5) * 12 - s.width / 2 + 3), Math.round(it.b * TILE + TILE - 6 + (hash2(it.a, it.b, 62) - 0.5) * 8 - 2)); } }
     }
     for (const it of items) {
@@ -190,6 +196,7 @@ export class Renderer {
         }
         case 2: this.drawBuilding(it.o as Building); break;
         case 3: this.drawUnit(it.o as Unit, it.a, it.b, L); break;
+        case 4: { const pk = it.p!; ctx.drawImage(propSprite((pk >> 3) as 1, pk & 7), Math.round(it.a * TILE + TILE / 2 - PROP_GX + (hash2(it.a, it.b, 403) - 0.5) * 8), Math.round(it.b * TILE + TILE - 3 - PROP_GY)); break; }
       }
     }
   }
@@ -197,6 +204,7 @@ export class Renderer {
   private drawUnit(u: Unit, ix: number, iy: number, detail: number): void {
     const { ctx, sim } = this, world = sim.world;
     const terr = world.terrain[Math.floor(iy) * world.w + Math.floor(ix)];
+    if (u.def.ship) return this.drawShip(u, ix, iy);
     const f = frameFor(u, this.time, terr === T.SHALLOW);
     const px = Math.round(ix * TILE), py = Math.round(iy * TILE);
     const bob = u.def.fly && u.species === 'bird' ? Math.sin(this.time * 6 + u.id) * 1.5 : u.species === 'dragon' && f.lift ? Math.sin(this.time * 3) * 2 : 0;
@@ -222,10 +230,67 @@ export class Renderer {
         if (k && (u.mode === 'march' || u.mode === 'siege' || u.role === 'king')) { ctx.fillStyle = k.color; ctx.fillRect(px - 2, py - 44, 4, 3); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(px - 2, py - 41, 4, 1); if (u.role === 'king') { ctx.fillStyle = '#ffd84a'; ctx.fillRect(px - 2, py - 46, 4, 2); } }
       }
     }
+    if (u.alive && this.cam.zoom >= 2 && (u.mode === 'chat' || u.mode === 'tavern' || u.mode === 'market' || u.mode === 'dance' || u.mode === 'play')) this.bubble(u, px, py - 49);
     if (this.selected && this.selected.kind === 'unit' && this.selected.id === u.id) {
       ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 0.55 + 0.35 * Math.sin(this.time * 6); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.ellipse(px, py, 11, 5, 0, 0, 6.283); ctx.stroke(); ctx.globalAlpha = 1;
     }
+  }
+
+  /** A speech bubble over someone chatting, drinking, shopping or playing: a small pixel glyph in a white balloon. */
+  private bubble(u: Unit, px: number, py: number): void {
+    const { ctx, sim } = this, t = this.time;
+    let glyph = -1;
+    if (u.mode === 'chat') {
+      const o = sim.byId.get(u.partner);
+      if (!o || (Math.floor(t * 0.6) + (u.id < u.partner ? 0 : 1)) % 2 !== 0) return; // they take turns
+      const k = Math.floor(t * 0.6 / 2 + u.id) % 4;
+      glyph = k === 3 && o.female !== u.female ? 3 : k === 3 ? 0 : k;
+    } else if (u.mode === 'tavern') { if (u.act !== 'eat') return; glyph = 4; }
+    else if (u.mode === 'market') { if (Math.floor(t * 0.4 + u.id) % 3 !== 0) return; glyph = 5; }
+    else if (u.mode === 'dance') { if (Math.floor(t * 0.8 + u.id) % 3 !== 0) return; glyph = 2; }
+    else { if (Math.floor(t * 1.2 + u.id) % 4 !== 0) return; glyph = 1; }
+    const x = Math.round(px) - 6, y = Math.round(py);
+    ctx.fillStyle = 'rgba(20,18,30,0.8)'; ctx.fillRect(x - 1, y - 1, 15, 12); ctx.fillRect(x + 4, y + 11, 4, 2);
+    ctx.fillStyle = '#fbfaf2'; ctx.fillRect(x, y, 13, 10); ctx.fillRect(x + 5, y + 10, 2, 2);
+    const dots = (): void => { ctx.fillStyle = '#4a4a5a'; for (let i = 0; i < 3; i++) if (Math.floor(t * 4) % 4 > i - 1) ctx.fillRect(x + 2 + i * 4, y + 5, 2, 2); };
+    switch (glyph) {
+      case 0: dots(); break;
+      case 1: ctx.fillStyle = '#d83a3a'; ctx.fillRect(x + 6, y + 1, 2, 5); ctx.fillRect(x + 6, y + 7, 2, 2); break;
+      case 2: ctx.fillStyle = '#c8941a'; ctx.fillRect(x + 4, y + 6, 3, 3); ctx.fillRect(x + 6, y + 1, 1, 6); ctx.fillRect(x + 7, y + 1, 3, 2); break;
+      case 3: ctx.fillStyle = '#ff5a7a'; for (const [dx, dy, w] of [[2, 2, 3], [7, 2, 3], [2, 4, 8], [3, 6, 6], [5, 8, 2]]) ctx.fillRect(x + dx, y + dy, w, 2); break;
+      case 4: ctx.fillStyle = '#e8b030'; ctx.fillRect(x + 3, y + 2, 5, 6); ctx.fillStyle = '#fff'; ctx.fillRect(x + 3, y + 2, 5, 2); ctx.fillStyle = '#c88a1a'; ctx.fillRect(x + 8, y + 3, 2, 4); break;
+      default: ctx.fillStyle = '#e8b020'; ctx.fillRect(x + 4, y + 2, 5, 6); ctx.fillRect(x + 3, y + 3, 7, 4); ctx.fillStyle = '#fff2a0'; ctx.fillRect(x + 5, y + 3, 1, 3);
+    }
+  }
+
+  /** A ship rides the swell: bob and rock, a wake behind it while it moves, a bow wave, and a slow sink when it dies. */
+  private drawShip(u: Unit, ix: number, iy: number): void {
+    const { ctx, sim } = this, t = this.time, k = sim.kingdoms.get(u.kingdomId);
+    const f = frameFor(u, t, false, k?.color ?? '#c0392b');
+    const px = Math.round(ix * TILE), py = Math.round(iy * TILE);
+    const moving = u.act === 'sail' && u.alive, ph = t * 1.7 + u.id * 1.3;
+    const bob = Math.round(Math.sin(ph) * 1.2), rock = Math.round(Math.sin(ph * 0.8 + 1) * 0.6);
+    const sink = u.alive ? 0 : Math.min(1, u.stateT / 2.3), drop = sink * 52;
+    const dx = px + f.dx + rock, dy = py + f.dy + bob + drop;
+    // water ring and wake, under the hull
+    ctx.fillStyle = 'rgba(210,235,255,0.13)'; ctx.beginPath(); ctx.ellipse(px, py + 2, f.w * 0.36, 5, 0, 0, 6.283); ctx.fill();
+    if (moving) {
+      const vx = u.dir === 'E' ? 1 : u.dir === 'W' ? -1 : 0, vy = u.dir === 'S' ? 1 : u.dir === 'N' ? -1 : 0;
+      for (let i = 1; i <= 7; i++) {
+        const a = 0.42 * (1 - i / 8), spread = i * 1.3, bx = px - vx * (f.w * 0.3 + i * 5), by = py + 1 - vy * (10 + i * 4);
+        ctx.fillStyle = `rgba(240,250,255,${a})`;
+        if (vx) { ctx.fillRect(Math.round(bx), Math.round(by - spread), 4, 1); ctx.fillRect(Math.round(bx), Math.round(by + spread), 4, 1); }
+        else { ctx.fillRect(Math.round(bx - spread), Math.round(by), 1, 4); ctx.fillRect(Math.round(bx + spread), Math.round(by), 1, 4); }
+      }
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(px + vx * f.w * 0.36 - 2, py + 1 + vy * 8, 5, 2);
+    }
+    if (sink > 0) { const src = Math.max(1, f.h - 4 - Math.round(drop)); ctx.drawImage(f.img, 0, 0, f.w, Math.min(f.h, Math.max(1, Math.round(-f.dy + 3 - drop))), dx, dy, f.w, Math.min(f.h, Math.max(1, Math.round(-f.dy + 3 - drop)))); void src; if (Math.random() < 0.3) this.fx.emit({ t: 'splash', x: ix + (Math.random() - 0.5) * 2, y: iy }); }
+    else ctx.drawImage(f.img, dx, dy);
+    if (u.hurtT > 0 && sink === 0) { ctx.globalAlpha = Math.min(0.6, u.hurtT * 4); ctx.drawImage(flashOf(f.img), dx, dy); ctx.globalAlpha = 1; }
+    if (u.alive && u.hp < u.maxHp * 0.98 && this.cam.zoom >= 1) { const w = 26; ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(px - w / 2 - 1, py + 7, w + 2, 4); ctx.fillStyle = u.hp > u.maxHp * 0.5 ? '#5ad25a' : u.hp > u.maxHp * 0.25 ? '#e0c030' : '#d83a3a'; ctx.fillRect(px - w / 2, py + 8, Math.max(1, (w * u.hp) / u.maxHp), 2); }
+    if (this.selected && this.selected.kind === 'unit' && this.selected.id === u.id) { ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 0.55 + 0.35 * Math.sin(t * 6); ctx.beginPath(); ctx.ellipse(px, py + 2, f.w * 0.4, 7, 0, 0, 6.283); ctx.stroke(); ctx.globalAlpha = 1; }
+    // a fishing crew's splashes and a rower's foam are particles: nothing more to draw here
   }
 
   private drawBuilding(b: Building): void {
@@ -233,18 +298,25 @@ export class Renderer {
     const d = b.def, size = bSize(b.type);
     const stage = b.progress >= 1 ? 3 : b.progress < 0.34 ? 0 : b.progress < 0.67 ? 1 : 2;
     const dmg = b.hp < b.maxHp * 0.3 ? 2 : b.hp < b.maxHp * 0.65 ? 1 : 0;
-    const spr = buildingSprite(b.type, b.race, stage, dmg);
-    const x = b.x * TILE - 8, y = (b.y + d.h) * TILE - size.h + 8;
+    let spr: HTMLCanvasElement, x = b.x * TILE - 8, y = (b.y + d.h) * TILE - size.h + 8;
+    if (b.type === 'wall' || b.type === 'gate') { // wall pieces join their neighbours
+      const world = sim.world, link = (dx: number, dy: number): number => { const t = sim.buildings.get(world.bld[(b.y + dy) * world.w + b.x + dx])?.type; return t === 'wall' || t === 'gate' || t === 'tower' ? 1 : 0; };
+      const mask = link(0, -1) | (link(1, 0) << 1) | (link(0, 1) << 2) | (link(-1, 0) << 3);
+      spr = wallSprite(b.race, mask, b.type === 'gate', stage, dmg); y = (b.y + 1) * TILE - WALL_H + 8;
+    } else if (b.type === 'orchard' && stage === 3 && !dmg) spr = orchardSprite(b.race, b.id, sim.season, Math.floor(this.time * 1.2));
+    else spr = buildingSprite(b.type, b.race, stage, dmg, b.id & 3);
     ctx.drawImage(spr, x, y);
     if (b.hurtT > 0) { b.hurtT -= 0.016; ctx.globalAlpha = 0.5; ctx.drawImage(flashOf(spr), x, y); ctx.globalAlpha = 1; }
     const city = sim.cities.get(b.cityId), k = city ? sim.kingdoms.get(city.kingdomId) : null;
     const base = (b.y + d.h) * TILE; // footprint bottom edge
     const midX = b.x * TILE + (d.w * TILE) / 2;
     if (b.done) {
-      if (k && (b.type === 'hall' || b.type === 'barracks' || b.type === 'tower' || b.type === 'temple')) this.flag(midX + (b.type === 'tower' ? 0 : d.w * 6), base - RIDGE[b.type] - 2, k.color);
+      if (k && (b.type === 'hall' || b.type === 'barracks' || b.type === 'tower' || b.type === 'temple' || b.type === 'keep')) this.flag(midX + (b.type === 'tower' ? 0 : d.w * 6), base - RIDGE[b.type] - 2, k.color);
       const ch = CHIMNEY[b.type];
       if (ch && city && city.stock.food > 0 && this.cam.zoom >= 1 && Math.random() < 0.025) this.fx.emit({ t: 'smoke', x: (b.x * TILE + d.w * TILE * ch[0]) / TILE, y: (base - ch[1]) / TILE + 0.3 });
       if (b.type === 'smith') { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,${120 + Math.floor(Math.sin(this.time * 9) * 30)},40,0.5)`; ctx.fillRect(b.x * TILE + 18, base - 24, 14, 12); ctx.globalCompositeOperation = 'source-over'; if (Math.random() < 0.05) this.fx.emit({ t: 'spark', x: (b.x * TILE + 26) / TILE, y: (base - 14) / TILE }); }
+      if (b.type === 'shipyard' && b.cd > 0 && Math.random() < 0.06) this.fx.emit({ t: 'spark', x: (b.x * TILE + 36 + Math.random() * 60) / TILE, y: (base - 46) / TILE });
+      this.civicLife(b, base, midX);
       if (b.type === 'windmill') this.windmill(b.x * TILE + d.w * 16, base - 6 - 42);
       if (b.type === 'campfire') this.flame(b.x * TILE + 16, base - 8);
     }
@@ -252,6 +324,41 @@ export class Renderer {
     if (this.selected && this.selected.kind === 'building' && this.selected.id === b.id) { ctx.strokeStyle = '#fff'; ctx.globalAlpha = 0.6 + 0.3 * Math.sin(this.time * 6); ctx.setLineDash([4, 3]); ctx.strokeRect(b.x * TILE - 2, b.y * TILE - 2, d.w * TILE + 4, d.h * TILE + 4); ctx.setLineDash([]); ctx.globalAlpha = 1; }
     if (b.hp < b.maxHp * 0.98 && b.done && this.cam.zoom >= 2) { const w = d.w * TILE * 0.6; ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(midX - w / 2 - 1, base + 3, w + 2, 4); ctx.fillStyle = '#d8a030'; ctx.fillRect(midX - w / 2, base + 4, w * (b.hp / b.maxHp), 2); }
     if (!b.done && this.cam.zoom >= 2) { const w = d.w * TILE * 0.6; ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(midX - w / 2 - 1, base + 3, w + 2, 4); ctx.fillStyle = '#e8d070'; ctx.fillRect(midX - w / 2, base + 4, w * b.progress, 2); }
+  }
+
+  /** Small motions that make a town look lived in: swinging signs, bread ovens, fountain jets, sparkles on a statue, sawdust. */
+  private civicLife(b: Building, base: number, midX: number): void {
+    const { ctx } = this, t = this.time, z = this.cam.zoom, left = b.x * TILE + 8;
+    if (z < 1) return;
+    switch (b.type) {
+      case 'tavern': { // the sign swings from its bracket
+        const px = left + 6 + 80 + 18 - 4, py = base - 30, a = Math.sin(t * 1.9 + b.id) * 0.16;
+        ctx.save(); ctx.translate(px, py); ctx.rotate(a);
+        ctx.fillStyle = '#5a4028'; ctx.fillRect(-1, 0, 2, 4); ctx.fillStyle = '#b88a50'; ctx.fillRect(-7, 4, 14, 11); ctx.fillStyle = '#7a5a38'; ctx.fillRect(-7, 14, 14, 1);
+        ctx.fillStyle = '#e8c24a'; ctx.fillRect(-3, 7, 5, 5); ctx.fillStyle = '#fff2b0'; ctx.fillRect(-3, 7, 5, 1); ctx.fillStyle = '#e8c24a'; ctx.fillRect(2, 8, 2, 3);
+        ctx.restore();
+        break;
+      }
+      case 'bakery': if (Math.random() < 0.05) this.fx.emit({ t: 'smoke', x: (left + 6 + 66 - 16 + 7) / TILE, y: (base - 28 - 36) / TILE }); {
+        ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,${130 + Math.floor(Math.sin(t * 8) * 30)},40,0.5)`; ctx.fillRect(left + 6 + 66 - 16 + 4, base - 28 + 8 - 7, 6, 4); ctx.globalCompositeOperation = 'source-over';
+        break;
+      }
+      case 'fountain': {
+        const cx = left + 32, top = base - 56;
+        ctx.fillStyle = 'rgba(190,230,255,0.85)';
+        for (let k = 0; k < 8; k++) { const ph = (t * 0.8 + k / 8) % 1, a = (k / 8) * 6.283, r = Math.sin(ph * Math.PI) * 11, h = Math.sin(ph * Math.PI) * 15 - ph * 3; ctx.fillRect(Math.round(cx + Math.cos(a) * r), Math.round(top + 18 - h + Math.sin(a) * r * 0.4), 1, 2); }
+        ctx.fillStyle = 'rgba(210,240,255,0.5)'; ctx.fillRect(cx - 1, top + 3, 2, 16);
+        ctx.strokeStyle = `rgba(210,240,255,${0.3 + 0.2 * Math.sin(t * 3)})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, base - 26, 12 + ((t * 8) % 8), 5 + ((t * 8) % 8) * 0.4, 0, 0, 6.283); ctx.stroke();
+        break;
+      }
+      case 'monument': if (Math.random() < 0.02) this.fx.emit({ t: 'spark', x: (left + 36) / TILE, y: (base - 62) / TILE }); break;
+      case 'market': if (Math.random() < 0.006) this.fx.emit({ t: 'coin', x: (left + 20 + Math.random() * 90) / TILE, y: (base - 24) / TILE }); break;
+      case 'healer': if (Math.random() < 0.012) this.fx.emit({ t: 'heal', x: (left + 36) / TILE, y: (base - 36) / TILE }); break;
+      case 'lumber': if (b.workers > 0 && Math.random() < 0.15) this.fx.emit({ t: 'dust', x: (left + 18 + Math.random() * 10) / TILE, y: (base - 14) / TILE, a: 0.25 }); break;
+      case 'orchard': if (this.sim.season < 3 && Math.random() < 0.02) this.fx.emit({ t: 'leaf', x: (left + Math.random() * 128) / TILE, y: (base - 20 - Math.random() * 90) / TILE }); break;
+      default: break;
+    }
+    void midX;
   }
 
   private flag(x: number, y: number, color: string): void {
@@ -355,8 +462,24 @@ export class Renderer {
         else if (b.type === 'smith') glow(cx - 6, base - 18, 48, 0.9);
         else if (b.type === 'hall' || b.type === 'temple') { glow(cx, base - 22, 70, 0.55); glow(cx, base + 4, 40, 0.5); }
         else if (b.type === 'tower') glow(cx, base - 40, 38, 0.6);
+        else if (b.type === 'lighthouse') {
+          glow(cx, base - 118, 58, 0.95);
+          const ang = this.time * 0.7;
+          for (let s = 0; s < 2; s++) {
+            ctx.save(); ctx.translate(cx, base - 118); ctx.rotate(ang + s * Math.PI);
+            const g = ctx.createLinearGradient(0, 0, 300, 0); g.addColorStop(0, 'rgba(255,240,170,0.55)'); g.addColorStop(1, 'rgba(255,240,170,0)');
+            ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(300, -20); ctx.lineTo(300, 20); ctx.lineTo(0, 3); ctx.closePath(); ctx.fill(); ctx.restore();
+          }
+        }
+        else if (b.type === 'dock') { glow(cx + d.w * 14, base - 26, 36, 0.8); }
+        else if (b.type === 'tavern') { glow(cx, base - 22, 54, 0.85 + 0.1 * Math.sin(this.time * 7 + b.id)); glow(cx, base + 6, 36, 0.5); }
+        else if (b.type === 'bakery') { glow(cx + 26, base - 12, 36, 0.8 + 0.15 * Math.sin(this.time * 9)); }
+        else if (b.type === 'market') { for (const lx of [0.2, 0.5, 0.8]) glow(b.x * TILE + 8 + d.w * 32 * lx, base - 34, 32, 0.7); }
+        else if (b.type === 'keep') { for (const tx of [0.05, 0.95]) glow(b.x * TILE + 8 + d.w * 32 * tx, base - 40, 40, 0.75); glow(cx, base - 26, 46, 0.7); }
+        else if (b.type === 'fountain' || b.type === 'monument') glow(cx, base - 28, 36, 0.45);
         else if (b.type !== 'farm' && b.type !== 'well' && b.type !== 'lumber') glow(cx, base - 18, 44, 0.55);
       }
+      for (const [lx, ly] of this.lamps) glow(lx * TILE + 22, ly * TILE + 4, 30, 0.7);
       for (const u of sim.units) { if (u.burning > 0 || (u.look?.weapon === 'torch')) glow(u.x * TILE, u.y * TILE - 12, 26, 0.9); }
       for (const i of sim.world.activeFires) { const x = i % sim.world.w, y = (i / sim.world.w) | 0; if (x * TILE > left - 40 && x * TILE < left + vw + 40 && y * TILE > top - 40 && y * TILE < top + vh + 40) glow(x * TILE + 16, y * TILE + 12, 34, 0.7); }
       ctx.globalAlpha = 1;

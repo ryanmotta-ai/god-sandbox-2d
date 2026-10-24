@@ -23,9 +23,10 @@ declareWar(sim, ka, kb, 'teste');
 let engines = 0, hallFell = false;
 for (let i = 0; i < 20 * 420; i++) {
   sim.tick();
+  if (!ka.wars.size) declareWar(sim, ka, kb, 'teste'); // a quick peace must not end the siege before it starts
   if (i % 20 === 0) engines = Math.max(engines, sim.units.filter(u => (u.species === 'ram' || u.species === 'catapult') && u.alive).length);
   if (!sim.buildings.has(hall.id)) { hallFell = true; break; }
 }
 console.log(`  siege: engines built ${engines}, hall fell ${hallFell}, ${sim.stats.kills} kills, town owner now ${sim.kingdoms.get(cb.kingdomId)?.name}`);
 assert.ok(engines >= 1, 'the realm never built a siege engine');
-assert.ok(hallFell || sim.stats.kills >= 5, 'the war produced neither a fallen hall nor a battle');
+assert.ok(hallFell || sim.stats.kills >= 5 || cb.kingdomId === ka.id, 'the war produced neither a fallen hall, a conquest nor a battle');

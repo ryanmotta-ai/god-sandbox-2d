@@ -3,6 +3,9 @@ import { humanoidFrame, SPR_W, SPR_H, CX, GROUND, type Look } from '../gfx/human
 import { animalFrame, A_SIZE, A_FRAMES, type AnimalKind, type AAnim } from '../gfx/animals';
 import { ANIM_FRAMES, type Anim } from '../gfx/rig';
 import { engineFrame, E_SIZE, E_FRAMES, type EngineKind } from '../gfx/engines';
+import { shipFrame } from '../gfx/ships';
+import { shipRace } from '../sim/navy';
+import type { ShipKind } from '../sim/species';
 import { TILE } from '../core/config';
 import { SPECIES } from '../sim/species';
 
@@ -17,8 +20,13 @@ const AN_FPS: Record<string, number> = { idle: 2, walk: 7, run: 11, attack: 9, e
 export const sizeOf = (u: Unit): number => u.species === 'ram' || u.species === 'catapult' ? 14 : u.species === 'dragon' ? 18 : u.species === 'bear' || u.species === 'cow' ? 12 : u.species === 'chicken' || u.species === 'rabbit' || u.species === 'crab' || u.species === 'snake' || u.species === 'bird' ? 5 : u.def.civ ? 7 : 9;
 
 /** Pick the frame to show for `u` at wall-clock `t`. Walk/work loop on global time; swings and deaths run from the moment they began. */
-export function frameFor(u: Unit, t: number, wading: boolean): Drawn {
+export function frameFor(u: Unit, t: number, wading: boolean, kcolor = '#c0392b'): Drawn {
   const act = u.act;
+  if (u.def.ship) {
+    const moving = act === 'sail', fishing = u.mission === 'fish' && u.phase === 1, furled = !moving && !fishing && u.mission !== 'hunt' && u.mission !== 'raid';
+    const s = shipFrame(u.species as ShipKind, shipRace(u), u.dir, moving ? Math.floor(t * 5 + u.id) : Math.floor(t * 1.4 + u.id), kcolor, furled, fishing);
+    return { img: s.img, dx: -s.gx, dy: -s.gy, lift: 0, shadow: 0, w: s.w, h: s.h, clip: 0 };
+  }
   if (u.species === 'ram' || u.species === 'catapult') {
     const kind = u.species as EngineKind, anim = act === 'attack' ? 'attack' : 'walk', sz = E_SIZE[kind];
     const f = anim === 'attack' ? Math.min(E_FRAMES.attack - 1, Math.floor(u.actT * 5)) : act === 'walk' ? Math.floor((t * 6 + u.id) % E_FRAMES.walk) : 0;

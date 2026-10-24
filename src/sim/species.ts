@@ -1,7 +1,8 @@
 import type { AnimalKind } from '../gfx/animals';
 import type { Race } from '../gfx/humanoid';
 
-export type Species = Race | AnimalKind | 'zombie' | 'ram' | 'catapult';
+export type ShipKind = 'canoe' | 'fishboat' | 'cog' | 'longship' | 'galley' | 'galleon';
+export type Species = Race | AnimalKind | 'zombie' | 'ram' | 'catapult' | ShipKind;
 export type Diet = 'herb' | 'carn' | 'omni' | 'none';
 
 export interface SpeciesDef {
@@ -21,6 +22,8 @@ export interface SpeciesDef {
   aggressive?: boolean;
   herd?: boolean;
   fly?: boolean;
+  /** Sails on water: pathing, drawing and AI live in navy.ts. */
+  ship?: boolean;
   /** Seconds between litters when conditions allow; 0 = does not breed on its own. */
   breed: number;
   food: number;
@@ -39,6 +42,12 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   zombie: S({ id: 'zombie', name: 'Zumbi', civ: false, hp: 90, dmg: 10, armor: 0, speed: 1.1, maxAge: 9999, sight: 10, diet: 'none', aggressive: true, breed: 0, food: 0, cap: 0 }),
   ram: S({ id: 'ram', name: 'Aríete', civ: false, hp: 320, dmg: 0, armor: 7, speed: 0.95, maxAge: 9999, sight: 12, diet: 'none', breed: 0, food: 0, cap: 0 }),
   catapult: S({ id: 'catapult', name: 'Catapulta', civ: false, hp: 150, dmg: 0, armor: 3, speed: 0.75, maxAge: 9999, sight: 16, diet: 'none', breed: 0, food: 0, cap: 0 }),
+  canoe: S({ id: 'canoe', name: 'Canoa', civ: false, hp: 45, dmg: 0, armor: 0, speed: 1.9, maxAge: 9999, sight: 10, diet: 'none', ship: true, breed: 0, food: 0, cap: 0 }),
+  fishboat: S({ id: 'fishboat', name: 'Barco de pesca', civ: false, hp: 110, dmg: 0, armor: 1, speed: 1.7, maxAge: 9999, sight: 12, diet: 'none', ship: true, breed: 0, food: 0, cap: 0 }),
+  cog: S({ id: 'cog', name: 'Mercante', civ: false, hp: 260, dmg: 0, armor: 2, speed: 1.45, maxAge: 9999, sight: 14, diet: 'none', ship: true, breed: 0, food: 0, cap: 0 }),
+  longship: S({ id: 'longship', name: 'Barco de guerra', civ: false, hp: 220, dmg: 14, armor: 2, speed: 2.3, maxAge: 9999, sight: 14, diet: 'none', ship: true, breed: 0, food: 0, cap: 0 }),
+  galley: S({ id: 'galley', name: 'Galé', civ: false, hp: 320, dmg: 26, armor: 4, speed: 2.0, maxAge: 9999, sight: 16, diet: 'none', ship: true, breed: 0, food: 0, cap: 0 }),
+  galleon: S({ id: 'galleon', name: 'Galeão', civ: false, hp: 640, dmg: 34, armor: 8, speed: 1.25, maxAge: 9999, sight: 18, diet: 'none', ship: true, breed: 0, food: 0, cap: 0 }),
   sheep: S({ id: 'sheep', name: 'Ovelha', civ: false, hp: 30, dmg: 0, armor: 0, speed: 1.3, maxAge: 14, sight: 6, diet: 'herb', skittish: true, herd: true, breed: 40, food: 4, cap: 18 }),
   cow: S({ id: 'cow', name: 'Vaca', civ: false, hp: 55, dmg: 0, armor: 0, speed: 1.1, maxAge: 20, sight: 5, diet: 'herb', herd: true, breed: 55, food: 7, cap: 10 }),
   chicken: S({ id: 'chicken', name: 'Galinha', civ: false, hp: 10, dmg: 0, armor: 0, speed: 1.4, maxAge: 8, sight: 4, diet: 'herb', skittish: true, herd: true, breed: 30, food: 1, cap: 14 }),
@@ -53,6 +62,7 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   dragon: S({ id: 'dragon', name: 'Dragão', civ: false, hp: 900, dmg: 55, armor: 12, speed: 3.6, maxAge: 500, sight: 18, diet: 'carn', aggressive: true, fly: true, breed: 0, food: 0, cap: 0 }),
 };
 
-export const isAnimal = (s: Species): boolean => !SPECIES[s].civ && s !== 'zombie' && s !== 'ram' && s !== 'catapult';
+export const isAnimal = (s: Species): boolean => !SPECIES[s].civ && !SPECIES[s].ship && s !== 'zombie' && s !== 'ram' && s !== 'catapult';
+export const isShip = (s: Species): boolean => SPECIES[s].ship === true;
 export const isEngine = (s: Species): boolean => s === 'ram' || s === 'catapult';
 export const RACES: Race[] = ['human', 'elf', 'dwarf', 'orc'];
