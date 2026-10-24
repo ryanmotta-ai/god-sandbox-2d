@@ -18,6 +18,7 @@ export class Kingdom {
   capital = 0;
   relations = new Map<number, number>();
   wars = new Set<number>();
+  allies = new Set<number>();
   truce = new Map<number, number>();
   army: Army | null = null;
   warSince = new Map<number, number>();
@@ -46,6 +47,7 @@ function baseline(a: Race, b: Race): number {
   return ({ 'elf+orc': -45, 'human+orc': -28, 'dwarf+orc': -34, 'dwarf+elf': -8, 'elf+human': 10, 'dwarf+human': 12 } as Record<string, number>)[key] ?? 0;
 }
 
+const ALLY_AT = 24;
 const dist = (a: City, b: City): number => Math.hypot(a.x - b.x, a.y - b.y);
 const closest = (sim: Sim, ka: Kingdom, kb: Kingdom): { a: City; b: City; d: number } | null => {
   let best: { a: City; b: City; d: number } | null = null;
@@ -61,9 +63,15 @@ export const soldiersOf = (sim: Sim, k: Kingdom): Unit[] => sim.units.filter(u =
 
 export function declareWar(sim: Sim, a: Kingdom, b: Kingdom, why: string): void {
   if (a.wars.has(b.id)) return;
+  if (a.allies.delete(b.id)) { b.allies.delete(a.id); sim.note(`A aliança entre ${a.name} e ${b.name} acabou.`, 'war'); }
   a.wars.add(b.id); b.wars.add(a.id); a.warSince.set(b.id, sim.time); b.warSince.set(a.id, sim.time);
   a.relations.set(b.id, Math.min(a.relations.get(b.id) ?? 0, -40)); b.relations.set(a.id, Math.min(b.relations.get(a.id) ?? 0, -40));
   sim.note(`${a.name} declarou guerra a ${b.name} (${why}).`, 'war');
+  // allies answer the call, unless they are friends with the other side too
+  for (const [x, y] of [[a, b], [b, a]]) for (const id of x.allies) {
+    const ally = sim.kingdoms.get(id);
+    if (ally && !y.allies.has(id) && ally.trait !== 'peaceful') declareWar(sim, ally, y, `aliança com ${x.name}`);
+  }
 }
 export function makePeace(sim: Sim, a: Kingdom, b: Kingdom, truce = 100): void {
   if (!a.wars.has(b.id)) return;
@@ -100,7 +108,7 @@ export function updateKingdoms(sim: Sim, dt: number): void {
     k.t -= 2;
     k.cities = k.cities.filter(cid => sim.cities.get(cid)?.kingdomId === id);
     if (!k.cities.length) { // a realm with no towns is gone
-      for (const [, o] of sim.kingdoms) { o.wars.delete(id); o.relations.delete(id); o.truce.delete(id); }
+      for (const [, o] of sim.kingdoms) { o.wars.delete(id); o.allies.delete(id); o.relations.delete(id); o.truce.delete(id); }
       for (const u of sim.units) if (u.kingdomId === id) { u.kingdomId = 0; if (u.role === 'king') u.role = 'peasant'; }
       sim.kingdoms.delete(id); sim.note(`${k.name} deixou de existir.`, 'war');
       continue;
@@ -130,7 +138,14 @@ function diplomacy(sim: Sim, k: Kingdom): void {
     let rel = k.relations.get(o.id) ?? 0;
     const base = baseline(k.race, o.race);
     rel += (base - rel) * 0.012;
-    if (near && near.d < 32) rel -= 0.7 * (1 - near.d / 32) * (k.trait === 'warlike' ? 1.6 : k.trait === 'peaceful' ? 0.4 : k.trait === 'diplomat' ? 0.6 : 1);
+    if (!k.wars.has(o.id) && !k.allies.has(o.id)) {
+      // friendship grows between kindred or diplomatic realms, and fast between those fighting the same enemy
+      if (base > 0) rel += 0.14;
+      if (k.trait === 'diplomat') rel += 0.25;
+      for (const e of k.wars) if (o.wars.has(e)) { rel += 0.6; break; }
+    }
+    if (k.allies.has(o.id)) rel += 0.2;
+    if (near && near.d < 32 && !k.allies.has(o.id)) rel -= 0.7 * (1 - near.d / 32) * (k.trait === 'warlike' ? 1.6 : k.trait === 'peaceful' ? 0.4 : k.trait === 'diplomat' ? 0.6 : 1);
     if (k.wars.has(o.id)) rel = Math.min(rel, -35);
     rel = Math.max(-100, Math.min(100, rel));
     k.relations.set(o.id, rel);
@@ -140,6 +155,13 @@ function diplomacy(sim: Sim, k: Kingdom): void {
       // exhaustion: outnumbered or long stalemate, and a king who would rather talk
       const wants = (mine < theirs * 0.35 && dur > 25) || dur > 150 || (k.trait === 'peaceful' && dur > 45) || (k.trait === 'diplomat' && dur > 70);
       if (wants && sim.rng.chance(0.3) && sim.rng.chance(acceptance(sim, o, k))) makePeace(sim, k, o, 90 + (k.trait === 'diplomat' ? 90 : 0));
+      continue;
+    }
+    if (k.allies.has(o.id)) continue;
+    if (rel > ALLY_AT && k.id < o.id && k.allies.size < 2 && o.allies.size < 2 && near && near.d < 110 && sim.rng.chance(0.08)
+      && ![...o.allies].some(x => k.wars.has(x)) && ![...k.allies].some(x => o.wars.has(x))) {
+      k.allies.add(o.id); o.allies.add(k.id);
+      sim.note(`${k.name} e ${o.name} firmaram uma aliança.`, 'peace');
       continue;
     }
     if (!near || near.d > 70 || sim.time < (k.truce.get(o.id) ?? 0)) continue;

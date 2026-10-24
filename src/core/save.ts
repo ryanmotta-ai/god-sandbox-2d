@@ -31,7 +31,7 @@ export function snapshot(sim: Sim): Snapshot {
     units: sim.units.filter(u => u.alive).map(u => [u.id, u.species, +u.x.toFixed(3), +u.y.toFixed(3), u.dir, u.hp, u.maxHp, u.age, u.female, u.name, u.hunger, u.cityId, u.kingdomId, u.role, u.variant, u.carry, u.traits, u.kills, u.mode === 'march' || u.mode === 'siege' || u.mode === 'settle' ? u.mode : 'wander', u.goalX, u.goalY, u.job, u.east]),
     buildings: [...sim.buildings.values()].map(b => [b.id, b.type, b.cityId, b.x, b.y, b.race, b.progress, b.hp, b.crop, b.burning]),
     cities: [...sim.cities.values()].map(c => [c.id, c.name, c.race, c.kingdomId, c.x, c.y, c.stock, c.loyalty, c.radius, c.hallId, c.buildings, c.founded, c.wallsPlanned, c.wallQueue]),
-    kingdoms: [...sim.kingdoms.values()].map(k => [k.id, k.name, k.race, k.color, k.trait, k.founded, k.cities, k.king, k.capital, [...k.relations], [...k.wars], [...k.truce], [...k.warSince]]),
+    kingdoms: [...sim.kingdoms.values()].map(k => [k.id, k.name, k.race, k.color, k.trait, k.founded, k.cities, k.king, k.capital, [...k.relations], [...k.wars], [...k.truce], [...k.warSince], [...k.allies]]),
   };
 }
 
@@ -47,7 +47,7 @@ export function restore(s: Snapshot): Sim {
   sim.time = m.time; sim.tickN = m.tickN; sim.nextId = m.nextId; sim.rng.state = m.rng; rng.state = m.grng; sim.weather = m.weather; sim.weatherT = m.weatherT; sim.stats = m.stats; sim.log = m.log;
   for (const r of s.kingdoms as any[]) {
     const k = new Kingdom(r[0], r[1], r[2] as Race, r[3], r[4], r[5]);
-    k.cities = r[6]; k.king = r[7]; k.capital = r[8]; k.relations = new Map(r[9]); k.wars = new Set(r[10]); k.truce = new Map(r[11]); k.warSince = new Map(r[12]);
+    k.cities = r[6]; k.king = r[7]; k.capital = r[8]; k.relations = new Map(r[9]); k.wars = new Set(r[10]); k.truce = new Map(r[11]); k.warSince = new Map(r[12]); k.allies = new Set(r[13] ?? []);
     sim.kingdoms.set(k.id, k);
   }
   for (const r of s.cities as any[]) {

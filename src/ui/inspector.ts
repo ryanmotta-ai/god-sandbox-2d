@@ -127,10 +127,12 @@ export class Inspector {
     this.el.append(h('div', { class: 'sub', style: { marginTop: '6px' } }, 'Vilas'), cities);
     const wars = h('div', { class: 'chips' });
     for (const id of k.wars) { const o = sim.kingdoms.get(id); if (o) wars.append(this.link('⚔ ' + o.name, o.color, () => this.onSelect({ kind: 'kingdom', id }))); }
+    const allies = h('div', { class: 'chips' });
+    for (const id of k.allies) { const o = sim.kingdoms.get(id); if (o) allies.append(this.link('🤝 ' + o.name, o.color, () => this.onSelect({ kind: 'kingdom', id }))); }
     const rels = h('div', { class: 'chips' });
     const rel = [...k.relations.entries()].filter(([id]) => sim.kingdoms.has(id) && !k.wars.has(id)).sort((a, b) => a[1] - b[1]).slice(0, 5);
     for (const [id, v] of rel) { const o = sim.kingdoms.get(id)!; rels.append(this.link(`${o.name.split(' de ')[1] ?? o.name} ${v > 0 ? '+' : ''}${v.toFixed(0)}`, o.color, () => this.onSelect({ kind: 'kingdom', id }))); }
-    this.el.append(h('div', { class: 'sub' }, k.wars.size ? 'Em guerra com' : 'Em paz'), wars, h('div', { class: 'sub' }, 'Relações'), rels,
+    this.el.append(h('div', { class: 'sub' }, k.wars.size ? 'Em guerra com' : 'Em paz'), wars, ...(k.allies.size ? [h('div', { class: 'sub' }, 'Aliados'), allies] : []), h('div', { class: 'sub' }, 'Relações'), rels,
       h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: () => { for (const id of [...k.wars]) { const o = sim.kingdoms.get(id); if (o) makePeace(sim, k, o, 160); } } }, 'Impor paz'),
         h('button', { class: 'btn small', onclick: () => { const c = sim.cities.get(k.capital); if (c) { this.game.cam.x = c.x * TILE; this.game.cam.y = c.y * TILE; } } }, 'Capital')));
   }
