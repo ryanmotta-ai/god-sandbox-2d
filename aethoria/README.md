@@ -5,6 +5,13 @@ nascem, constroem vilas, fundam reinos e vão à guerra — tudo simulado de ver
 Reescrita do zero do jogo antigo desta pasta-mãe; os erros daquele jogo estão catalogados em
 [`DESIGN.md`](./DESIGN.md) junto com a regra que cada um gerou.
 
+![mundo](docs/screens/1-mundo.png)
+
+| | |
+|---|---|
+| ![vila](docs/screens/2-vila.png) | ![noite](docs/screens/3-noite.png) |
+| ![batalha](docs/screens/4-batalha.png) | |
+
 ```bash
 cd aethoria
 npm install
@@ -35,8 +42,8 @@ Menu: novo mundo (5 formas, tamanho, água/montanhas/florestas/clima, povos, sem
   rasa com espuma, água animada. Estações mudam as árvores; dia/noite com luz de fogueira e janelas; chuva,
   neve, névoa e tempestade com raios.
 * **Arte** — tudo desenhado por código, 1 tile = 32 px: humanos, elfos, anões e orcs com rig esquelético
-  (cinemática inversa nas pernas e braços, 4 direções reais, 12 animações: andar, correr, golpear, atirar,
-  cortar, minerar, cultivar, martelar, conjurar, morrer…); 13 animais; dragão; aríete e catapulta; 13 tipos de
+  (cinemática inversa nas pernas e braços, 4 direções reais, 13 animações: andar, correr, golpear, atirar,
+  cortar, minerar, cultivar, martelar, conjurar, morrer…); 11 animais, dragão e zumbi; aríete e catapulta; 13 tipos de
   prédio em 4 estilos de raça, com obra em andamento, dano e fumaça de chaminé.
 * **Vida** — fome, idade, nascimento, trabalho físico (lenha, pedra, fazenda, construção, caça), ecologia com
   predadores e presas, fogo que se espalha, lava que esfria, árvores que crescem e semeiam.
