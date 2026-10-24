@@ -6,6 +6,8 @@ import { makeWaterFrames, WATER_FRAMES } from '../gfx/water';
 import { plantSprite, PCX, PBASE, type Season } from '../gfx/flora';
 import { mountainSprite, MCX, MBASE } from '../gfx/mountain';
 import { buildingSprite, cropSprite, bSize } from '../gfx/buildings';
+import { orchardSprite } from '../gfx/town';
+import { propAt, propSprite, PROP_GX, PROP_GY, LAMP } from '../gfx/props';
 import { wallSprite, WALL_H } from '../gfx/walls';
 import { hash2 } from '../core/rng';
 import { T, O, TERRAIN } from '../world/defs';
@@ -18,11 +20,11 @@ import { ambient, Weather } from './atmosphere';
 import type { Sound } from '../core/sound';
 
 interface Slot { baked: BakedChunk | null; ver: number; zone: HTMLCanvasElement | null; zoneVer: number }
-interface Item { y: number; k: 0 | 1 | 2 | 3 | 4; a: number; b: number; o?: Unit | Building }
+interface Item { y: number; k: 0 | 1 | 2 | 3 | 4; a: number; b: number; o?: Unit | Building; p?: number }
 
 /** Where each building's roof ridge sits (px above the footprint's bottom edge), for flags and chimney smoke. */
-const RIDGE: Record<string, number> = { hut: 48, house: 70, hall: 82, barracks: 64, tower: 72, temple: 60, storehouse: 54, lumber: 40, smith: 60, windmill: 66, well: 34, campfire: 14, farm: 30 };
-const CHIMNEY: Record<string, [number, number]> = { hut: [0.74, 54], house: [0.78, 84], hall: [0.78, 98], smith: [0.7, 62] };
+const RIDGE: Record<string, number> = { keep: 128, hut: 48, house: 70, hall: 82, barracks: 64, tower: 72, temple: 60, storehouse: 54, lumber: 40, smith: 60, windmill: 66, well: 34, campfire: 14, farm: 30 };
+const CHIMNEY: Record<string, [number, number]> = { hut: [0.74, 54], house: [0.78, 84], hall: [0.78, 98], smith: [0.7, 62], tavern: [0.8, 92], bakery: [0.7, 84], healer: [0.78, 70], townhouse: [0.14, 92] };
 
 /** One Canvas2D renderer. Terrain/water/foam/borders are baked or patterned; everything standing up is depth-sorted together. */
 export class Renderer {
@@ -41,6 +43,8 @@ export class Renderer {
   /** Tile hover / brush preview in tile coords. */
   hover: { x: number; y: number; r: number; shape: 'circle' | 'square' } | null = null;
   lightCanvas: HTMLCanvasElement;
+  /** Street lamps seen this frame (tile coords), for the night glow pass. */
+  lamps: [number, number][] = [];
   sound: Sound | null = null;
 
   constructor(public canvas: HTMLCanvasElement, public sim: Sim, public cam: Camera) {
@@ -145,7 +149,7 @@ export class Renderer {
 
   private drawWorldObjects(left: number, top: number, vw: number, vh: number, alpha: number): void {
     const { ctx, sim } = this, world = sim.world, t = this.time, items = this.items;
-    items.length = 0;
+    items.length = 0; this.lamps.length = 0;
     const tx0 = Math.max(0, Math.floor(left / TILE) - 2), tx1 = Math.min(world.w - 1, Math.floor((left + vw) / TILE) + 2);
     const ty0 = Math.max(0, Math.floor(top / TILE) - 1), ty1 = Math.min(world.h - 1, Math.floor((top + vh) / TILE) + 4);
     const season = sim.season as Season;
@@ -153,6 +157,7 @@ export class Renderer {
     for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
       const i = ty * world.w + tx, terr = world.terrain[i], o = world.obj[i];
       if ((terr === T.MOUNTAIN || terr === T.PEAK) && (lod < 2 || ((tx + ty) & 1) === 0)) items.push({ y: ty * TILE + TILE - 2, k: 1, a: tx, b: ty });
+      if (terr === T.ROAD && lod === 0 && world.zone[i] !== 0) { const pr = propAt(world, tx, ty); if (pr) { items.push({ y: ty * TILE + TILE - 3, k: 4, a: tx, b: ty, o: undefined, p: pr.kind * 8 + pr.v } as Item); if (pr.kind === LAMP) this.lamps.push([tx, ty]); } }
       if (o !== O.NONE && !(lod > 0 && MINOR.has(o)) && !(lod > 1 && world.objAge[i] < 170)) items.push({ y: ty * TILE + TILE - 6 + (hash2(tx, ty, 62) - 0.5) * 8 + 1, k: 0, a: tx, b: ty });
     }
     const pad = 3;
@@ -191,6 +196,7 @@ export class Renderer {
         }
         case 2: this.drawBuilding(it.o as Building); break;
         case 3: this.drawUnit(it.o as Unit, it.a, it.b, L); break;
+        case 4: { const pk = it.p!; ctx.drawImage(propSprite((pk >> 3) as 1, pk & 7), Math.round(it.a * TILE + TILE / 2 - PROP_GX + (hash2(it.a, it.b, 403) - 0.5) * 8), Math.round(it.b * TILE + TILE - 3 - PROP_GY)); break; }
       }
     }
   }
@@ -269,18 +275,20 @@ export class Renderer {
       const world = sim.world, link = (dx: number, dy: number): number => { const t = sim.buildings.get(world.bld[(b.y + dy) * world.w + b.x + dx])?.type; return t === 'wall' || t === 'gate' || t === 'tower' ? 1 : 0; };
       const mask = link(0, -1) | (link(1, 0) << 1) | (link(0, 1) << 2) | (link(-1, 0) << 3);
       spr = wallSprite(b.race, mask, b.type === 'gate', stage, dmg); y = (b.y + 1) * TILE - WALL_H + 8;
-    } else spr = buildingSprite(b.type, b.race, stage, dmg);
+    } else if (b.type === 'orchard' && stage === 3 && !dmg) spr = orchardSprite(b.race, b.id, sim.season, Math.floor(this.time * 1.2));
+    else spr = buildingSprite(b.type, b.race, stage, dmg, b.id & 3);
     ctx.drawImage(spr, x, y);
     if (b.hurtT > 0) { b.hurtT -= 0.016; ctx.globalAlpha = 0.5; ctx.drawImage(flashOf(spr), x, y); ctx.globalAlpha = 1; }
     const city = sim.cities.get(b.cityId), k = city ? sim.kingdoms.get(city.kingdomId) : null;
     const base = (b.y + d.h) * TILE; // footprint bottom edge
     const midX = b.x * TILE + (d.w * TILE) / 2;
     if (b.done) {
-      if (k && (b.type === 'hall' || b.type === 'barracks' || b.type === 'tower' || b.type === 'temple')) this.flag(midX + (b.type === 'tower' ? 0 : d.w * 6), base - RIDGE[b.type] - 2, k.color);
+      if (k && (b.type === 'hall' || b.type === 'barracks' || b.type === 'tower' || b.type === 'temple' || b.type === 'keep')) this.flag(midX + (b.type === 'tower' ? 0 : d.w * 6), base - RIDGE[b.type] - 2, k.color);
       const ch = CHIMNEY[b.type];
       if (ch && city && city.stock.food > 0 && this.cam.zoom >= 1 && Math.random() < 0.025) this.fx.emit({ t: 'smoke', x: (b.x * TILE + d.w * TILE * ch[0]) / TILE, y: (base - ch[1]) / TILE + 0.3 });
       if (b.type === 'smith') { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,${120 + Math.floor(Math.sin(this.time * 9) * 30)},40,0.5)`; ctx.fillRect(b.x * TILE + 18, base - 24, 14, 12); ctx.globalCompositeOperation = 'source-over'; if (Math.random() < 0.05) this.fx.emit({ t: 'spark', x: (b.x * TILE + 26) / TILE, y: (base - 14) / TILE }); }
       if (b.type === 'shipyard' && b.cd > 0 && Math.random() < 0.06) this.fx.emit({ t: 'spark', x: (b.x * TILE + 36 + Math.random() * 60) / TILE, y: (base - 46) / TILE });
+      this.civicLife(b, base, midX);
       if (b.type === 'windmill') this.windmill(b.x * TILE + d.w * 16, base - 6 - 42);
       if (b.type === 'campfire') this.flame(b.x * TILE + 16, base - 8);
     }
@@ -288,6 +296,41 @@ export class Renderer {
     if (this.selected && this.selected.kind === 'building' && this.selected.id === b.id) { ctx.strokeStyle = '#fff'; ctx.globalAlpha = 0.6 + 0.3 * Math.sin(this.time * 6); ctx.setLineDash([4, 3]); ctx.strokeRect(b.x * TILE - 2, b.y * TILE - 2, d.w * TILE + 4, d.h * TILE + 4); ctx.setLineDash([]); ctx.globalAlpha = 1; }
     if (b.hp < b.maxHp * 0.98 && b.done && this.cam.zoom >= 2) { const w = d.w * TILE * 0.6; ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(midX - w / 2 - 1, base + 3, w + 2, 4); ctx.fillStyle = '#d8a030'; ctx.fillRect(midX - w / 2, base + 4, w * (b.hp / b.maxHp), 2); }
     if (!b.done && this.cam.zoom >= 2) { const w = d.w * TILE * 0.6; ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(midX - w / 2 - 1, base + 3, w + 2, 4); ctx.fillStyle = '#e8d070'; ctx.fillRect(midX - w / 2, base + 4, w * b.progress, 2); }
+  }
+
+  /** Small motions that make a town look lived in: swinging signs, bread ovens, fountain jets, sparkles on a statue, sawdust. */
+  private civicLife(b: Building, base: number, midX: number): void {
+    const { ctx } = this, t = this.time, z = this.cam.zoom, left = b.x * TILE + 8;
+    if (z < 1) return;
+    switch (b.type) {
+      case 'tavern': { // the sign swings from its bracket
+        const px = left + 6 + 80 + 18 - 4, py = base - 30, a = Math.sin(t * 1.9 + b.id) * 0.16;
+        ctx.save(); ctx.translate(px, py); ctx.rotate(a);
+        ctx.fillStyle = '#5a4028'; ctx.fillRect(-1, 0, 2, 4); ctx.fillStyle = '#b88a50'; ctx.fillRect(-7, 4, 14, 11); ctx.fillStyle = '#7a5a38'; ctx.fillRect(-7, 14, 14, 1);
+        ctx.fillStyle = '#e8c24a'; ctx.fillRect(-3, 7, 5, 5); ctx.fillStyle = '#fff2b0'; ctx.fillRect(-3, 7, 5, 1); ctx.fillStyle = '#e8c24a'; ctx.fillRect(2, 8, 2, 3);
+        ctx.restore();
+        break;
+      }
+      case 'bakery': if (Math.random() < 0.05) this.fx.emit({ t: 'smoke', x: (left + 6 + 66 - 16 + 7) / TILE, y: (base - 28 - 36) / TILE }); {
+        ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,${130 + Math.floor(Math.sin(t * 8) * 30)},40,0.5)`; ctx.fillRect(left + 6 + 66 - 16 + 4, base - 28 + 8 - 7, 6, 4); ctx.globalCompositeOperation = 'source-over';
+        break;
+      }
+      case 'fountain': {
+        const cx = left + 32, top = base - 56;
+        ctx.fillStyle = 'rgba(190,230,255,0.85)';
+        for (let k = 0; k < 8; k++) { const ph = (t * 0.8 + k / 8) % 1, a = (k / 8) * 6.283, r = Math.sin(ph * Math.PI) * 11, h = Math.sin(ph * Math.PI) * 15 - ph * 3; ctx.fillRect(Math.round(cx + Math.cos(a) * r), Math.round(top + 18 - h + Math.sin(a) * r * 0.4), 1, 2); }
+        ctx.fillStyle = 'rgba(210,240,255,0.5)'; ctx.fillRect(cx - 1, top + 3, 2, 16);
+        ctx.strokeStyle = `rgba(210,240,255,${0.3 + 0.2 * Math.sin(t * 3)})`; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, base - 26, 12 + ((t * 8) % 8), 5 + ((t * 8) % 8) * 0.4, 0, 0, 6.283); ctx.stroke();
+        break;
+      }
+      case 'monument': if (Math.random() < 0.02) this.fx.emit({ t: 'spark', x: (left + 36) / TILE, y: (base - 62) / TILE }); break;
+      case 'market': if (Math.random() < 0.006) this.fx.emit({ t: 'coin', x: (left + 20 + Math.random() * 90) / TILE, y: (base - 24) / TILE }); break;
+      case 'healer': if (Math.random() < 0.012) this.fx.emit({ t: 'heal', x: (left + 36) / TILE, y: (base - 36) / TILE }); break;
+      case 'lumber': if (b.workers > 0 && Math.random() < 0.15) this.fx.emit({ t: 'dust', x: (left + 18 + Math.random() * 10) / TILE, y: (base - 14) / TILE, a: 0.25 }); break;
+      case 'orchard': if (this.sim.season < 3 && Math.random() < 0.02) this.fx.emit({ t: 'leaf', x: (left + Math.random() * 128) / TILE, y: (base - 20 - Math.random() * 90) / TILE }); break;
+      default: break;
+    }
+    void midX;
   }
 
   private flag(x: number, y: number, color: string): void {
@@ -401,8 +444,14 @@ export class Renderer {
           }
         }
         else if (b.type === 'dock') { glow(cx + d.w * 14, base - 26, 36, 0.8); }
+        else if (b.type === 'tavern') { glow(cx, base - 22, 54, 0.85 + 0.1 * Math.sin(this.time * 7 + b.id)); glow(cx, base + 6, 36, 0.5); }
+        else if (b.type === 'bakery') { glow(cx + 26, base - 12, 36, 0.8 + 0.15 * Math.sin(this.time * 9)); }
+        else if (b.type === 'market') { for (const lx of [0.2, 0.5, 0.8]) glow(b.x * TILE + 8 + d.w * 32 * lx, base - 34, 32, 0.7); }
+        else if (b.type === 'keep') { for (const tx of [0.05, 0.95]) glow(b.x * TILE + 8 + d.w * 32 * tx, base - 40, 40, 0.75); glow(cx, base - 26, 46, 0.7); }
+        else if (b.type === 'fountain' || b.type === 'monument') glow(cx, base - 28, 36, 0.45);
         else if (b.type !== 'farm' && b.type !== 'well' && b.type !== 'lumber') glow(cx, base - 18, 44, 0.55);
       }
+      for (const [lx, ly] of this.lamps) glow(lx * TILE + 22, ly * TILE + 4, 30, 0.7);
       for (const u of sim.units) { if (u.burning > 0 || (u.look?.weapon === 'torch')) glow(u.x * TILE, u.y * TILE - 12, 26, 0.9); }
       for (const i of sim.world.activeFires) { const x = i % sim.world.w, y = (i / sim.world.w) | 0; if (x * TILE > left - 40 && x * TILE < left + vw + 40 && y * TILE > top - 40 && y * TILE < top + vh + 40) glow(x * TILE + 16, y * TILE + 12, 34, 0.7); }
       ctx.globalAlpha = 1;

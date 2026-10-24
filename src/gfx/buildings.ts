@@ -4,6 +4,7 @@ import { hash2, Rng } from '../core/rng';
 import { BDEFS, type BType } from '../sim/buildings';
 import type { Race } from './humanoid';
 import { paintPort } from './port';
+import { paintTown } from './town';
 
 /**
  * Procedural buildings, painted facade-first in a 3/4 view: front wall, roof band above it, a sliver of
@@ -27,8 +28,14 @@ const STYLES: Record<Race, Style> = {
   orc: { wall: '#6e4e34', wallKind: 'planks', beam: '#3a2a1c', roof: '#7e3a2c', roofKind: 'tri', trim: '#d8cfb4', glow: '#ff6a2a', door: '#3a281c', deco: 'bone' },
 };
 
+const ROOFS: Record<Race, string[]> = { human: ['#b0503c', '#a56a32', '#8d4a5a', '#a8493a'], elf: ['#4a9c70', '#5aa87a', '#3f8a82', '#6aa860'], dwarf: ['#4e5462', '#5a4e52', '#45586a', '#58585e'], orc: ['#7e3a2c', '#6a3a30', '#8a4a2c', '#5a3030'] };
+const WALLS: Record<Race, string[]> = { human: ['#d6c6a0', '#e0d2b0', '#cbb892', '#d8c0a0'], elf: ['#ece4d0', '#e4ecd8', '#f0e8dc', '#dce8e0'], dwarf: ['#85837c', '#7a7a80', '#8c8478', '#757a7e'], orc: ['#6e4e34', '#604430', '#7a5638', '#5a4a3a'] };
+/** Which of the four looks this building wears (from its id): roof and wall tint, and bit 0 = shutters, bit 1 = flower box. */
+let VAR = 0;
+const styled = (race: Race, v: number): Style => ({ ...STYLES[race], roof: ROOFS[race][v & 3], wall: WALLS[race][(v >> 1 ^ v) & 3] });
+
 const OX = 8; // left margin in the sprite
-export const bSize = (type: BType): { w: number; h: number } => { const d = BDEFS[type]; return { w: d.w * 32 + 16, h: d.h * 32 + 72 + (type === 'lighthouse' ? 44 : 0) }; };
+export const bSize = (type: BType): { w: number; h: number } => { const d = BDEFS[type]; return { w: d.w * 32 + 16, h: d.h * 32 + 72 + (type === 'lighthouse' ? 44 : type === 'keep' ? 48 : 0) }; };
 
 /* ---- painter verbs (local coords: x from footprint left, y up from footprint bottom) -------------------- */
 class Canvas {
@@ -37,6 +44,8 @@ class Canvas {
   X(x: number): number { return OX + x; }
   Y(y: number): number { return this.px.h - 8 - y; }
   set(x: number, y: number, c: number): void { this.px.set(this.X(x), this.Y(y), c); }
+  /** Filled box from its bottom-left corner (local coords, y up). */
+  rect(x: number, y: number, w: number, h: number, c: number): void { this.px.rect(this.X(x), this.Y(y + h - 1), w, h, c); }
 }
 
 function wallFill(c: Canvas, x: number, y: number, w: number, h: number, st: Style): void {
@@ -112,6 +121,8 @@ function windowAt(c: Canvas, x: number, y: number, w: number, h: number, st: Sty
   }
   c.set(x + Math.floor(w / 2), y + Math.floor(h / 2), fr[2]);
   for (let j = 0; j < h; j++) { c.set(x + Math.floor(w / 2), y + j, fr[2]); }
+  if (VAR & 1 && w >= 6) { const sp = R(st.deco === 'vine' ? '#4a9a70' : st.deco === 'iron' ? '#5a4a3a' : '#3a6a8a'); for (let j = 0; j < h; j++) for (let k = 0; k < 2; k++) { c.set(x - 2 - k, y + j, sp[(j % 3 === 0 ? 1 : 2) + (k ? 0 : 1)]); c.set(x + w + 1 + k, y + j, sp[(j % 3 === 0 ? 1 : 2) + (k ? 1 : 0)]); } }
+  if (VAR & 2 && w >= 6) { c.rect(x - 1, y - 4, w + 2, 3, R('#7a5a38')[2]); for (let i = 0; i < w; i += 2) { c.set(x + i, y - 2, col(['#e0404a', '#f2c230', '#f08ac0', '#ffffff'][(i + VAR) % 4])); c.set(x + i, y - 1, col('#3a8a34')); } }
   for (let i = -1; i <= w; i++) { c.set(x + i, y - 1, R(st.trim)[2]); c.set(x + i, y + h, fr[2]); }
   for (let j = 0; j < h; j++) { c.set(x - 1, y + j, fr[1]); c.set(x + w, y + j, fr[0]); }
   if (st.deco === 'vine') { c.set(x - 1, y - 2, col('#4a9a40')); c.set(x + w, y - 2, col('#4a9a40')); }
@@ -139,10 +150,11 @@ function stoneBase(c: Canvas, x: number, y: number, w: number, h: number): void 
 }
 
 /* ---- the buildings --------------------------------------------------------------------------------------- */
-function paint(type: BType, race: Race): Pix {
-  const port = paintPort(type, race, bSize(type).h);
+function paint(type: BType, race: Race, variant: number): Pix {
+  VAR = variant;
+  const port = paintPort(type, race, bSize(type).h) ?? paintTown(type, race, variant, bSize(type).h);
   if (port) return port;
-  const c = new Canvas(type), st = STYLES[race], d = BDEFS[type], W = d.w * 32, rng = new Rng(7 + type.length);
+  const c = new Canvas(type), st = styled(race, variant), d = BDEFS[type], W = d.w * 32, rng = new Rng(7 + type.length);
   const arch = race === 'elf';
   switch (type) {
     case 'campfire': {
@@ -328,11 +340,11 @@ function damageOverlay(p: Pix, level: number): Pix {
 
 const cache = new Map<string, HTMLCanvasElement>();
 /** stage: 0..2 construction, 3 finished. damage: 0 none, 1 worn, 2 wrecked. */
-export function buildingSprite(type: BType, race: Race, stage: number, damage: number): HTMLCanvasElement {
-  const key = `${type}|${race}|${stage}|${damage}`;
+export function buildingSprite(type: BType, race: Race, stage: number, damage: number, variant = 0): HTMLCanvasElement {
+  const key = `${type}|${race}|${stage}|${damage}|${variant}`;
   let c = cache.get(key);
   if (!c) {
-    let p = paint(type, race);
+    let p = paint(type, race, variant);
     if (stage < 3) p = underConstruction(p, type, stage);
     else if (damage) p = damageOverlay(p, damage);
     c = p.toCanvas(); cache.set(key, c);
@@ -357,3 +369,6 @@ export function cropSprite(stage: number): HTMLCanvasElement {
   }
   return c;
 }
+
+export { Canvas, wallFill, sideWall, roofShape, door, windowAt, chimney, crate, barrel, logs, hay, flowers, stoneBase, STYLES, R, col, OX, styled };
+export type { Style };

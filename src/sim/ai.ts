@@ -7,7 +7,7 @@ import { hostile, damage, kill, shoot, attackPower, MELEE } from './combat';
 export { updateArrows } from './combat';
 import { thinkAnimal, actDragon } from './fauna';
 import { thinkEngine, actEngine } from './siege';
-import { thinkShip, actShip, actBoard } from './navy';
+import { thinkShip, actShip, actBoard, geo } from './navy';
 import { isEngine } from './species';
 import { hash2 } from '../core/rng';
 import type { Building } from './buildings';
@@ -221,9 +221,11 @@ function wanderNear(sim: Sim, u: Unit, cx: number, cy: number, r: number): void 
 export function findObj(sim: Sim, u: Unit, r: number, pred: (o: number) => boolean, cx = u.x, cy = u.y): { x: number; y: number } | null {
   const w = sim.world, x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(w.w - 1, Math.floor(cx + r)), y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(w.h - 1, Math.floor(cy + r));
   let best: { x: number; y: number } | null = null, bd = Infinity;
+  const land = geo(sim).land, here = land[Math.floor(u.y) * w.w + Math.floor(u.x)]; // nothing across the water or behind a mountain wall
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
     const i = y * w.w + x, o = w.obj[i];
     if (o === 0 || !pred(o)) continue;
+    if (here && land[i] !== here) continue;
     if (isTree(o) && w.objAge[i] < 170) continue; // let saplings grow
     const d = (x - u.x) ** 2 + (y - u.y) ** 2 + hash2(x, y, 3) * 4;
     if (d < bd) { bd = d; best = { x, y }; }
@@ -245,8 +247,9 @@ function startGather(sim: Sim, u: Unit, city: City, mode: 'chop' | 'mine', r: nu
 function findQuarry(sim: Sim, cx: number, cy: number, r: number, u: Unit): { x: number; y: number } | null {
   const w = sim.world;
   let best: { x: number; y: number } | null = null, bd = Infinity;
+  const land = geo(sim).land, here = land[Math.floor(u.y) * w.w + Math.floor(u.x)];
   for (let y = Math.max(1, Math.floor(cy - r)); y <= Math.min(w.h - 2, Math.floor(cy + r)); y++) for (let x = Math.max(1, Math.floor(cx - r)); x <= Math.min(w.w - 2, Math.floor(cx + r)); x++) {
-    if (!w.isWalkable(x, y) || TERRAIN[w.terrain[y * w.w + x]].water) continue;
+    if (!w.isWalkable(x, y) || TERRAIN[w.terrain[y * w.w + x]].water || (here && land[y * w.w + x] !== here)) continue;
     const t = w.terrain[(y - 1) * w.w + x];
     if (t !== T.MOUNTAIN && t !== T.PEAK) continue; // the face is north of where one stands
     const d = (x - cx) ** 2 + (y - cy) ** 2 + (x - u.x) ** 2 * 0.3 + hash2(x, y, 7) * 30;
@@ -259,7 +262,7 @@ function startFarm(sim: Sim, u: Unit, city: City): void {
   let best: Building | null = null, bs = -1;
   for (const id of city.buildings) {
     const b = sim.buildings.get(id);
-    if (!b || b.type !== 'farm' || !b.done || b.ruin || b.workers >= b.def.slots) continue;
+    if (!b || (b.type !== 'farm' && b.type !== 'orchard') || !b.done || b.ruin || b.workers >= b.def.slots) continue;
     const s = b.crop + 0.3 - Math.hypot(b.cx - u.x, b.cy - u.y) * 0.01;
     if (s > bs) { bs = s; best = b; }
   }
@@ -312,7 +315,7 @@ function act(sim: Sim, u: Unit, dt: number): void {
       if (m === 'moving') { setAct(u, 'walk'); return; }
       if (m === 'blocked') { u.mode = 'wander'; return; }
       setAct(u, 'eat'); u.state = 'eat';
-      if (u.actT > 1.3) { if (city && city.stock.food > 0) { city.stock.food -= 1; u.hunger = Math.max(0, u.hunger - 65); } u.mode = 'wander'; u.thinkT = 0.2; }
+      if (u.actT > 1.3) { if (city && city.stock.food > 0) { city.stock.food -= 1; u.hunger = Math.max(0, u.hunger - (city.perks.bakery ? 80 : 65)); } u.mode = 'wander'; u.thinkT = 0.2; }
       return;
     }
     case 'forage': {
@@ -373,7 +376,7 @@ function act(sim: Sim, u: Unit, dt: number): void {
       u.jobT += dt;
       if (u.jobT > 5.5) {
         u.jobT = 0;
-        if (b.crop >= 0.7) { u.carry = { good: 'food', n: Math.round(6 + b.crop * 6) }; b.crop = 0.05; releaseJob(sim, u); u.mode = 'wander'; u.thinkT = 0.05; }
+        if (b.crop >= 0.7) { u.carry = { good: 'food', n: Math.round((b.type === 'orchard' ? 9 : 6) + b.crop * 6) }; b.crop = 0.05; releaseJob(sim, u); u.mode = 'wander'; u.thinkT = 0.05; }
       }
       return;
     }

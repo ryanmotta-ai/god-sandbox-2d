@@ -32,7 +32,8 @@ main.ts  rAF → game.frame(dt) → ui.update(dt)
 | Humanoides: proporções, andar, golpe | `gfx/rig.ts` (poses + IK), `gfx/humanoid.ts` (desenho), `gfx/looks.ts` (visual por raça/função) |
 | Animais, dragão | `gfx/animals.ts` |
 | Árvores, pedras, minérios | `gfx/flora.ts`; montanhas `gfx/mountain.ts` |
-| Prédios (por raça/estágio/dano) | `gfx/buildings.ts`; dados em `sim/buildings.ts` |
+| Prédios (por raça/estágio/dano/variação) | `gfx/buildings.ts` (casas e utilitários), `gfx/town.ts` (cívicos), `gfx/port.ts` (porto); dados em `sim/buildings.ts`; efeitos em `city.ts` (`perksOf`) |
+| Mobília de rua (postes, bancos, barris) | `gfx/props.ts` (`propAt`: função pura do tile, sem estado) |
 | Navios, portos, pesca, troca, colonização e invasão por mar | `sim/navy.ts` (mapas de terra/mar, docas, estaleiro, missões), `sim/fleet.ts` (guerra naval); arte `gfx/ships.ts`, `gfx/port.ts` |
 | Aríete, catapulta | `gfx/engines.ts` (arte), `sim/siege.ts` (IA e construção) |
 | Comportamento de aldeão | `sim/ai.ts` (`thinkCiv`, `act`) |

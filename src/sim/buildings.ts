@@ -1,6 +1,7 @@
 import type { Race } from '../gfx/humanoid';
 
-export type BType = 'campfire' | 'hut' | 'house' | 'farm' | 'storehouse' | 'lumber' | 'barracks' | 'tower' | 'temple' | 'hall' | 'well' | 'smith' | 'windmill' | 'wall' | 'gate' | 'dock' | 'shipyard' | 'fishhut' | 'lighthouse';
+export type BType = 'campfire' | 'hut' | 'house' | 'farm' | 'storehouse' | 'lumber' | 'barracks' | 'tower' | 'temple' | 'hall' | 'well' | 'smith' | 'windmill' | 'wall' | 'gate' | 'dock' | 'shipyard' | 'fishhut' | 'lighthouse'
+  | 'market' | 'tavern' | 'bakery' | 'stable' | 'healer' | 'fountain' | 'keep' | 'monument' | 'orchard' | 'townhouse';
 
 export interface BDef {
   type: BType; name: string;
@@ -29,7 +30,7 @@ export const BDEFS: Record<BType, BDef> = {
   barracks: { type: 'barracks', name: 'Quartel', w: 3, h: 3, cost: { wood: 16, stone: 14 }, hp: 420, beds: 0, build: 36, slots: 4 },
   tower: { type: 'tower', name: 'Torre', w: 2, h: 2, cost: { wood: 8, stone: 18 }, hp: 520, beds: 0, build: 34, slots: 1 },
   temple: { type: 'temple', name: 'Templo', w: 3, h: 3, cost: { wood: 14, stone: 24 }, hp: 380, beds: 0, build: 44, slots: 0 },
-  hall: { type: 'hall', name: 'Salão', w: 4, h: 3, cost: { wood: 24, stone: 24 }, hp: 900, beds: 4, build: 60, slots: 0 },
+  hall: { type: 'hall', name: 'Salão', w: 4, h: 3, cost: { wood: 24, stone: 12 }, hp: 900, beds: 4, build: 60, slots: 0 },
   well: { type: 'well', name: 'Poço', w: 1, h: 1, cost: { wood: 2, stone: 6 }, hp: 90, beds: 0, build: 12, slots: 0 },
   smith: { type: 'smith', name: 'Ferraria', w: 2, h: 2, cost: { wood: 8, stone: 10 }, hp: 260, beds: 0, build: 28, slots: 1 },
   wall: { type: 'wall', name: 'Muralha', w: 1, h: 1, cost: { wood: 1, stone: 3 }, hp: 420, beds: 0, build: 5, slots: 0 },
@@ -38,6 +39,16 @@ export const BDEFS: Record<BType, BDef> = {
   shipyard: { type: 'shipyard', name: 'Estaleiro', w: 4, h: 3, cost: { wood: 28, stone: 6 }, hp: 340, beds: 0, build: 38, slots: 2, water: true },
   fishhut: { type: 'fishhut', name: 'Rancho de pesca', w: 3, h: 2, cost: { wood: 8, stone: 0 }, hp: 130, beds: 2, build: 14, slots: 2 },
   lighthouse: { type: 'lighthouse', name: 'Farol', w: 2, h: 2, cost: { wood: 6, stone: 22 }, hp: 480, beds: 0, build: 40, slots: 1 },
+  market: { type: 'market', name: 'Mercado', w: 4, h: 3, cost: { wood: 18, stone: 4 }, hp: 200, beds: 0, build: 26, slots: 2 },
+  tavern: { type: 'tavern', name: 'Taverna', w: 3, h: 3, cost: { wood: 16, stone: 8 }, hp: 280, beds: 2, build: 30, slots: 1 },
+  bakery: { type: 'bakery', name: 'Padaria', w: 3, h: 2, cost: { wood: 10, stone: 10 }, hp: 220, beds: 0, build: 22, slots: 1 },
+  stable: { type: 'stable', name: 'Estábulo', w: 4, h: 2, cost: { wood: 22, stone: 4 }, hp: 260, beds: 0, build: 28, slots: 1 },
+  healer: { type: 'healer', name: 'Casa de cura', w: 3, h: 3, cost: { wood: 12, stone: 8 }, hp: 240, beds: 2, build: 28, slots: 1 },
+  fountain: { type: 'fountain', name: 'Chafariz', w: 2, h: 2, cost: { wood: 0, stone: 20 }, hp: 200, beds: 0, build: 20, slots: 0 },
+  keep: { type: 'keep', name: 'Fortaleza', w: 5, h: 4, cost: { wood: 30, stone: 70 }, hp: 1300, beds: 6, build: 80, slots: 3 },
+  monument: { type: 'monument', name: 'Monumento', w: 2, h: 2, cost: { wood: 0, stone: 30 }, hp: 300, beds: 0, build: 30, slots: 0 },
+  orchard: { type: 'orchard', name: 'Pomar', w: 4, h: 4, cost: { wood: 6, stone: 0 }, hp: 80, beds: 0, build: 16, slots: 2 },
+  townhouse: { type: 'townhouse', name: 'Sobrado', w: 3, h: 3, cost: { wood: 16, stone: 14 }, hp: 340, beds: 9, build: 36, slots: 0 },
   windmill: { type: 'windmill', name: 'Moinho', w: 2, h: 2, cost: { wood: 14, stone: 6 }, hp: 240, beds: 0, build: 30, slots: 1 },
 };
 

@@ -42,8 +42,9 @@ Menu: novo mundo (5 formas, tamanho, água/montanhas/florestas/clima, povos, sem
   neve, névoa e tempestade com raios.
 * **Arte** — tudo desenhado por código, 1 tile = 32 px: humanos, elfos, anões e orcs com rig esquelético
   (cinemática inversa nas pernas e braços, 4 direções reais, 13 animações: andar, correr, golpear, atirar,
-  cortar, minerar, cultivar, martelar, conjurar, morrer…); 11 animais, dragão e zumbi; aríete e catapulta; 13 tipos de
-  prédio em 4 estilos de raça, com obra em andamento, dano e fumaça de chaminé.
+  cortar, minerar, cultivar, martelar, conjurar, morrer…); 11 animais, dragão e zumbi; aríete e catapulta; 33 tipos de
+  prédio (casas, mercado, taverna, padaria, estábulo, casa de cura, chafariz, fortaleza, pomar…) em 4 estilos de raça e 4 variações
+  cada, com obra em andamento, dano, fumaça, placa que balança, forno aceso e jatos de chafariz; postes, bancos, barris e carroças nas ruas.
 * **Vida** — fome, idade, nascimento, trabalho físico (lenha, pedra, fazenda, construção, caça), ecologia com
   predadores e presas, fogo que se espalha, lava que esfria, árvores que crescem e semeiam.
 * **Civilização** — grupos fundam vilas; o planejador loteia o terreno, pavimenta ruas e constrói; território com

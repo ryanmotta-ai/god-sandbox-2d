@@ -113,7 +113,7 @@ export class Sim {
     }
     w.touch(x, y, 3);
     if (b.def.water) initPort(this, b);
-    if (done) { b.progress = 1; b.crop = type === 'farm' ? 0.2 : 0; }
+    if (done) { b.progress = 1; b.crop = type === 'farm' || type === 'orchard' ? 0.2 : 0; }
     this.buildings.set(b.id, b);
     const c = this.cities.get(cityId);
     if (c) c.buildings.push(b.id);
