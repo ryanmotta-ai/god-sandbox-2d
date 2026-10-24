@@ -1,26 +1,19 @@
 {
-  "name": "worldcraft-2d-aethoria",
-  "version": "1.0.0",
-  "description": "Aethoria: Divine Sandbox 2D Game Engine",
+  "name": "aethoria",
+  "version": "0.1.0",
+  "description": "Aethoria — sandbox divino 2D em pixel art",
   "type": "module",
+  "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "test:platform": "tsx tests/platform-v1b.test.ts",
-    "test:perf": "tsx tests/perf-v1.test.ts",
-    "bench:perf": "tsx tests/perf-v1.bench.ts",
-    "test:art": "tsx tests/sprite-art.test.ts"
+    "dev": "vite --port 5200",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx tests/run.ts"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
+    "@types/node": "^26.6.5",
     "tsx": "^4.23.4",
     "typescript": "^7.0.2",
     "vite": "^8.2.0"
-  },
-  "dependencies": {
-    "@tauri-apps/api": "^2.11.1"
   }
 }
