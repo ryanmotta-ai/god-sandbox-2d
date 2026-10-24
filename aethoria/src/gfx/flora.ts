@@ -248,7 +248,7 @@ function mushroom(rng: Rng): Pix {
 
 function stump(): Pix {
   const px = new Pix(PW, PH), b = R(BARK);
-  px.column(PCX - 5, PBASE - 6, 10, 6, b); px.ellipse(PCX, PBASE - 6, 5, 2.2, col('#c8a070')); px.ellipse(PCX, PBASE - 6, 3, 1.2, col('#a8804e')); px.set(PCX, PBASE - 6, col('#8a6238'));
+  px.column(PCX - 3, PBASE - 4, 7, 4, b); px.ellipse(PCX, PBASE - 4, 3.4, 1.7, col('#c8a070')); px.ellipse(PCX, PBASE - 4, 2, 0.9, col('#a8804e')); px.set(PCX, PBASE - 4, col('#8a6238'));
   px.outline(0.6, [24, 14, 14]);
   return px;
 }

@@ -7,6 +7,8 @@ import { TILE } from './core/config';
 import { TERRAIN } from './world/defs';
 import type { Species } from './sim/species';
 import type { Race } from './gfx/humanoid';
+import type { Unit } from './sim/unit';
+import type { Power } from './sim/powers';
 
 export interface Setup extends GenConfig {
   races: Race[];
@@ -20,7 +22,7 @@ export const DEFAULT_SETUP: Setup = { ...DEFAULT_GEN, races: ['human', 'elf', 'd
 export function populate(sim: Sim, s: Setup): void {
   const world = sim.world, size = world.w;
   const placed: { x: number; y: number }[] = [];
-  const goodGround = new Set([4, 3, 6, 5, 9]);
+  const goodGround = new Set([4, 3, 6, 5]);
   for (const race of s.races) {
     let best: { x: number; y: number } | null = null, bd = -1;
     for (let tries = 0; tries < 600; tries++) {
@@ -36,12 +38,14 @@ export function populate(sim: Sim, s: Setup): void {
     placed.push(best);
     for (let i = 0; i < s.founders; i++) { const sp = sim.freeSpot(best.x + sim.rng.range(-2, 2), best.y + sim.rng.range(-2, 2), 4); if (sp) sim.spawn(race, sp.x, sp.y, { role: 'peasant' }); }
   }
-  const wild: Species[] = ['sheep', 'sheep', 'cow', 'deer', 'deer', 'rabbit', 'rabbit', 'chicken', 'wolf', 'boar', 'bear', 'bird', 'bird'];
+  const wild: Species[] = ['sheep', 'sheep', 'sheep', 'cow', 'cow', 'deer', 'deer', 'deer', 'rabbit', 'rabbit', 'rabbit', 'chicken', 'chicken', 'wolf', 'boar', 'bear', 'bird', 'bird'];
   const n = Math.floor((size * size) / 130 * s.wildlife);
   for (let k = 0; k < n; k++) {
     const x = sim.rng.int(2, size - 3), y = sim.rng.int(2, size - 3), t = world.t(x, y);
     if (!sim.walkable(x, y) || TERRAIN[t].water) continue;
-    const sp = sim.rng.pick(wild);
+    let sp = sim.rng.pick(wild);
+    // keep the dangerous ones away from the founders: a first village should have a chance
+    if ((sp === 'wolf' || sp === 'bear' || sp === 'boar') && placed.some(p => Math.hypot(p.x - x, p.y - y) < 30)) sp = 'sheep';
     if (sp === 'bird') { sim.spawn(sp, x + 0.5, y + 0.5); continue; }
     if (t === 2 && sim.rng.chance(0.3)) { sim.spawn('crab', x + 0.5, y + 0.5); continue; }
     if ((t === 7 || t === 5) && sim.rng.chance(0.2)) { sim.spawn('snake', x + 0.5, y + 0.5); continue; }
@@ -59,6 +63,9 @@ export class Game {
   private acc = 0;
   setup: Setup = DEFAULT_SETUP;
   onWorld: (() => void)[] = [];
+  follow: Unit | null = null;
+  tool: Power | null = null;
+  brush = 2;
 
   constructor(public canvas: HTMLCanvasElement) { this.newWorld(DEFAULT_SETUP); }
 
@@ -71,7 +78,7 @@ export class Game {
     else { this.cam.worldW = world.w; this.cam.worldH = world.h; this.cam.x = world.w * TILE / 2; this.cam.y = world.h * TILE / 2; this.renderer.setSim(this.sim); }
     const first = this.sim.units.find(u => u.def.civ);
     if (first) { this.cam.x = first.x * TILE; this.cam.y = first.y * TILE; }
-    this.acc = 0;
+    this.acc = 0; this.follow = null;
     for (const f of this.onWorld) f();
   }
 
@@ -85,6 +92,7 @@ export class Game {
       this.sim.tick(); this.acc -= TICK_DT; steps++;
       if (performance.now() - t0 > 14) { this.acc = Math.min(this.acc, TICK_DT * 2); break; }
     }
+    if (this.follow) { if (this.follow.alive) { const a = this.speed > 0 ? this.acc / TICK_DT : 1; this.cam.x += ((this.follow.px + (this.follow.x - this.follow.px) * a) * TILE - this.cam.x) * Math.min(1, dt * 6); this.cam.y += ((this.follow.py + (this.follow.y - this.follow.py) * a) * TILE - this.cam.y) * Math.min(1, dt * 6); } else this.follow = null; }
     this.renderer.draw(dt, this.speed > 0 ? this.acc / TICK_DT : 1);
   }
 }

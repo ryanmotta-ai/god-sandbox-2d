@@ -39,7 +39,7 @@ export function thinkAnimal(sim: Sim, u: Unit): void {
     const a = sim.rng.range(0, 6.283), r = sim.rng.range(4, 14);
     u.goalX = Math.max(1, Math.min(sim.world.w - 2, u.x + Math.cos(a) * r)); u.goalY = Math.max(1, Math.min(sim.world.h - 2, u.y + Math.sin(a) * r)); u.mode = 'goto'; return;
   }
-  if (d.diet === 'herb' && u.hunger > 30 && sim.rng.chance(0.5)) { u.mode = 'graze'; u.path = null; return; }
+  if (d.diet === 'herb' && u.hunger > 22 && sim.rng.chance(0.7)) { u.mode = 'graze'; u.path = null; return; }
   if (sim.rng.chance(0.25)) { setAct(u, 'idle'); u.mode = 'wander'; u.thinkT = sim.rng.range(1, 3.5); return; }
   wander(sim, u, d.herd ? 5 : 8);
 }

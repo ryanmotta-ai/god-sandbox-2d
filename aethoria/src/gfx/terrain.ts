@@ -187,6 +187,20 @@ function texture(t: number, px: number, py: number): number {
   }
 }
 
+/** A square of one terrain's texture, for UI swatches. */
+export function terrainSwatch(t: number, size = 28): HTMLCanvasElement {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d')!, img = g.createImageData(size, size), p = new Uint32Array(img.data.buffer);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    let col: number;
+    if (t === T.DEEP) col = packHex('#0f3a6b'); else if (t === T.SHALLOW) col = SAND_BED[(x + y) % 7 === 0 ? 1 : 2];
+    else col = texture(t, 300 + x, 400 + y);
+    p[y * size + x] = col;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
 // ---- chunk bake -------------------------------------------------------------------------------------
 const ter = new Uint8Array(BW * BH);
 const dLand = new Uint8Array(BW * BH);

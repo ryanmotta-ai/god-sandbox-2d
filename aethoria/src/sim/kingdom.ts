@@ -143,7 +143,7 @@ function diplomacy(sim: Sim, k: Kingdom): void {
     if (!near || near.d > 70 || sim.time < (k.truce.get(o.id) ?? 0)) continue;
     const mine = soldiersOf(sim, k).length;
     const thresh = -22 + (k.trait === 'warlike' ? 22 : k.trait === 'peaceful' ? -30 : k.trait === 'tyrant' ? 12 : k.trait === 'greedy' ? 8 : k.trait === 'diplomat' ? -14 : 0) + (k.trait === 'zealot' && k.race !== o.race ? 25 : 0);
-    if (rel < thresh && mine >= 4 && sim.time - k.founded > 40 && sim.rng.chance(0.16)) declareWar(sim, k, o, rel < -45 ? 'ódio antigo' : near.d < 25 ? 'disputa de fronteira' : 'ambição');
+    if (rel < thresh && mine >= 3 && sim.time - k.founded > 40 && sim.rng.chance(0.16)) declareWar(sim, k, o, rel < -45 ? 'ódio antigo' : near.d < 25 ? 'disputa de fronteira' : 'ambição');
   }
 }
 

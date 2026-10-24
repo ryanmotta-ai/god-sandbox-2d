@@ -15,6 +15,7 @@ import { updateUnits, updateArrows } from './ai';
 import { updateCities } from './city';
 import { updateKingdoms } from './kingdom';
 import { updateDynamics } from './dynamics';
+import type { Disaster } from './disasters';
 
 export interface FxEvent { t: 'blood' | 'hit' | 'spark' | 'smoke' | 'fire' | 'dust' | 'heal' | 'curse' | 'boom' | 'splash' | 'arrow' | 'flash' | 'coin' | 'rubble' | 'lightning' | 'meteor' | 'leaf' | 'zzz' | 'heart'; x: number; y: number; a?: number; b?: number; c?: string }
 export interface LogEntry { t: number; text: string; kind: 'info' | 'war' | 'birth' | 'death' | 'disaster' | 'city' | 'peace' }
@@ -31,6 +32,7 @@ export class Sim {
   cities = new Map<number, City>();
   kingdoms = new Map<number, Kingdom>();
   arrows: Arrow[] = [];
+  disasters: Disaster[] = [];
   fx: FxEvent[] = [];
   log: LogEntry[] = [];
   time = 0;
@@ -62,7 +64,7 @@ export class Sim {
 
   get year(): number { return this.time / YEAR_SECONDS; }
   /** 0..1 through the day; 0.25 = dawn, 0.5 = noon. */
-  get dayPhase(): number { return (this.time / this.dayLength) % 1; }
+  get dayPhase(): number { return ((this.time + 52) / this.dayLength) % 1; }
   /** 0 spring, 1 summer, 2 autumn, 3 winter. Four seasons per world year pair for slower, readable change. */
   get season(): 0 | 1 | 2 | 3 { return (Math.floor(this.time / (YEAR_SECONDS * 3)) % 4) as 0 | 1 | 2 | 3; }
 

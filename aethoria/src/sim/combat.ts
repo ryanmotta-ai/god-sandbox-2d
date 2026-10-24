@@ -71,6 +71,8 @@ export function kill(sim: Sim, u: Unit, by: Unit | null, why = ''): void {
     if (k && k.king === u.id) { sim.note(`${k.name}: o rei ${u.name} morreu${by ? ` (${by.def.name})` : why ? ` (${why})` : ''}.`, 'death'); k.king = 0; }
   }
   if (u.species === 'dragon') sim.note('Um dragão foi abatido!', 'death');
+  // the dead rise: a zombie's victim, or the plague's, comes back wrong
+  if (u.def.civ && (by?.species === 'zombie' || (u.traits.includes('plague') && sim.rng.chance(0.45)))) { u.stateT = 99; sim.spawn('zombie', u.x, u.y); }
 }
 
 export function shoot(sim: Sim, from: Unit, target: Unit): void {

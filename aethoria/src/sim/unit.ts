@@ -50,6 +50,8 @@ export class Unit {
   /** Dragon breath accumulator. */
   breathT = 0;
   pathFail = 0;
+  /** Seconds until a moving goal may be re-searched; and a cool-down after a search found nothing. */
+  repathT = 0; failT = 0;
   fleeT = 0;
   /** Seconds since last births / breeding for animals. */
   breedT = 0;

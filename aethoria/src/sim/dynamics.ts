@@ -3,6 +3,7 @@ import { TERRAIN, T, O, OBJECTS, isTree } from '../world/defs';
 import { hash2 } from '../core/rng';
 import { damage } from './combat';
 import { igniteTile } from './ai';
+import { updateDisasters } from './disasters';
 
 const NB = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -10,6 +11,7 @@ const NB = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 export function updateDynamics(sim: Sim, dt: number): void {
   const w = sim.world;
   weather(sim, dt);
+  updateDisasters(sim, dt);
   if (sim.tickN % 4 === 0) fire(sim);
   // random sampling: every tile is visited roughly every minute
   const samples = Math.max(8, Math.floor((w.w * w.h) / 600));
@@ -18,7 +20,7 @@ export function updateDynamics(sim: Sim, dt: number): void {
     if (isTree(o)) {
       if (w.objAge[i] < 255) w.objAge[i] = Math.min(255, w.objAge[i] + 10);
       else if (sim.rng.chance(0.012)) seed(sim, x, y, o);
-    } else if (o === O.STUMP && sim.rng.chance(0.08)) w.obj[i] = 0;
+    } else if (o === O.STUMP && sim.rng.chance(0.4)) w.obj[i] = 0;
     switch (t) {
       case T.ASH: if (sim.rng.chance(0.06)) w.setTerrain(x, y, T.DIRT); break;
       case T.DIRT: if (sim.rng.chance(0.03) && nearTerrain(w, x, y, T.GRASS) && w.bld[i] === 0 && w.zone[i] === 0) w.setTerrain(x, y, T.GRASS); break;

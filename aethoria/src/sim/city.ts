@@ -19,6 +19,7 @@ export class City {
   roles: Partial<Record<Role, number>> = {};
   t = 0; planT = 0; roleT = 0; birthT = 0; failedLots = 0; settleT = 0; zoneRadius = 0;
   founded = 0;
+  empty = 0;
   constructor(public id: number, public name: string, public race: Race, public kingdomId: number, public x: number, public y: number) {}
 
   hall(sim: Sim): Building | null {
@@ -61,12 +62,12 @@ export class City {
 /* ---- lots ----------------------------------------------------------------------------------- */
 const LOT = 5;
 const OK_BUILD = new Set<number>([T.GRASS, T.DIRT, T.SAVANNA, T.TUNDRA, T.SNOW, T.DESERT, T.SAND, T.ROAD, T.JUNGLE, T.HILL, T.ASH, T.ENCHANTED]);
-const OK_FARM = new Set<number>([T.GRASS, T.DIRT, T.SAVANNA, T.JUNGLE, T.FIELD, T.ENCHANTED]);
+const OK_FARM = new Set<number>([T.GRASS, T.DIRT, T.SAVANNA, T.JUNGLE, T.FIELD, T.ENCHANTED, T.TUNDRA, T.HILL]);
 const LOTS: [number, number][] = [];
 for (let j = -7; j <= 7; j++) for (let i = -7; i <= 7; i++) if (i || j) LOTS.push([i, j]);
 LOTS.sort((a, b) => Math.hypot(a[0], a[1] * 1.15) - Math.hypot(b[0], b[1] * 1.15));
 
-function footprintOk(sim: Sim, city: City, x: number, y: number, type: BType): boolean {
+export function footprintOk(sim: Sim, city: City, x: number, y: number, type: BType): boolean {
   const w = sim.world, d = BDEFS[type], ok = d.field ? OK_FARM : OK_BUILD;
   for (let j = -1; j <= d.h; j++) for (let i = 0; i < d.w; i++) {
     const tx = x + i, ty = y + j;
@@ -85,10 +86,10 @@ function footprintOk(sim: Sim, city: City, x: number, y: number, type: BType): b
 }
 
 /** Find a lot for `type` around the town centre (inner ring first; farms prefer the outside). */
-function findLot(sim: Sim, city: City, type: BType): { x: number; y: number } | null {
+export function findLot(sim: Sim, city: City, type: BType): { x: number; y: number } | null {
   const d = BDEFS[type], ax = city.x - 2, ay = city.y - 2;
-  const maxD = city.radius / LOT + 0.6;
-  const minRing = type === 'farm' || type === 'windmill' ? 1.8 : type === 'tower' ? 2.4 : 0;
+  const maxD = Math.max(2.9, city.radius / LOT + 0.6);
+  const minRing = type === 'farm' || type === 'windmill' ? 1.0 : type === 'tower' ? 2.4 : 0;
   for (const [i, j] of LOTS) {
     const ring = Math.hypot(i, j);
     if (ring > maxD) break;
@@ -202,6 +203,9 @@ function countPeople(sim: Sim): void {
 
 function cityStep(sim: Sim, c: City): void {
   const k = sim.kingdoms.get(c.kingdomId);
+  // a town nobody lives in is abandoned: its buildings fall, its land is free again
+  c.empty = c.pop === 0 && sim.time - c.founded > 30 ? c.empty + 1 : 0;
+  if (c.empty > 60) { for (const id of [...c.buildings]) { const b = sim.buildings.get(id); if (b) sim.removeBuilding(b, true); } sim.cities.delete(c.id); for (const kk of sim.kingdoms.values()) kk.cities = kk.cities.filter(id => id !== c.id); for (let i = 0; i < sim.world.zone.length; i++) if (sim.world.zone[i] === c.id) sim.world.zone[i] = 0; sim.zoneVer++; sim.note(`${c.name} foi abandonada.`, 'city'); return; }
   // tier & territory
   const targetR = Math.min(26, 6 + 2.3 * Math.sqrt(c.pop));
   if (Math.abs(targetR - c.radius) > 0.25) { c.radius += Math.sign(targetR - c.radius) * 0.25; if (Math.floor(c.radius * 2) !== Math.floor(c.zoneRadius * 2)) paintZone(sim, c); }
@@ -256,13 +260,13 @@ function balanceRoles(sim: Sim, c: City): void {
   const damaged = c.buildings.some(id => { const b = sim.buildings.get(id); return b && b.done && b.hp < b.maxHp * 0.6; });
   const war = sim.kingdoms.get(c.kingdomId)?.wars.size ?? 0;
   const barracks = c.count(sim, 'barracks', true);
-  const soldiers = n < 6 ? 0 : Math.round(n * (barracks ? (war ? 0.4 : 0.26) : 0.1));
+  const soldiers = n < 5 ? 0 : Math.max(2, Math.round(n * (barracks ? (war ? 0.4 : 0.28) : 0.18)));
   const want: Partial<Record<Role, number>> = {
     farmer: Math.min(Math.ceil(n * 0.4), farms * 2),
     woodcutter: Math.max(1, Math.round(n * (c.stock.wood < 30 ? 0.3 : 0.14))),
     builder: sites > 0 ? Math.min(5, 1 + sites) : damaged ? 1 : 0,
     miner: c.stock.stone < 60 ? Math.max(0, Math.round(n * 0.16)) : 0,
-    soldier: Math.round(soldiers * 0.6), archer: Math.round(soldiers * 0.3), knight: c.count(sim, 'smith', true) && c.stock.ore >= 10 ? Math.round(soldiers * 0.2) : 0,
+    soldier: Math.max(1, Math.round(soldiers * 0.6)), archer: Math.round(soldiers * 0.3), knight: c.count(sim, 'smith', true) && c.stock.ore >= 10 ? Math.round(soldiers * 0.2) : 0,
   };
   const have: Partial<Record<Role, number>> = {};
   for (const u of adults) have[u.role] = (have[u.role] ?? 0) + 1;

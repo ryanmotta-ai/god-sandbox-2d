@@ -10,7 +10,7 @@ import { hash2 } from '../core/rng';
 import type { Building } from './buildings';
 import { tryFoundCity, type City } from './city';
 
-const PATHS_PER_TICK = 40;
+const PATHS_PER_TICK = 24;
 let pathBudget = PATHS_PER_TICK;
 
 export type Move = 'moving' | 'arrived' | 'blocked';
@@ -26,14 +26,17 @@ export function moveTo(sim: Sim, u: Unit, gx: number, gy: number, dt: number, mu
     u.x += (dxg / l) * Math.min(s, l); u.y += (dyg / l) * Math.min(s, l); face(u, dxg, dyg);
     return 'moving';
   }
-  const goalChanged = Math.abs(u.goalX - gx) > 0.6 || Math.abs(u.goalY - gy) > 0.6;
-  if (!u.path || goalChanged) {
+  u.repathT -= dt;
+  const moved = Math.abs(u.goalX - gx) > 0.6 || Math.abs(u.goalY - gy) > 0.6;
+  // a chased target moves every tick: keep the old route unless the goal ran far or the timer lapsed
+  if (!u.path || (moved && (u.repathT <= 0 || Math.hypot(u.goalX - gx, u.goalY - gy) > 5))) {
+    if (u.failT > 0) { u.failT -= dt; return 'blocked'; }
     if (pathBudget <= 0) return 'moving';
     pathBudget--;
-    u.goalX = gx; u.goalY = gy;
-    u.path = findPath(w, Math.floor(u.x), Math.floor(u.y), Math.floor(gx), Math.floor(gy), 2600);
+    u.goalX = gx; u.goalY = gy; u.repathT = 0.7;
+    u.path = findPath(w, Math.floor(u.x), Math.floor(u.y), Math.floor(gx), Math.floor(gy), 1000);
     u.pathI = 0;
-    if (!u.path) { u.pathFail++; return 'blocked'; }
+    if (!u.path) { u.pathFail++; u.failT = 2.5; return 'blocked'; }
     u.pathFail = 0;
   }
   const p = u.path;
@@ -79,9 +82,10 @@ export function updateUnits(sim: Sim, dt: number): void {
     if (u.age > d.maxAge * (0.85 + hash2(u.id, 1, 9) * 0.3)) { kill(sim, u, null, 'velhice'); continue; }
     // hunger: civs and carnivores feel it; herbivores graze it off
     if (d.diet !== 'none' && u.species !== 'zombie') {
-      u.hunger += dt * (d.civ ? 0.55 : 0.35);
+      u.hunger += dt * (d.civ ? 0.55 : d.diet === 'herb' ? 0.14 : 0.2);
       if (u.hunger >= 100) { u.hp -= dt * 1.2; if (u.hp <= 0) { kill(sim, u, null, 'fome'); continue; } }
     }
+    if (!d.fly && d.id !== 'crab' && tt0(sim, u) && !sim.walkable(u.x, u.y) && sim.tickN % 10 === u.id % 10) { const sp = sim.freeSpot(u.x, u.y, 4); if (sp) { u.x = sp.x; u.y = sp.y; u.path = null; } }
     // drowning / lava
     const ti = Math.floor(u.y) * w.w + Math.floor(u.x);
     const tt = w.terrain[ti];
@@ -96,7 +100,12 @@ export function updateUnits(sim: Sim, dt: number): void {
       if (u.hp <= 0) { kill(sim, u, null, 'fogo'); continue; }
       if (w.fire[ti] === 0 && TERRAIN[tt].flammable > 0.3 && hash2(sim.tickN, u.id, 6) < 0.02) igniteTile(sim, Math.floor(u.x), Math.floor(u.y));
     }
-    if (u.hp < u.maxHp && d.civ && u.hunger < 60) u.hp = Math.min(u.maxHp, u.hp + dt * 0.5);
+    if (u.traits.length && u.traits.includes('plague')) {
+      u.hp -= dt * 1.5; if (hash2(sim.tickN, u.id, 11) < 0.02) sim.fx.push({ t: 'curse', x: u.x, y: u.y - 0.4 });
+      if (hash2(sim.tickN, u.id, 12) < 0.05) sim.near(u.x, u.y, 1.6, o => { if (o !== u && o.alive && !o.traits.includes('plague') && o.species !== 'zombie' && hash2(sim.tickN, o.id, 13) < 0.4) o.traits.push('plague'); });
+      if (u.hp <= 0) { kill(sim, u, null, 'peste'); continue; }
+    }
+    if (u.hp < u.maxHp && d.civ && u.hunger < 60 && !u.traits.includes('plague')) u.hp = Math.min(u.maxHp, u.hp + dt * 0.5);
     u.thinkT -= dt;
     if (u.hitT > 0) { u.hitT -= dt; if (u.hitT <= 0) resolveHit(sim, u); }
     if (u.thinkT <= 0) {
@@ -107,6 +116,8 @@ export function updateUnits(sim: Sim, dt: number): void {
   // grow-ups: keep the look in step with age (child → adult)
   for (let i = sim.tickN % 20; i < units.length; i += 20) { const u = units[i]; if (u.def.civ && u.look && (u.look.age === 'child') !== (u.age < 16)) sim.refreshLook(u); }
 }
+
+function tt0(sim: Sim, u: Unit): boolean { const t = sim.world.t(Math.floor(u.x), Math.floor(u.y)); return t !== T.DEEP && t !== T.LAVA; }
 
 export function igniteTile(sim: Sim, x: number, y: number): void {
   const w = sim.world;
